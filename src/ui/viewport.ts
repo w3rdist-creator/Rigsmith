@@ -210,6 +210,23 @@ export class Viewport {
     return best;
   }
 
+  /** Bone that moves the art of attachment `id` at world point `wp` (null: placed in world). */
+  boneForArt(id: string, wp: Vec): string | null {
+    const f = this.ed.frame().attachments.find((x) => x.att.id === id);
+    if (!f) return null;
+    const weights = f.att.mesh?.weights;
+    if (weights && f.vertices) {
+      let best = -1, bestD = Infinity;
+      for (let i = 0; i < weights.length; i++) {
+        const d = Math.hypot(f.vertices[2 * i] - wp.x, f.vertices[2 * i + 1] - wp.y);
+        if (d < bestD) (bestD = d), (best = i);
+      }
+      const top = best >= 0 ? weights[best].reduce<{ bone: string; w: number } | null>((m, x) => (!m || x.w > m.w ? x : m), null) : null;
+      if (top && this.ed.project.bones.some((b) => b.id === top.bone)) return top.bone;
+    }
+    return f.att.boneId;
+  }
+
   private insideAttachment(id: string, sx: number, sy: number, _world: Map<string, Mat>): boolean {
     const f = this.ed.frame().attachments.find((x) => x.att.id === id);
     if (!f?.image) return false;
@@ -256,6 +273,13 @@ export class Viewport {
       return;
     }
     let target: { kind: 'bone' | 'attachment'; id: string } | null = hit as { kind: 'bone' | 'attachment'; id: string } | null;
+    // Animate mode keys bones, never attachment offsets: clicking art acts on the bone
+    // that moves it (for a weighted mesh, the strongest influence of the vertex nearest
+    // the click). Attachments stay selectable from the tree for slot keys.
+    if (target?.kind === 'attachment' && ed.mode === 'animate') {
+      const boneId = this.boneForArt(target.id, wp);
+      if (boneId) target = { kind: 'bone', id: boneId };
+    }
     if (target) ed.select({ kind: target.kind, id: target.id });
     else if ((ed.tool === 'rotate' || ed.tool === 'scale') && (ed.selection?.kind === 'bone' || ed.selection?.kind === 'attachment')) {
       // Rotate/scale tools act on the current selection when dragging empty canvas.

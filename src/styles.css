@@ -154,6 +154,8 @@ button.transport.play.on { background: var(--animate); border-color: var(--anima
 .tl-empty { padding: 16px; color: var(--dim); }
 .tl-body { position: relative; display: grid; grid-template-columns: 200px 1fr; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .tl-labels { border-right: 1px solid var(--line); }
+.tl-body.zoomed { overflow-x: auto; }
+.tl-body.zoomed .tl-labels { position: sticky; left: 0; z-index: 3; background: var(--panel); }
 .tl-label { height: 22px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; font-size: 12px; border-bottom: 1px solid #1f222b; gap: 6px; }
 .tl-label.head { height: 24px; color: var(--dim); font-size: 11px; position: sticky; top: 0; background: var(--panel); z-index: 2; }
 .tl-label.sel { background: #262418; }

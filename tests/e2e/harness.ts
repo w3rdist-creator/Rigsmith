@@ -26,9 +26,12 @@ export async function pickPort(candidates: number[]): Promise<number> {
   throw new Error(`No free port among ${candidates.join(', ')}`);
 }
 
+/** Build served by startPreview: dist/, or RIGSMITH_DIST (e.g. a pre-fix build for red runs). */
+export const DIST = process.env.RIGSMITH_DIST ? path.resolve(process.env.RIGSMITH_DIST) : path.join(ROOT, 'dist');
+
 export async function startPreview(port: number): Promise<ChildProcess> {
-  if (!existsSync(path.join(ROOT, 'dist/index.html'))) throw new Error('dist/ missing — run `npm run build` first');
-  const child = spawn(path.join(ROOT, 'node_modules/.bin/vite'), ['preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+  if (!existsSync(path.join(DIST, 'index.html'))) throw new Error(`${DIST} missing — run \`npm run build\` first`);
+  const child = spawn(path.join(ROOT, 'node_modules/.bin/vite'), ['preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort', '--outDir', DIST], {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -49,7 +52,7 @@ export async function startPreview(port: number): Promise<ChildProcess> {
 export async function launchIsolated(
   profileName: string,
   extraArgs: string[] = [],
-  opts: { viewport?: { width: number; height: number }; deviceScaleFactor?: number } = {},
+  opts: { viewport?: { width: number; height: number }; deviceScaleFactor?: number; fileSystemAccess?: boolean; acceptDownloads?: boolean } = {},
 ): Promise<BrowserContext> {
   if (!existsSync(CFT)) throw new Error(`Chrome for Testing not found at ${CFT}`);
   const dir = path.join(ROOT, '.hermes/browser-profiles', profileName);
@@ -62,12 +65,36 @@ export async function launchIsolated(
     headless: true,
     viewport: opts.viewport ?? { width: 1440, height: 900 },
     deviceScaleFactor: opts.deviceScaleFactor,
-    acceptDownloads: true,
+    acceptDownloads: opts.acceptDownloads ?? true,
     downloadsPath: downloads,
     args: ['--no-first-run', '--no-default-browser-check', '--disable-background-networking', ...extraArgs],
   });
   if (process.env.RIGSMITH_TESTID_RECORD) await recordInteractions(ctx, profileName, process.env.RIGSMITH_TESTID_RECORD);
+  // Headless CfT exposes showSaveFilePicker but every call rejects with AbortError (there
+  // is no dialog to answer; see .hermes/evidence/usecase-milestone/probes/). Unless a test
+  // opts in, pages run as a browser without the File System Access API, so Save takes the
+  // download path that the tests can observe.
+  if (!opts.fileSystemAccess)
+    await ctx.addInitScript(() => {
+      delete (Window.prototype as any).showSaveFilePicker;
+      delete (window as any).showSaveFilePicker;
+    });
   return ctx;
+}
+
+/** Test-side read of the app's IndexedDB record (assertions only; the app is not touched). */
+export function readIdb(page: Page, key: string): Promise<any> {
+  return page.evaluate((k) => new Promise((resolve, reject) => {
+    const req = indexedDB.open('rigsmith', 1);
+    req.onupgradeneeded = () => void req.result.createObjectStore('kv');
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      const g = db.transaction('kv', 'readonly').objectStore('kv').get(k);
+      g.onsuccess = () => (db.close(), resolve(g.result ?? null));
+      g.onerror = () => (db.close(), reject(g.error));
+    };
+  }), key);
 }
 
 /** Interaction events that count as exercising a control. */
@@ -166,4 +193,28 @@ export interface Probe {
 /** Calls the read-only window.__rigsmith probe. */
 export function probe<T>(page: Page, fn: string, ...args: unknown[]): Promise<T> {
   return page.evaluate(([f, a]) => (window as any).__rigsmith[f as string](...(a as unknown[])), [fn, args] as const);
+}
+
+/** Polls `read` until `ok` holds (or throws after `timeoutMs`); returns the last value. */
+export async function waitUntil<T>(read: () => Promise<T>, ok: (v: T) => boolean, timeoutMs = 5000, what = 'condition'): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const v = await read();
+    if (ok(v)) return v;
+    if (Date.now() > deadline) throw new Error(`Timed out after ${timeoutMs} ms waiting for ${what}; last value: ${JSON.stringify(v)?.slice(0, 300)}`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+/**
+ * Limits the origin's storage quota through CDP (environment control for quota tests).
+ * The session stays attached (the override lives with it); call the returned reset.
+ */
+export async function overrideQuota(page: Page, origin: string, bytes: number): Promise<() => Promise<void>> {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Storage.overrideQuotaForOrigin' as any, { origin, quotaSize: bytes });
+  return async () => {
+    await cdp.send('Storage.overrideQuotaForOrigin' as any, { origin });
+    await cdp.detach();
+  };
 }

@@ -58,10 +58,12 @@ describe('undo history memory (review P3-2)', () => {
   it('a mutation that changes nothing adds no undo step; a real one adds one', () => {
     const ed = new Editor();
     ed.load(bigRig());
-    ed.mutate('nothing', () => {});
-    ed.mutate('same value', (p) => { p.bones[0].x = p.bones[0].x; });
+    // mutate reports whether it recorded a step (the pose fields use this to tell an
+    // unchanged Enter apart, use-case review RV-005).
+    assert.equal(ed.mutate('nothing', () => {}), false);
+    assert.equal(ed.mutate('same value', (p) => { p.bones[0].x = p.bones[0].x; }), false);
     assert.deepEqual(ed.history.size, { undo: 0, redo: 0 });
-    ed.mutate('move', (p) => { p.bones[0].x += 1; });
+    assert.equal(ed.mutate('move', (p) => { p.bones[0].x += 1; }), true);
     assert.deepEqual(ed.history.size, { undo: 1, redo: 0 });
     assert.equal(ed.history.undoLabel(), 'move');
   });

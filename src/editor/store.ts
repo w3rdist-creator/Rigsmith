@@ -90,7 +90,8 @@ export class Editor {
   // ---- Mutation -----------------------------------------------------------------
 
   /** One undoable step. If fn throws, the project is left untouched and the error propagates. */
-  mutate(label: string, fn: (p: Project) => void): void {
+  /** Applies one undoable edit; returns false when it changed nothing (no undo step). */
+  mutate(label: string, fn: (p: Project) => void): boolean {
     if (this.gestureBefore) this.endGesture(label);
     const before = cloneProject(this.project);
     try {
@@ -105,12 +106,13 @@ export class Editor {
       // Nothing changed (after repairs): no undo step, dirty state unchanged.
       this.sanitize();
       this.emit('project');
-      return;
+      return false;
     }
     this.history.record(label, before);
     this.dirty = true;
     this.sanitize();
     this.emit('project');
+    return true;
   }
 
   beginGesture(): void {

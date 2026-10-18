@@ -13,7 +13,7 @@ import { gridPoints, triangulate } from '../../src/model/meshOps.ts';
 import type { Project } from '../../src/model/types.ts';
 import { encodePng } from '../support/png-encode.ts';
 import { richProject } from '../support/runtime-fixture.ts';
-import { EVIDENCE, launchIsolated, pickPort, probe, startPreview } from './harness.ts';
+import { EVIDENCE, launchIsolated, pickPort, probe, readIdb, startPreview, waitUntil } from './harness.ts';
 
 const OUT = path.join(EVIDENCE, 'post-review/review-fixes');
 mkdirSync(OUT, { recursive: true });
@@ -185,10 +185,10 @@ describe('DRW-001: pasting an old-mesh deform key keeps the rest of the deform t
 });
 
 describe('DRW-003: autosave never stores an uncommitted mid-drag state', () => {
-  const stored = () => page.evaluate(() => {
-    const t = localStorage.getItem('rigsmith:autosave:v1');
-    return t ? JSON.parse(JSON.parse(t).project) : null;
-  });
+  const stored = async () => {
+    const t = await readIdb(page, 'autosave');
+    return t ? JSON.parse(t.project) : null;
+  };
   const rootX = async () => (await project()).bones.find((b: any) => b.name === 'root').x;
 
   it('a drag held past the autosave delay keeps the committed copy; Esc and release; a finished drag autosaves', async () => {
@@ -198,10 +198,7 @@ describe('DRW-003: autosave never stores an uncommitted mid-drag state', () => {
     await page.getByTestId('tree-bone-root').click();
     await page.getByTestId('tool-move').click();
     const committed = await rootX();
-    await page.waitForFunction((x) => {
-      const t = localStorage.getItem('rigsmith:autosave:v1');
-      return !!t && JSON.parse(JSON.parse(t).project).bones[0].x === x;
-    }, committed, { timeout: 5000 });
+    await waitUntil(stored, (v) => v?.bones[0].x === committed, 5000, 'committed autosave');
     const b = (await probe<{ mid: { x: number; y: number } }>(page, 'bone', 'root'));
     await page.mouse.move(b.mid.x, b.mid.y);
     await page.mouse.down();
@@ -221,10 +218,7 @@ describe('DRW-003: autosave never stores an uncommitted mid-drag state', () => {
     await page.mouse.up();
     const moved = await rootX();
     assert.notEqual(moved, committed);
-    await page.waitForFunction((x) => {
-      const t = localStorage.getItem('rigsmith:autosave:v1');
-      return !!t && JSON.parse(JSON.parse(t).project).bones[0].x === x;
-    }, moved, { timeout: 5000 });
+    await waitUntil(stored, (v) => v?.bones[0].x === moved, 5000, 'finished drag autosaved');
     assert.deepEqual(pageErrors, []);
   });
 });

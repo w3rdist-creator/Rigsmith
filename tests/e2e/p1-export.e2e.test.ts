@@ -12,7 +12,7 @@ import type { BrowserContext, Page } from 'playwright-core';
 import { decodePng, borderAlphaCount } from '../support/png-decode.ts';
 import { boneWorlds, composite, decodeProjectImages, diffImages } from '../support/reference-composite.ts';
 import { readZip } from '../support/zip-read.ts';
-import { EVIDENCE, launchIsolated, pickPort, probe, startPreview } from './harness.ts';
+import { EVIDENCE, launchIsolated, overrideQuota, pickPort, probe, readIdb, startPreview, waitUntil } from './harness.ts';
 
 const OUT = path.join(EVIDENCE, 'roadmap/p1-export');
 mkdirSync(OUT, { recursive: true });
@@ -262,12 +262,13 @@ describe('autosave and recovery', () => {
     if (await page.getByTestId('recovery-banner').count()) await page.getByTestId('recovery-discard').click();
     await demo();
     await page.getByTestId('save-browser').click();
-    const explicit = await page.evaluate(() => localStorage.getItem('rigsmith:project:v1'));
+    // Storage is IndexedDB since RV-007 (records "browser-save" and "autosave").
+    const explicit = await waitUntil(() => readIdb(page, 'browser-save'), (v) => v !== null, 5000, 'browser save');
     await setField('project-name', 'Autosave check');
     await page.waitForFunction(() => /Autosaved/.test(document.querySelector('[data-testid="autosave-status"]')?.textContent ?? ''), null, { timeout: 5000 });
-    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('rigsmith:autosave:v1')!));
+    const stored = await readIdb(page, 'autosave');
     assert.equal(JSON.parse(stored.project).name, 'Autosave check');
-    assert.equal(await page.evaluate(() => localStorage.getItem('rigsmith:project:v1')), explicit, 'explicit browser save untouched');
+    assert.deepEqual(await readIdb(page, 'browser-save'), explicit, 'explicit browser save untouched');
   });
 
   it('after a reload, offers recovery without loading it; Recover restores the unsaved work', async () => {
@@ -287,26 +288,39 @@ describe('autosave and recovery', () => {
     await fresh();
     await page.getByTestId('recovery-banner').waitFor();
     await page.getByTestId('recovery-discard').click();
-    assert.equal(await page.getByTestId('recovery-banner').count(), 0);
-    assert.equal(await page.evaluate(() => localStorage.getItem('rigsmith:autosave:v1')), null);
+    await page.getByTestId('recovery-banner').waitFor({ state: 'detached' });
+    await waitUntil(() => readIdb(page, 'autosave'), (v) => v === null, 5000, 'autosave removed');
     await demo();
     await setField('project-name', 'saved explicitly');
-    await page.waitForFunction(() => localStorage.getItem('rigsmith:autosave:v1') !== null, null, { timeout: 5000 });
+    await waitUntil(() => readIdb(page, 'autosave'), (v) => v !== null, 5000, 'autosave written');
     await page.getByTestId('save-browser').click();
-    assert.equal(await page.evaluate(() => localStorage.getItem('rigsmith:autosave:v1')), null);
+    await waitUntil(() => readIdb(page, 'autosave'), (v) => v === null, 5000, 'autosave cleared by the browser save');
     await fresh();
     assert.equal(await page.getByTestId('recovery-banner').count(), 0, 'no stale recovery after an explicit save');
   });
 
   it('a storage quota failure is shown persistently and as an error', async () => {
+    // IndexedDB's quota here is GBs: limit it (CDP) so this ~8 MB project cannot fit. Chrome
+    // caches an origin's quota once its storage is open, so the limit is set in a fresh
+    // context (from a blank holder page) before the app first opens IndexedDB.
+    const shared = ctx;
+    await page.close();
+    ctx = await launchIsolated('e2e-p1-quota');
+    const holder = ctx.pages()[0] ?? (await ctx.newPage());
+    const resetQuota = await overrideQuota(holder, new URL(base).origin, 2_000_000);
     await demo();
     const png = noisePng(1400, 1400);
     await page.getByTestId('image-input').setInputFiles({ name: 'noise.png', mimeType: 'image/png', buffer: png });
     await page.getByTestId('image-noise.png').waitFor();
-    await page.waitForFunction(() => document.querySelector('[data-testid="autosave-status"]')?.getAttribute('data-state') === 'error', null, { timeout: 6000 });
+    const indicator = async () => ({ state: await page.getByTestId('autosave-status').getAttribute('data-state'), text: await page.getByTestId('autosave-status').textContent() });
+    await waitUntil(indicator, (v) => v.state === 'error', 8000, 'autosave error indicator');
     assert.match(await page.getByTestId('autosave-status').textContent() ?? '', /too large for browser storage/);
     assert.match(await page.getByTestId('error-toast').last().textContent() ?? '', /Autosave failed/);
     await page.screenshot({ path: path.join(OUT, 'autosave-quota.png') });
+    await resetQuota();
+    await ctx.close();
+    ctx = shared;
+    page = await ctx.newPage();
   });
 
   it('raised no uncaught page errors', () => {

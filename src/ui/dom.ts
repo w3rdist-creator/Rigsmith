@@ -41,6 +41,8 @@ export function numberField(opts: {
   testId: string;
   disabled?: boolean;
   onCommit: (v: number) => void;
+  /** Enter on a value equal to the current one (no edit): e.g. key it anyway in Animate mode. */
+  onEnterUnchanged?: (v: number) => void;
   suffix?: Node | null;
 }): HTMLElement {
   const input = h('input', {
@@ -69,7 +71,11 @@ export function numberField(opts: {
   };
   input.addEventListener('change', commit);
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') commit();
+    if (e.key === 'Enter') {
+      const v = Number(input.value);
+      if (opts.onEnterUnchanged && input.value.trim() !== '' && v === last) opts.onEnterUnchanged(v);
+      else commit();
+    }
     if (e.key === 'Escape') {
       input.value = fmt(opts.value);
       input.blur();

@@ -62,5 +62,6 @@
   "skins-panel": "panel container",
   "status": "read-only status bar",
   "time-readout": "read-only time readout",
-  "timeline-empty": "read-only empty-state text"
+  "timeline-empty": "read-only empty-state text",
+  "tl-zoom-readout": "read-only timeline zoom readout (fit or px/frame)"
 }

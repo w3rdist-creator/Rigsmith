@@ -449,6 +449,8 @@ describe('save / load roundtrip', () => {
 
   it('saves to browser storage and restores after reload', async () => {
     await page.getByTestId('save-browser').click();
+    // The IndexedDB write is asynchronous: wait until it reports committed.
+    await page.waitForFunction(() => /Saved to this browser/.test(document.querySelector('[data-testid="status"]')?.textContent ?? ''));
     const before = await project();
     await page.reload();
     await page.getByTestId('restore-browser').click();

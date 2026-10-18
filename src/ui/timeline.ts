@@ -11,6 +11,14 @@ import type { App } from './app.ts';
 import { CurveEditor } from './curveEditor.ts';
 import { append, clear, fmt, h } from './dom.ts';
 
+/** Zoom levels in screen pixels per frame; "fit" shows the whole animation. */
+export const PITCH_LEVELS = [2, 3, 4, 6, 8, 12, 16, 24] as const;
+/** Spacing (frames) of ticks / numbered ticks for a pitch in px per frame. */
+function rulerSpacing(pitch: number): { tick: number; label: number } {
+  const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+  return { tick: steps.find((s) => s * pitch >= 4) ?? 1000, label: steps.find((s) => s * pitch >= 36) ?? 1000 };
+}
+
 const CH_LABEL: Record<string, string> = { translate: 'translate', rotate: 'rotate', scale: 'scale', visible: 'visible', opacity: 'opacity', image: 'image', deform: 'deform', mix: 'mix', position: 'position' };
 
 interface Row {
@@ -39,6 +47,10 @@ export class Timeline {
   readonly curve: CurveEditor;
   /** True while a drag owns pointer capture; rebuilding the DOM then would drop it. */
   interacting = false;
+  /** Time zoom: px per frame, or null = fit the whole animation (kept across rebuilds). */
+  private pitch: number | null = null;
+  private scrollX = 0;
+  private body: HTMLElement | null = null;
 
   constructor(app: App, root: HTMLElement) {
     this.app = app;
@@ -181,13 +193,15 @@ export class Timeline {
     this.rows = this.buildRows(anim);
     const frames = frameCount(anim);
     const ruler = h('div', { class: 'tl-ruler', 'data-testid': 'timeline-ruler' });
-    const tickEvery = frames <= 30 ? 1 : frames <= 120 ? 5 : 10;
-    const labelEvery = frames <= 30 ? 5 : frames <= 120 ? 10 : 30;
+    const zoomed = this.pitch !== null;
+    const spacing = zoomed ? rulerSpacing(this.pitch!) : null;
+    const tickEvery = spacing ? spacing.tick : frames <= 30 ? 1 : frames <= 120 ? 5 : 10;
+    const labelEvery = spacing ? spacing.label : frames <= 30 ? 5 : frames <= 120 ? 10 : 30;
     for (let f = 0; f <= frames; f += tickEvery) {
       ruler.append(h('div', { class: `tick${f % labelEvery === 0 ? ' major' : ''}`, style: `left:${(f / frames) * 100}%` }, f % labelEvery === 0 ? h('span', {}, String(f)) : null));
     }
     const labels = h('div', { class: 'tl-labels' }, h('div', { class: 'tl-label head' }, ed.mode === 'setup' ? 'Setup mode' : 'Frame'));
-    const lanes = h('div', { class: 'tl-lanes', 'data-testid': 'timeline-lanes' }, ruler);
+    const lanes = h('div', { class: 'tl-lanes', 'data-testid': 'timeline-lanes', style: zoomed ? `width:${this.pitch! * frames}px` : '' }, ruler);
     this.lanes = lanes;
     for (const r of this.rows) {
       labels.append(
@@ -209,12 +223,76 @@ export class Timeline {
     this.attachPointer(lanes);
     this.drawKeys();
 
-    const body = h('div', { class: 'tl-body' }, labels, lanes);
+    const body = h('div', { class: `tl-body${zoomed ? ' zoomed' : ''}` }, labels, lanes);
+    this.body = body;
+    body.addEventListener('scroll', () => void (this.scrollX = body.scrollLeft));
+    body.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
+    append(controls,
+      h('span', { class: 'sep' }),
+      h('button', { class: 'mini', 'data-testid': 'tl-zoom-out', title: 'Zoom time out (Ctrl/⌘ + wheel)', 'aria-label': 'Zoom timeline out', disabled: !zoomed, onclick: () => this.zoomStep(-1) }, '−'),
+      h('span', { class: 'dim', 'data-testid': 'tl-zoom-readout', title: 'Timeline zoom (screen pixels per frame)' }, zoomed ? `${this.pitch} px/frame` : 'fit'),
+      h('button', { class: 'mini', 'data-testid': 'tl-zoom-in', title: 'Zoom time in (Ctrl/⌘ + wheel); Shift + wheel scrolls', 'aria-label': 'Zoom timeline in', disabled: this.pitch === PITCH_LEVELS[PITCH_LEVELS.length - 1], onclick: () => this.zoomStep(1) }, '+'),
+      h('button', { class: 'mini', 'data-testid': 'tl-zoom-fit', title: 'Show the whole animation', disabled: !zoomed, onclick: () => this.setPitch(null, null) }, 'Fit'),
+    );
     const main = h('div', { class: 'tl-main' }, body, this.curve.render());
     this.root.append(controls, main);
     const selLabel = labels.querySelector<HTMLElement>('.tl-label.sel');
     if (selLabel) body.scrollTop = Math.max(0, selLabel.offsetTop - 24 - 22);
+    if (zoomed) body.scrollLeft = this.scrollX;
     this.updateTime();
+  }
+
+  /** Px per frame when the whole animation fits (measured). */
+  private fitPitch(): number {
+    const anim = this.app.ed.anim();
+    if (!anim || !this.body) return 0;
+    const labels = this.body.querySelector<HTMLElement>('.tl-labels');
+    return Math.max(0, this.body.clientWidth - (labels?.offsetWidth ?? 0) - 28) / frameCount(anim);
+  }
+
+  /** Levels strictly finer than fitting the whole animation. */
+  private levels(): number[] {
+    const fit = this.fitPitch();
+    return PITCH_LEVELS.filter((x) => x > fit + 1e-6);
+  }
+
+  private zoomStep(dir: 1 | -1, clientX: number | null = null): void {
+    const levels = this.levels();
+    const cur = this.pitch;
+    let next: number | null;
+    if (dir > 0) next = cur === null ? (levels[0] ?? null) : (levels.find((x) => x > cur) ?? cur);
+    else next = cur === null ? null : ([...levels].reverse().find((x) => x < cur) ?? null);
+    if (next === cur) return;
+    this.setPitch(next, clientX);
+  }
+
+  /** Changes the zoom, keeping the time under `clientX` (default: the playhead) in place. */
+  private setPitch(pitch: number | null, clientX: number | null): void {
+    const anim = this.app.ed.anim();
+    const body = this.body;
+    if (!anim || !body || !this.lanes) return;
+    const r = this.lanes.getBoundingClientRect();
+    const bodyLeft = body.getBoundingClientRect().left;
+    const x = clientX ?? r.left + (this.app.ed.time / anim.duration) * r.width;
+    const frac = Math.min(1, Math.max(0, (x - r.left) / Math.max(1, r.width)));
+    const lanesOffset = r.left - bodyLeft + body.scrollLeft;
+    this.pitch = pitch;
+    this.render();
+    const nb = this.body!;
+    const nr = this.lanes!.getBoundingClientRect();
+    nb.scrollLeft = Math.max(0, lanesOffset + frac * nr.width - (x - bodyLeft));
+    this.scrollX = nb.scrollLeft;
+    this.app.status(pitch === null ? 'Timeline: whole animation.' : `Timeline zoom: ${pitch} px per frame.`);
+  }
+
+  private onWheel(e: WheelEvent): void {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      if (e.deltaY) this.zoomStep(e.deltaY < 0 ? 1 : -1, e.clientX);
+    } else if (e.shiftKey && this.pitch !== null && this.body) {
+      e.preventDefault();
+      this.body.scrollLeft += e.deltaY || e.deltaX;
+    }
   }
 
   /** (Re)draws the key diamonds inside the existing lane elements. */

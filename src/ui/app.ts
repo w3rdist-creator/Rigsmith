@@ -25,16 +25,21 @@ import { CutoutDialog } from './cutoutDialog.ts';
 import { MeshDialog } from './meshDialog.ts';
 import { deleteConstraint, deletePath } from '../model/rigOps.ts';
 import { h } from './dom.ts';
+import { BROWSER_SAVE, LEGACY_KEYS, isQuotaError, migrateLegacy, readStored, writeStored } from './storage.ts';
 import { ImageCache, importImageFile } from './images.ts';
 import { Viewport, isTyping } from './viewport.ts';
 
-export const STORAGE_KEY = 'rigsmith:project:v1';
+/** Legacy localStorage key of the browser save (migrated to IndexedDB, src/ui/storage.ts). */
+export const STORAGE_KEY = LEGACY_KEYS[BROWSER_SAVE];
 
 export class App {
   readonly ed = new Editor();
   readonly images = new ImageCache();
   viewport!: Viewport;
   autosave: Autosave | null = null;
+  /** Legacy localStorage migration + browser-save lookup (IndexedDB); awaited before storage reads. */
+  storageReady: Promise<void> = Promise.resolve();
+  private browserSaved = false;
   exportDialog!: ExportDialog;
   mixDialog!: MixDialog;
   atlasDialog!: AtlasDialog;
@@ -58,6 +63,13 @@ export class App {
     this.lottieDialog = new LottieDialog(this);
     this.cutout = new CutoutDialog(this);
     this.meshDialog = new MeshDialog(this);
+    this.storageReady = migrateLegacy()
+      .then(async (moved) => {
+        this.browserSaved = !!(await readStored(BROWSER_SAVE));
+        if (moved.length) this.status('Moved the browser copies of your project from local storage to IndexedDB.');
+        this.ed.emit('view');
+      })
+      .catch((e) => this.error('Browser storage unavailable', [(e as Error).message]));
     document.body.append(this.fileInput, this.imageInput);
     this.fileInput.addEventListener('change', () => {
       const f = this.fileInput.files?.[0];
@@ -188,45 +200,73 @@ export class App {
     return (this.ed.project.name || 'rig').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'rig';
   }
 
-  saveDownload(): void {
-    download(new Blob([serializeProject(this.ed.project)], { type: 'application/json' }), `${this.fileBaseName()}.rig.json`);
-    this.ed.dirty = false;
-    this.autosave?.clearAfterExplicitSave();
+  /**
+   * Save with embedded images. Where the File System Access API exists the file picker is
+   * used, and only a write that completed marks the project saved and clears the autosave
+   * copy (cancel changes nothing). Otherwise the file is downloaded — the browser cannot
+   * report whether that file was written, so the project stays marked unsaved and the
+   * autosave copy is kept, annotated with the download.
+   */
+  async saveDownload(): Promise<void> {
+    const text = serializeProject(this.ed.project);
+    const name = `${this.fileBaseName()}.rig.json`;
+    const blob = new Blob([text], { type: 'application/json' });
+    const picker = (window as unknown as { showSaveFilePicker?: (o: unknown) => Promise<FileSystemFileHandle> }).showSaveFilePicker;
+    if (typeof picker === 'function') {
+      let handle: FileSystemFileHandle;
+      try {
+        handle = await picker.call(window, { suggestedName: name, types: [{ description: 'Rigsmith project', accept: { 'application/json': ['.json'] } }] });
+      } catch (e) {
+        if ((e as DOMException)?.name === 'AbortError') return this.status('Save cancelled — nothing was written; the project is still unsaved.');
+        return this.error('Save failed', [(e as Error).message]);
+      }
+      try {
+        const w = await handle.createWritable();
+        await w.write(blob);
+        await w.close();
+      } catch (e) {
+        return this.error('Save failed', [`“${handle.name}” was not written: ${(e as Error).message}`, 'The project is still unsaved and its autosave copy is kept.']);
+      }
+      if (serializeProject(this.ed.project) === text) {
+        this.ed.dirty = false;
+        await this.autosave?.clearAfterExplicitSave();
+      }
+      this.ed.emit('view');
+      return this.status(`Saved “${handle.name}” (images embedded).`);
+    }
+    download(blob, name);
+    await this.autosave?.noteDownload(name);
     this.ed.emit('view');
-    this.status('Project downloaded (images embedded).');
+    this.status(`Downloaded “${name}” (images embedded). The browser cannot confirm the file was written, so the project stays marked unsaved and its recovery copy is kept.`);
   }
 
-  saveToBrowser(): void {
+  async saveToBrowser(): Promise<void> {
+    const text = serializeProject(this.ed.project);
     try {
-      localStorage.setItem(STORAGE_KEY, serializeProject(this.ed.project));
-      this.ed.dirty = false;
-      this.autosave?.clearAfterExplicitSave();
-      this.ed.emit('view');
-      this.status('Saved to this browser’s local storage.');
+      await this.storageReady;
+      await writeStored(BROWSER_SAVE, { savedAt: new Date().toISOString(), name: this.ed.project.name, project: text });
     } catch (e) {
-      const quota = e instanceof DOMException && (e.name === 'QuotaExceededError' || e.code === 22);
-      this.error('Browser save failed', [quota ? 'The project is too large for browser storage. Use Save (download) instead.' : (e as Error).message]);
+      return this.error('Browser save failed', [isQuotaError(e) ? 'The project is too large for browser storage. Use Save (download) instead.' : (e as Error).message]);
     }
+    this.browserSaved = true;
+    if (serializeProject(this.ed.project) === text) {
+      this.ed.dirty = false;
+      await this.autosave?.clearAfterExplicitSave();
+    }
+    this.ed.emit('view');
+    this.status('Saved to this browser (IndexedDB).');
   }
 
   hasBrowserSave(): boolean {
-    try {
-      return localStorage.getItem(STORAGE_KEY) !== null;
-    } catch {
-      return false;
-    }
+    return this.browserSaved;
   }
 
   async restoreFromBrowser(): Promise<void> {
-    let text: string | null = null;
-    try {
-      text = localStorage.getItem(STORAGE_KEY);
-    } catch {
-      text = null;
-    }
-    if (!text) return this.error('Nothing saved in this browser yet.');
+    await this.storageReady;
+    const stored = await readStored(BROWSER_SAVE).catch(() => null);
+    if (!stored) return this.error('Nothing saved in this browser yet.');
     if (!this.confirmDiscard()) return;
-    await this.loadProjectText(text, 'browser save');
+    await this.loadProjectText(stored.project, 'browser save');
   }
 
   exportRuntimeJson(): void {
@@ -597,7 +637,7 @@ export class App {
     const ed = this.ed;
     if (mod && e.key.toLowerCase() === 's') {
       e.preventDefault();
-      this.saveDownload();
+      void this.saveDownload();
       return;
     }
     if (mod && e.key.toLowerCase() === 'o') {

@@ -159,6 +159,16 @@ export function renderInspector(app: App, root: HTMLElement): void {
     const edit = (patch: Partial<LocalPose>, label: string) => {
       ed.mutate(animate ? `Key ${label}` : `Edit ${label}`, (q) => applyPoseEdit(q, ed.mode, ed.animId, ed.time, b.id, patch));
     };
+    // Animate mode: Enter on the value already shown still keys that channel here (the
+    // user asked for a key, not an edit); a key with that value already present is a no-op.
+    const keyAnyway = (patch: Partial<LocalPose>, label: string) =>
+      animate
+        ? () => {
+            const frame = Math.round(t * anim!.fps);
+            const wrote = ed.mutate(`Key ${label}`, (q) => applyPoseEdit(q, ed.mode, ed.animId, ed.time, b.id, patch));
+            app.status(wrote ? `Key written (unchanged value): ${b.name} ${label} at frame ${frame}.` : `${b.name} ${label} is already keyed with this value at frame ${frame}.`);
+          }
+        : undefined;
     const excluded = descendantIds(p.bones, b.id);
     excluded.add(b.id);
     const parentSel = h('select', { 'data-testid': 'bone-parent', 'aria-label': 'Parent bone' },
@@ -177,15 +187,15 @@ export function renderInspector(app: App, root: HTMLElement): void {
       h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Parent'), parentSel),
       h('div', { class: 'group-label' }, 'Translate', keyBtn('translate')),
       h('div', { class: 'row2' },
-        numberField({ label: 'X', value: pose.x, testId: 'bone-x', onCommit: (v) => edit({ x: v }, 'position') }),
-        numberField({ label: 'Y', value: pose.y, testId: 'bone-y', onCommit: (v) => edit({ y: v }, 'position') }),
+        numberField({ label: 'X', value: pose.x, testId: 'bone-x', onCommit: (v) => edit({ x: v }, 'position'), onEnterUnchanged: keyAnyway({ x: pose.x }, 'position') }),
+        numberField({ label: 'Y', value: pose.y, testId: 'bone-y', onCommit: (v) => edit({ y: v }, 'position'), onEnterUnchanged: keyAnyway({ y: pose.y }, 'position') }),
       ),
       h('div', { class: 'group-label' }, 'Rotate', keyBtn('rotate')),
-      numberField({ label: 'Degrees', value: pose.rotation, testId: 'bone-rotation', onCommit: (v) => edit({ rotation: v }, 'rotation') }),
+      numberField({ label: 'Degrees', value: pose.rotation, testId: 'bone-rotation', onCommit: (v) => edit({ rotation: v }, 'rotation'), onEnterUnchanged: keyAnyway({ rotation: pose.rotation }, 'rotation') }),
       h('div', { class: 'group-label' }, 'Scale', keyBtn('scale')),
       h('div', { class: 'row2' },
-        numberField({ label: 'X', value: pose.scaleX, step: 0.05, testId: 'bone-scale-x', onCommit: (v) => edit({ scaleX: v }, 'scale') }),
-        numberField({ label: 'Y', value: pose.scaleY, step: 0.05, testId: 'bone-scale-y', onCommit: (v) => edit({ scaleY: v }, 'scale') }),
+        numberField({ label: 'X', value: pose.scaleX, step: 0.05, testId: 'bone-scale-x', onCommit: (v) => edit({ scaleX: v }, 'scale'), onEnterUnchanged: keyAnyway({ scaleX: pose.scaleX }, 'scale') }),
+        numberField({ label: 'Y', value: pose.scaleY, step: 0.05, testId: 'bone-scale-y', onCommit: (v) => edit({ scaleY: v }, 'scale'), onEnterUnchanged: keyAnyway({ scaleY: pose.scaleY }, 'scale') }),
       ),
       h('div', { class: 'group-label' }, 'Setup'),
       h('div', { class: 'row2' },

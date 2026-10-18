@@ -18,7 +18,7 @@ const openHelp = () => helpDialog.showModal();
 app.mount($('stage-canvas') as HTMLCanvasElement, $('status-msg'), $('toasts'));
 new Timeline(app, $('timeline'));
 app.autosave = new Autosave(app, $('autosave-status'));
-app.autosave.checkForRecovery($('banners'));
+void app.autosave.checkForRecovery($('banners'));
 
 const toolbar = $('toolbar');
 const skeleton = $('skeleton-panel');
