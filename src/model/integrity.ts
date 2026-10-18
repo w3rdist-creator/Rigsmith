@@ -2,6 +2,7 @@
 // repair is part of the same undo step). The file validator is strict — e.g. every
 // draw-order key must list each attachment exactly once — and this pass guarantees an
 // edited project always re-opens. Returns human-readable notes for what it changed.
+import { normalizeWeights } from './meshOps.ts';
 import { isAncestorOrSelf } from './skeleton.ts';
 import type { Project } from './types.ts';
 
@@ -32,6 +33,28 @@ export function repairReferences(p: Project): string[] {
         return !owner || !pc.bones.some((b) => isAncestorOrSelf(p.bones, b, owner));
       });
     if (p.pathConstraints.length !== before) notes.push(`${before - p.pathConstraints.length} path constraint(s) removed.`);
+  }
+  // Mesh weights: influences of missing bones are dropped and the rest renormalized; a
+  // vertex left without influences goes to the attachment's bone (or, with no bone, the
+  // mesh becomes rigid).
+  for (const a of p.attachments) {
+    const m = a.mesh;
+    if (!m?.weights) continue;
+    let changed = 0;
+    let rigid = false;
+    const next = m.weights.map((list) => {
+      const sum = list.reduce((s, x) => s + x.w, 0);
+      if (list.every((x) => boneIds.has(x.bone)) && Math.abs(sum - 1) < 1e-6) return list;
+      changed++;
+      const nw = normalizeWeights(list.filter((x) => boneIds.has(x.bone)));
+      if (nw) return nw;
+      if (a.boneId) return [{ bone: a.boneId, w: 1 }];
+      rigid = true;
+      return list;
+    });
+    if (rigid || next.length !== m.points.length / 2) delete m.weights;
+    else m.weights = next;
+    if (changed) notes.push(`${a.name}: ${changed} vertex weight list(s) repaired.`);
   }
   const constraintIds = new Set([...(p.ik ?? []).map((k) => k.id), ...(p.pathConstraints ?? []).map((k) => k.id)]);
   if (p.skins)

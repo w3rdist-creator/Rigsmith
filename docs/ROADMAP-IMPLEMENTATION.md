@@ -116,13 +116,28 @@ Wiz-prep parity (the original Wiz art was prepared by scripts; what the editor n
 | Speck/stray-pixel removal | — | not offered: no pixel-editing tools in scope (external editor) |
 
 ### Phase 3 — meshes, weights, deformation
+Fresh gate run: `.hermes/evidence/roadmap/phase3-gates/summary.txt` (preservation 16/16,
+test-id audit 0 missing of 197, unit 122/122, typecheck, build, e2e 93/93, wiz 16/16 —
+all exit 0).
+
 | Item | Status | Evidence |
 |---|---|---|
-| Mesh authoring + triangulation, textured rendering | absent | |
-| Editable vertices, weights + weight paint, deform keys | absent | |
-| Renderer checks: seams, flips, alpha, degenerate triangles | absent | |
-| Format evolution, lossless v1 migration | absent | |
-| Bendy limb / secondary motion demo | absent | |
+| Mesh authoring + triangulation, textured rendering | delivered | `▦ Create mesh…` dialog (`mesh-canvas`, `mesh-mode-outline/interior`, `mesh-grid-cols/rows` + `mesh-grid`, `mesh-undo-point`, `mesh-clear`, live `mesh-summary-dialog`, `mesh-problem`/`mesh-errors`, `mesh-apply`/`mesh-cancel`), `mesh-edit` (re-mesh), `mesh-remove`; `src/model/meshOps.ts` (ear clipping + interior insertion + Delaunay flips; validation); unit `mesh.test.ts` (Euler count, tiling, outline edges kept, manifold, Delaunay, rejections); p3-mesh: bow-tie rejected, counts, cancel, one undo step, rigid mesh renders identical to the flat image (max diff 0) |
+| Editable vertices, weights + weight paint, deform keys | delivered | `mesh-tool-vertices` (Setup: moves the image point — render unchanged, max diff 0; Animate: keys a deform that lands the vertex under the pointer ±0.6 px; Esc cancels), `mv-x/y`, `mv-dx/dy`; `mesh-tool-weights` + brush `wp-bone/mode/radius/strength` (one undo step per stroke, sums exactly 1), `mv-w-<bone>`, `mv-add-bone`, `weights-auto`, `weights-rigid`; `slot-key-deform`, `deform-reset`, timeline deform lane |
+| Renderer checks: seams, flips, alpha, degenerate triangles | delivered | layered renderer (`drawMeshLayer`: additive no-bleed for unfolded meshes, bleed + triangle order for folds); independent rasterizer in `tests/support/reference-composite.ts`; p3-render: opaque / α128 / opacity 0.5 / weighted bend / mirrored parent all have interior alpha exactly the target, fold and degenerate cases within budget, 2× image swap keeps the silhouette (`p3-render/report.txt`) |
+| Format evolution, lossless v1 migration | delivered | `Attachment.mesh`, `slots[].deform` (v2 only; v1 files still re-save byte-identically — format-v2 tests); `readMesh` rejections with locations (unit); integrity: deleted/missing weight bones, setup-image swaps (points rescale), re-mesh drops deform keys — each re-opens (unit + p3-mesh save/reopen deep-equal) |
+| Runtime data reproduces editor output | delivered | runtime export `mesh: {uvs, triangles, hull}` + `bakedMeshes[att][frame]`; unit: equals `evaluate()`; p3-mesh: equals the independent skinning (max err < 0.002 px) |
+| Bendy limb / secondary motion demo | delivered | `scripts/roadmap/demo-phase3-build.ts` (UI-driven: Fill grid + Auto weights on a continuous hose arm over shoulder→elbow, tail over a 3-bone chain with follow-through keys, tail-tip deform flick drawn with the vertex tool); `npm run demo:phase3` → `.hermes/assets/roadmap-demos/phase3/`; p3-demo: frames 0/15/26/33/45 vs the reference (0 px over tolerance, interior alpha 255 exact across the bends; arm bend 0° at rest, 77° at the elbow keys) |
+
+Phase-3 decisions and limits (also in docs/architecture.md):
+- Bind pose = current setup pose (editing setup bones re-binds). Mesh points live in the
+  setup image's pixel space; other images (keys/skins) scale only the UVs.
+- Renderer verified on headless Chrome for Testing's software raster only. Additive
+  seams assume no self-overlap without a reversed triangle; minified hard texture edges
+  use Canvas2D's single bilinear tap.
+- Weight painting is Setup-only; one stroke dabs on pointer-down and each move (amount
+  depends on stroke sampling). No mesh vertex add/delete on the canvas (re-mesh instead),
+  no weight smoothing/mirroring tools, no automatic outline tracing from alpha.
 
 ### Phase 4 — follow-ons and pipeline
 | Item | Status | Evidence |

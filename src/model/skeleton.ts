@@ -210,6 +210,21 @@ export function deleteBone(project: Project, boneId: string): void {
     }
     path.boneId = newParentId;
   }
+  // Mesh weights on the deleted bone pass to its parent (merged; sums stay 1). With no
+  // parent the integrity pass drops them and renormalizes.
+  if (newParentId)
+    for (const att of project.attachments) {
+      if (!att.mesh?.weights) continue;
+      att.mesh.weights = att.mesh.weights.map((list) => {
+        if (!list.some((x) => x.bone === boneId)) return list;
+        const merged = new Map<string, number>();
+        for (const x of list) {
+          const id = x.bone === boneId ? newParentId : x.bone;
+          merged.set(id, (merged.get(id) ?? 0) + x.w);
+        }
+        return [...merged].map(([bone, w]) => ({ bone, w }));
+      });
+    }
   project.bones = project.bones.filter((b) => b.id !== boneId);
   for (const anim of project.animations) delete anim.tracks[boneId];
 }

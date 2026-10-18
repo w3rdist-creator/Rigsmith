@@ -7,6 +7,7 @@ import { History } from '../model/history.ts';
 import type { KeyClipboard, KeyRef } from '../model/keys.ts';
 import { parseLane, sameRef, validRefs } from '../model/keys.ts';
 import type { Mat } from '../model/math.ts';
+import type { PaintMode } from '../model/meshOps.ts';
 import type { EditMode } from '../model/ops.ts';
 import { animationById } from '../model/ops.ts';
 import type { Animation, LocalPose, Project } from '../model/types.ts';
@@ -55,6 +56,12 @@ export class Editor {
   pathNode = 0;
   /** Notes from the last reference repair (e.g. constraints removed with a bone). */
   lastRepairs: string[] = [];
+  /** Canvas tool on the selected mesh attachment (view state): drag vertices or paint weights. */
+  meshTool: 'off' | 'vertices' | 'weights' = 'off';
+  /** Selected vertex of the selected mesh (-1 = none). */
+  meshVertex = -1;
+  /** Weight brush: radius in screen px, strength 0..1 per dab at the centre (linear falloff). */
+  brush: { boneId: string | null; radius: number; strength: number; mode: PaintMode } = { boneId: null, radius: 40, strength: 0.2, mode: 'add' };
   mode: EditMode = 'setup';
   tool: Tool = 'move';
   animId: string | null = null;
@@ -191,6 +198,12 @@ export class Editor {
     if (this.selection?.kind === 'path' && !p.paths?.some((x) => x.id === this.selection!.id)) this.selection = null;
     const path = this.selection?.kind === 'path' ? p.paths?.find((x) => x.id === this.selection!.id) : undefined;
     if (path && this.pathNode >= path.nodes.length) this.pathNode = path.nodes.length - 1;
+    const meshAtt = this.selection?.kind === 'attachment' ? p.attachments.find((a) => a.id === this.selection!.id) : undefined;
+    if (!meshAtt?.mesh) {
+      this.meshTool = 'off';
+      this.meshVertex = -1;
+    } else if (this.meshVertex >= meshAtt.mesh.points.length / 2) this.meshVertex = -1;
+    if (this.brush.boneId && !p.bones.some((b) => b.id === this.brush.boneId)) this.brush.boneId = null;
     if (this.animId && !p.animations.some((a) => a.id === this.animId)) this.animId = p.animations[0]?.id ?? null;
     if (!this.animId && this.mode === 'animate') this.mode = 'setup';
     const anim = this.anim();
@@ -203,6 +216,11 @@ export class Editor {
   // ---- Selection / mode / time ---------------------------------------------------
 
   select(sel: Selection): void {
+    const prev = this.selection;
+    if (!(sel?.kind === 'attachment' && prev?.kind === 'attachment' && prev.id === sel.id)) {
+      this.meshTool = 'off';
+      this.meshVertex = -1;
+    }
     this.selection = sel;
     // Keep selected keys that belong to the newly selected item; drop the rest.
     const owner = (r: KeyRef) => {

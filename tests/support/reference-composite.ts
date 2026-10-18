@@ -3,6 +3,11 @@
 // matrix chain, draw order, slot visibility/opacity/image keys, and the compositing
 // (bilinear texture sampling × 4×4 supersampled quad coverage, premultiplied
 // source-over) are re-derived here from the project JSON and the format docs.
+// Meshes: vertices are re-skinned here (setup pose = bind pose, deform keys sampled
+// here); each of the 4×4 subsamples per pixel belongs to the topmost (last-listed)
+// triangle containing it, each triangle contributes its subsample coverage × one
+// bilinear texture tap at the pixel centre through its own barycentric map (the quad
+// model above), and the mesh is composited once with the attachment opacity.
 import type { Decoded } from './png-decode.ts';
 import { decodePng } from './png-decode.ts';
 
@@ -102,6 +107,7 @@ export function composite(project: any, anim: any | null, t: number, images: Map
   const dk = stepped(anim?.drawOrder, t);
   const byId = new Map(project.attachments.map((a: any) => [a.id, a]));
   const order: any[] = dk ? dk.order.map((id: string) => byId.get(id)) : project.attachments;
+  let setup: Map<string, M> | undefined;
   for (const a of order) {
     const st = anim?.slots?.[a.id];
     // Stepped channels show the setup value before their first key.
@@ -113,6 +119,11 @@ export function composite(project: any, anim: any | null, t: number, images: Map
     const meta = project.images.find((i: any) => i.id === imageId);
     const img = images.get(imageId)!;
     const base = a.boneId ? worlds.get(a.boneId)! : ([1, 0, 0, 1, 0, 0] as M);
+    if (a.mesh) {
+      setup ??= boneWorlds(project, null, 0);
+      compositeMesh(acc, w, h, view, a, st, t, project, worlds, setup, meta, img, opacity);
+      continue;
+    }
     const m = mul(view, mul(base, trs(a.x, a.y, a.rotation, a.scaleX, a.scaleY)));
     const im = inv(m);
     const hw = meta.width / 2, hh = meta.height / 2;
@@ -151,6 +162,121 @@ export function composite(project: any, anim: any | null, t: number, images: Map
     for (let c = 0; c < 3; c++) data[i * 4 + c] = a > 0 ? Math.round(Math.min(1, acc[i * 4 + c] / a) * 255) : 0;
   }
   return { width: w, height: h, data };
+}
+
+const apply = (m: M, x: number, y: number): [number, number] => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+
+/** Screen-space (pixel) vertex positions of a mesh attachment at time t. */
+export function meshScreenVertices(a: any, st: any, t: number, project: any, worlds: Map<string, M>, setup: Map<string, M>, view: M): number[] {
+  const mesh = a.mesh;
+  const setupMeta = project.images.find((i: any) => i.id === a.imageId);
+  const n = mesh.points.length / 2;
+  const deform = sampleTrack(st?.deform, t, new Array(mesh.points.length).fill(0));
+  const attLocal = trs(a.x, a.y, a.rotation, a.scaleX, a.scaleY);
+  const ident: M = [1, 0, 0, 1, 0, 0];
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const lx = mesh.points[2 * i] - setupMeta.width / 2 + deform[2 * i];
+    const ly = mesh.points[2 * i + 1] - setupMeta.height / 2 + deform[2 * i + 1];
+    let x: number, y: number;
+    if (!mesh.weights) {
+      [x, y] = apply(mul(a.boneId ? worlds.get(a.boneId)! : ident, attLocal), lx, ly);
+    } else {
+      const [rx, ry] = apply(mul(a.boneId ? setup.get(a.boneId)! : ident, attLocal), lx, ly);
+      x = 0;
+      y = 0;
+      for (const inf of mesh.weights[i]) {
+        const [qx, qy] = apply(mul(worlds.get(inf.bone)!, inv(setup.get(inf.bone)!)), rx, ry);
+        x += qx * inf.w;
+        y += qy * inf.w;
+      }
+    }
+    const [sx, sy] = apply(view, x, y);
+    out.push(sx, sy);
+  }
+  return out;
+}
+
+function compositeMesh(acc: Float64Array, w: number, h: number, view: M, a: any, st: any, t: number, project: any, worlds: Map<string, M>, setup: Map<string, M>, meta: any, img: Decoded, opacity: number): void {
+  const mesh = a.mesh;
+  const setupMeta = project.images.find((i: any) => i.id === a.imageId);
+  const v = meshScreenVertices(a, st, t, project, worlds, setup, view);
+  // Texture coordinates in the shown image's pixels (scaled from the setup image).
+  const ku = meta.width / setupMeta.width, kv = meta.height / setupMeta.height;
+  const S = 4;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < v.length; i += 2) {
+    minX = Math.min(minX, v[i]);
+    maxX = Math.max(maxX, v[i]);
+    minY = Math.min(minY, v[i + 1]);
+    maxY = Math.max(maxY, v[i + 1]);
+  }
+  const X0 = Math.max(0, Math.floor(minX)), X1 = Math.min(w - 1, Math.ceil(maxX));
+  const Y0 = Math.max(0, Math.floor(minY)), Y1 = Math.min(h - 1, Math.ceil(maxY));
+  if (X1 < X0 || Y1 < Y0) return;
+  const bw = X1 - X0 + 1, bh = Y1 - Y0 + 1;
+  // Per triangle: the affine map screen → texture (u = A·x + B·y + C), from barycentrics.
+  const nt = mesh.triangles.length / 3;
+  const tex = new Float64Array(nt * 6);
+  // Topmost (last-listed) triangle per subsample, −1 = none.
+  const owner = new Int32Array(bw * S * bh * S).fill(-1);
+  const p = mesh.points;
+  for (let k = 0; k < nt; k++) {
+    const [i0, i1, i2] = [mesh.triangles[3 * k], mesh.triangles[3 * k + 1], mesh.triangles[3 * k + 2]];
+    const ax = v[2 * i0], ay = v[2 * i0 + 1], bx = v[2 * i1], by = v[2 * i1 + 1], cx = v[2 * i2], cy = v[2 * i2 + 1];
+    const area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+    const uvArea = (p[2 * i1] - p[2 * i0]) * (p[2 * i2 + 1] - p[2 * i0 + 1]) - (p[2 * i2] - p[2 * i0]) * (p[2 * i1 + 1] - p[2 * i0 + 1]);
+    if (Math.abs(area) < 1e-9 || Math.abs(uvArea) < 1e-9) continue; // degenerate: draws nothing
+    // l1 = ((x−ax)(cy−ay) − (cx−ax)(y−ay))/area, l2 = ((bx−ax)(y−ay) − (x−ax)(by−ay))/area
+    const l1x = (cy - ay) / area, l1y = -(cx - ax) / area, l1c = (-ax * (cy - ay) + (cx - ax) * ay) / area;
+    const l2x = -(by - ay) / area, l2y = (bx - ax) / area, l2c = (-(bx - ax) * ay + ax * (by - ay)) / area;
+    for (let c = 0; c < 2; c++) {
+      const q0 = p[2 * i0 + c] * (c ? kv : ku), q1 = p[2 * i1 + c] * (c ? kv : ku), q2 = p[2 * i2 + c] * (c ? kv : ku);
+      tex[6 * k + 3 * c] = (q1 - q0) * l1x + (q2 - q0) * l2x;
+      tex[6 * k + 3 * c + 1] = (q1 - q0) * l1y + (q2 - q0) * l2y;
+      tex[6 * k + 3 * c + 2] = q0 + (q1 - q0) * l1c + (q2 - q0) * l2c;
+    }
+    const sx0 = Math.max(0, Math.floor((Math.min(ax, bx, cx) - X0) * S)), sx1 = Math.min(bw * S - 1, Math.ceil((Math.max(ax, bx, cx) - X0) * S));
+    const sy0 = Math.max(0, Math.floor((Math.min(ay, by, cy) - Y0) * S)), sy1 = Math.min(bh * S - 1, Math.ceil((Math.max(ay, by, cy) - Y0) * S));
+    for (let j = sy0; j <= sy1; j++) {
+      for (let i = sx0; i <= sx1; i++) {
+        const qx = X0 + (i + 0.5) / S, qy = Y0 + (j + 0.5) / S;
+        const l1 = l1x * qx + l1y * qy + l1c, l2 = l2x * qx + l2y * qy + l2c;
+        if (l1 < 0 || l2 < 0 || 1 - l1 - l2 < 0) continue;
+        owner[j * bw * S + i] = k;
+      }
+    }
+  }
+  const tx = img.width / meta.width, ty = img.height / meta.height;
+  const uvAt = (k: number, x: number, y: number): [number, number] => [tex[6 * k] * x + tex[6 * k + 1] * y + tex[6 * k + 2], tex[6 * k + 3] * x + tex[6 * k + 4] * y + tex[6 * k + 5]];
+  const counts = new Map<number, number>();
+  for (let py = 0; py < bh; py++) {
+    for (let px = 0; px < bw; px++) {
+      // Coverage per owning triangle (subsamples whose texture point lies on the image),
+      // colour: one bilinear tap at the pixel centre through that triangle's map — the
+      // same model as the quad path above (coverage × centre sample).
+      counts.clear();
+      for (let j = 0; j < S; j++)
+        for (let i = 0; i < S; i++) {
+          const k = owner[(py * S + j) * bw * S + px * S + i];
+          if (k < 0) continue;
+          const [u, vv] = uvAt(k, X0 + px + (i + 0.5) / S, Y0 + py + (j + 0.5) / S);
+          if (u < 0 || vv < 0 || u > meta.width || vv > meta.height) continue;
+          counts.set(k, (counts.get(k) ?? 0) + 1);
+        }
+      if (!counts.size) continue;
+      const col = [0, 0, 0, 0];
+      for (const [k, n] of counts) {
+        const [u, vv] = uvAt(k, X0 + px + 0.5, Y0 + py + 0.5);
+        const s = bilinear(img, u * tx - 0.5, vv * ty - 0.5);
+        for (let c = 0; c < 4; c++) col[c] += (s[c] * n) / (S * S);
+      }
+      const o = ((Y0 + py) * w + X0 + px) * 4;
+      const sa = col[3] * opacity;
+      for (let c = 0; c < 3; c++) acc[o + c] = col[c] * opacity + acc[o + c] * (1 - sa);
+      acc[o + 3] = sa + acc[o + 3] * (1 - sa);
+    }
+  }
 }
 
 /** Premultiplied bilinear sample (clamped to the image), channels in 0..1. */
@@ -201,4 +327,26 @@ export function diffImages(a: { width: number; height: number; data: Uint8Array 
     if (worst > tol) over++;
   }
   return { maxDiff, meanDiff: sum / (a.width * a.height), over, covered, tol };
+}
+
+/**
+ * Alpha of a render over the reference's flat interior: pixels whose reference alpha is
+ * within ±1 of `target` and whose 8 neighbours are too (away from the art boundary).
+ * Mesh seams cross this interior, so a crack or a doubled seam shows here.
+ */
+export function interiorAlpha(got: { width: number; data: Uint8Array }, ref: { width: number; height: number; data: Uint8Array }, target: number, tol: number) {
+  let n = 0, bad = 0, min = 255, max = 0;
+  const W = ref.width;
+  for (let y = 1; y < ref.height - 1; y++)
+    for (let x = 1; x < W - 1; x++) {
+      let flat = true;
+      for (let dy = -1; dy <= 1 && flat; dy++) for (let dx = -1; dx <= 1; dx++) if (Math.abs(ref.data[((y + dy) * W + x + dx) * 4 + 3] - target) > 1) flat = false;
+      if (!flat) continue;
+      const a = got.data[(y * W + x) * 4 + 3];
+      n++;
+      min = Math.min(min, a);
+      max = Math.max(max, a);
+      if (Math.abs(a - target) > tol) bad++;
+    }
+  return { n, bad, min, max };
 }

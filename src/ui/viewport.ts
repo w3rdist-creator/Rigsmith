@@ -6,6 +6,8 @@ import type { Mat, Vec } from '../model/math.ts';
 import { angleOf, apply, determinant, invert, wrapDegrees } from '../model/math.ts';
 import { applyPoseEdit, makeBone, uniqueName } from '../model/ops.ts';
 import { PathTable, pathWorldMatrix } from '../model/constraints.ts';
+import { snapToFrame } from '../model/animation.ts';
+import { bindAll, deformAt, keyDeform, moveMeshPoint, paintVertex, vertexJacobian, worldDeltaToLocal } from '../model/meshOps.ts';
 import { moveBonePivot } from '../model/rigOps.ts';
 import { attachmentWorld, boneTip, computeWorld, parentWorld, toLocal, topoOrder } from '../model/skeleton.ts';
 import type { Bone, PathShape, Project } from '../model/types.ts';
@@ -28,6 +30,9 @@ type Drag =
   | { kind: 'create'; id: string; start: Vec }
   | { kind: 'pivot'; id: string; grab: Vec; base: Project }
   | { kind: 'path-point'; pathId: string; index: number; part: PathPart }
+  /** Setup: moves the point (position + texture coordinate); Animate: keys a deform. */
+  | { kind: 'mesh-vertex'; attId: string; index: number; start: Vec; point: Vec; deform: number[]; jac: Mat; animate: boolean }
+  | { kind: 'weight-paint'; attId: string }
   | { kind: 'pending-pan'; startX: number; startY: number; viewX: number; viewY: number };
 
 export interface Hit {
@@ -235,6 +240,7 @@ export class Viewport {
       this.startCreate(wp);
       return;
     }
+    if (this.meshDown(s, wp)) return;
 
     const pp = this.pathPointAt(s.x, s.y);
     if (pp) {
@@ -318,6 +324,10 @@ export class Viewport {
     const s = this.local(e);
     const d = this.drag;
     if (!d) {
+      if (this.ed.meshTool === 'weights') {
+        this.brushAt = s;
+        this.invalidate();
+      }
       const h = this.hitTest(s.x, s.y);
       if (h?.id !== this.hover?.id) {
         this.hover = h;
@@ -358,6 +368,28 @@ export class Viewport {
         });
         return;
       }
+      case 'mesh-vertex': {
+        const dl = worldDeltaToLocal(d.jac, wp.x - d.start.x, wp.y - d.start.y);
+        if (!dl) return;
+        const anim = ed.anim();
+        if (!d.animate) {
+          ed.gestureMutate((p) => {
+            const a = p.attachments.find((x) => x.id === d.attId);
+            if (a) moveMeshPoint(p, a, d.index, round2(d.point.x + dl.x), round2(d.point.y + dl.y));
+          });
+        } else if (anim) {
+          const t = snapToFrame(ed.time, anim.fps);
+          const off = d.deform.slice();
+          off[2 * d.index] = round2(d.deform[2 * d.index] + dl.x);
+          off[2 * d.index + 1] = round2(d.deform[2 * d.index + 1] + dl.y);
+          ed.gestureMutate((p) => keyDeform(p.animations.find((x) => x.id === anim.id)!, d.attId, t, off));
+        }
+        return;
+      }
+      case 'weight-paint':
+        this.brushAt = s;
+        this.paintAt(wp);
+        return;
       case 'path-point': {
         const path = ed.project.paths?.find((x) => x.id === d.pathId);
         const n = path?.nodes[d.index];
@@ -457,6 +489,12 @@ export class Viewport {
       case 'path-point':
         ed.endGesture(d.part === 'node' ? 'Move path node' : 'Edit path handle');
         break;
+      case 'mesh-vertex':
+        ed.endGesture(d.animate ? 'Key deform' : 'Move mesh vertex');
+        break;
+      case 'weight-paint':
+        ed.endGesture('Paint weights');
+        break;
       case 'rotate':
         ed.endGesture(d.target === 'bone' ? (ed.mode === 'animate' ? 'Key bone rotation' : 'Rotate bone') : 'Rotate attachment');
         break;
@@ -530,6 +568,7 @@ export class Viewport {
       if (!isSel && !isHover) continue;
       this.outlineAttachment(g, vm, f, isSel ? '#ffd166' : 'rgba(255,209,102,0.5)');
     }
+    this.drawMeshOverlay(g, vm, dpr, frame);
     if (ed.showBones) {
       this.drawPaths(g, p, world, vm, dpr);
       this.drawBones(g, p, world, vm, dpr);
@@ -653,6 +692,148 @@ export class Viewport {
       this.ghost.height = h;
     }
     return this.ghost;
+  }
+
+  // ---- Mesh tools ----------------------------------------------------------------------
+
+  /** Last pointer position (canvas px) for the weight-brush outline. */
+  private brushAt: Vec | null = null;
+
+  /** The selected mesh attachment while a mesh tool is active. */
+  private meshTarget(frame: Frame = this.ed.frame()): AttachmentFrame | null {
+    const ed = this.ed;
+    const sel = ed.selection;
+    if (ed.meshTool === 'off' || sel?.kind !== 'attachment') return null;
+    const f = frame.attachments.find((x) => x.att.id === sel.id);
+    return f?.vertices && f.att.mesh ? f : null;
+  }
+
+  /** Nearest vertex within 8 px of canvas point s (-1 = none). */
+  private vertexAt(f: AttachmentFrame, s: Vec): number {
+    let best = -1, bd = 8;
+    for (let i = 0; i < f.vertices!.length / 2; i++) {
+      const q = this.toScreen({ x: f.vertices![2 * i], y: f.vertices![2 * i + 1] });
+      const d = Math.hypot(q.x - s.x, q.y - s.y);
+      if (d <= bd) (bd = d), (best = i);
+    }
+    return best;
+  }
+
+  private meshDown(s: Vec, wp: Vec): boolean {
+    const ed = this.ed;
+    const f = this.meshTarget();
+    if (!f) return false;
+    const att = f.att;
+    if (ed.meshTool === 'weights') {
+      if (ed.mode !== 'setup' || !att.boneId) return true;
+      ed.beginGesture();
+      this.drag = { kind: 'weight-paint', attId: att.id };
+      this.brushAt = s;
+      this.paintAt(wp);
+      return true;
+    }
+    const i = this.vertexAt(f, s);
+    if (i < 0) {
+      if (ed.meshVertex !== -1) {
+        ed.meshVertex = -1;
+        ed.emit('selection');
+      }
+      this.drag = { kind: 'pending-pan', startX: s.x, startY: s.y, viewX: this.view.x, viewY: this.view.y };
+      return true;
+    }
+    ed.meshVertex = i;
+    const anim = ed.anim();
+    const animate = ed.mode === 'animate' && !!anim;
+    const frame = ed.frame();
+    // Points and deform offsets enter the skinning formula the same way (p + deform), so
+    // one Jacobian at the current pose converts the drag for both modes.
+    const jac = vertexJacobian(att, i, frame.world, computeWorld(ed.project.bones));
+    const mesh = att.mesh!;
+    ed.beginGesture();
+    this.drag = {
+      kind: 'mesh-vertex',
+      attId: att.id,
+      index: i,
+      start: wp,
+      point: { x: mesh.points[2 * i], y: mesh.points[2 * i + 1] },
+      deform: animate ? deformAt(anim!, att, snapToFrame(ed.time, anim!.fps)) : [],
+      jac,
+      animate,
+    };
+    ed.emit('selection');
+    return true;
+  }
+
+  /** One brush dab at world point wp (inside a weight-paint gesture). */
+  private paintAt(wp: Vec): void {
+    const ed = this.ed;
+    const f = this.meshTarget();
+    if (!f || !f.att.boneId) return;
+    const fallback = f.att.boneId;
+    const bone = ed.brush.boneId ?? fallback;
+    const r = ed.brush.radius / this.view.zoom;
+    const v = f.vertices!;
+    ed.gestureMutate((p) => {
+      const a = p.attachments.find((x) => x.id === f.att.id);
+      const m = a?.mesh;
+      if (!m) return;
+      m.weights ??= bindAll(m, fallback);
+      for (let i = 0; i < v.length / 2; i++) {
+        const d = Math.hypot(v[2 * i] - wp.x, v[2 * i + 1] - wp.y);
+        if (d >= r) continue;
+        m.weights[i] = paintVertex(m.weights[i], bone, ed.brush.strength * (1 - d / r), ed.brush.mode, fallback);
+      }
+    });
+  }
+
+  private drawMeshOverlay(g: CanvasRenderingContext2D, vm: Mat, dpr: number, frame: Frame): void {
+    const f = this.meshTarget(frame);
+    if (!f) return;
+    const ed = this.ed;
+    const m = f.att.mesh!;
+    const v = f.vertices!;
+    const P = (i: number) => apply(vm, { x: v[2 * i], y: v[2 * i + 1] });
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    const painting = ed.meshTool === 'weights';
+    const bone = ed.brush.boneId ?? f.att.boneId;
+    const wOf = (i: number) => (m.weights ? (m.weights[i].find((x) => x.bone === bone)?.w ?? 0) : bone === f.att.boneId ? 1 : 0);
+    const heat = (w: number, a: number) => `rgba(${Math.round(60 + 195 * w)},${Math.round(90 + 40 * (1 - Math.abs(w - 0.5) * 2))},${Math.round(255 - 205 * w)},${a})`;
+    for (let t = 0; t < m.triangles.length; t += 3) {
+      const [a, b, c] = [m.triangles[t], m.triangles[t + 1], m.triangles[t + 2]];
+      const [pa, pb, pc] = [P(a), P(b), P(c)];
+      g.beginPath();
+      g.moveTo(pa.x, pa.y);
+      g.lineTo(pb.x, pb.y);
+      g.lineTo(pc.x, pc.y);
+      g.closePath();
+      if (painting) {
+        g.fillStyle = heat((wOf(a) + wOf(b) + wOf(c)) / 3, 0.35);
+        g.fill();
+      }
+      g.lineWidth = dpr;
+      g.strokeStyle = 'rgba(120,200,255,0.7)';
+      g.stroke();
+    }
+    for (let i = 0; i < v.length / 2; i++) {
+      const q = P(i);
+      const sel = i === ed.meshVertex;
+      const r = (sel ? 5 : i < m.hull ? 3.5 : 3) * dpr;
+      g.beginPath();
+      if (i < m.hull) g.rect(q.x - r, q.y - r, r * 2, r * 2);
+      else g.arc(q.x, q.y, r, 0, Math.PI * 2);
+      g.fillStyle = sel ? '#ffd166' : painting ? heat(wOf(i), 1) : '#78c8ff';
+      g.fill();
+      g.lineWidth = dpr;
+      g.strokeStyle = '#101218';
+      g.stroke();
+    }
+    if (painting && this.brushAt) {
+      g.beginPath();
+      g.arc(this.brushAt.x * dpr, this.brushAt.y * dpr, ed.brush.radius * dpr, 0, Math.PI * 2);
+      g.lineWidth = 1.5 * dpr;
+      g.strokeStyle = 'rgba(255,255,255,0.8)';
+      g.stroke();
+    }
   }
 
   private outlineAttachment(g: CanvasRenderingContext2D, vm: Mat, f: AttachmentFrame, color: string): void {

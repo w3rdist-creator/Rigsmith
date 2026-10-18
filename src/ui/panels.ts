@@ -5,6 +5,8 @@ import { descendantIds, depthOf, topoOrder } from '../model/skeleton.ts';
 import type { Attachment, Channel, LocalPose } from '../model/types.ts';
 import type { App } from './app.ts';
 import { append, clear, h, numberField } from './dom.ts';
+import { setAttachmentImage } from '../model/meshOps.ts';
+import { meshSection } from './meshPanels.ts';
 import { attachmentSlotSection, boneRigSection, renderConstraintInspector, renderPathInspector } from './rigPanels.ts';
 
 export function renderSkeleton(app: App, root: HTMLElement): void {
@@ -203,11 +205,12 @@ export function renderInspector(app: App, root: HTMLElement): void {
   boneSel.addEventListener('change', () => setA('Rebind attachment', (x) => void (x.boneId = boneSel.value || null)));
   const imgSel = h('select', { 'data-testid': 'att-image', 'aria-label': 'Attachment image' }, ...p.images.map((im) => h('option', { value: im.id }, im.name)));
   imgSel.value = a.imageId;
-  imgSel.addEventListener('change', () => setA('Swap image', (x) => void (x.imageId = imgSel.value)));
+  // A mesh keeps its shape relative to the image: its points rescale to the new image size.
+  imgSel.addEventListener('change', () => setA('Swap image', (x) => setAttachmentImage(ed.project, x, imgSel.value)));
   const idx = p.attachments.indexOf(a);
   const animating = ed.mode === 'animate' && !!ed.anim();
   // Animate mode: slot keys first (what can be keyed now), setup fields below.
-  if (animating) root.append(h('div', { class: 'kind-badge' }, `Image attachment · keying at frame ${Math.round(ed.time * ed.anim()!.fps)}`), ...attachmentSlotSection(app, a), h('div', { class: 'group-label' }, 'Setup (shared by all animations)'));
+  if (animating) root.append(h('div', { class: 'kind-badge' }, `Image attachment · keying at frame ${Math.round(ed.time * ed.anim()!.fps)}`), ...attachmentSlotSection(app, a), ...meshSection(app, a), h('div', { class: 'group-label' }, 'Setup (shared by all animations)'));
   append(
     root,
     animating ? null : h('div', { class: 'kind-badge' }, 'Image attachment · setup'),
@@ -231,6 +234,7 @@ export function renderInspector(app: App, root: HTMLElement): void {
       h('button', { class: 'mini', 'data-testid': 'att-forward', disabled: idx === p.attachments.length - 1, onclick: () => app.moveAttachmentOrder(a.id, 1) }, 'Bring forward'),
     ),
     ...(animating ? [] : attachmentSlotSection(app, a)),
+    ...(animating ? [] : meshSection(app, a)),
   );
 }
 

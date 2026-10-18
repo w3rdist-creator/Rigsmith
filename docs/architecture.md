@@ -108,6 +108,8 @@ files that declare version 1 but contain v2 fields, and versions newer than 2.
 | `paths: [{id, name, boneId, closed, nodes: [{x,y,inX,inY,outX,outY}]}]` | cubic Bezier paths in a bone's space (null = world); handles relative to their node |
 | `pathConstraints: [{id, name, pathId, bones, position, spacing, mix, rotate, rotateOffset}]` | bones placed along a path |
 | `ImageAsset.derived: {kind, sourceId, offsetX, offsetY, polygon?, synthesized, note?}` | provenance of cutout/remainder/patch images; the source image is kept unmodified |
+| `Attachment.mesh: {points, triangles, hull, weights?}` | textured triangle mesh: `points` in the setup image's pixels (also the texture coordinates), the first `hull` points are the outline in order; `weights[v] = [{bone, w}]` sums to 1 per vertex (absent = rigid on the attachment's bone) |
+| `Animation.slots[attId].deform` | deform keys: `value` = per-vertex offsets `[dx0,dy0,…]` in image pixels (2 per vertex), interpolated |
 
 Evaluation order (`src/model/evaluate.ts`, shared by the viewport, onion skin, sequence
 export and runtime export): sample local pose → IK constraints (array order) → path
@@ -137,6 +139,32 @@ image, skin, draw order) → mesh vertices.
   first clean cross-section back past the pivot (axis: pivot → outline area centroid),
   filling only transparent pixels under opaque cover (alpha ≥ 250), so the grown part
   stays hidden at rest and fills the gap when the joint bends.
+- **Meshes** (`src/model/mesh.ts`, `meshOps.ts`): the bind pose is the current **setup
+  pose** — a weighted vertex is `Σ wᵢ · Wᵢ(now) · Wᵢ(setup)⁻¹ · A(setup) · (p + deform)`,
+  so editing setup bones re-binds (the mesh follows the attachment's bone at setup).
+  Geometry is centred on the setup image; an image key or skin showing another image
+  scales only the texture coordinates (normalized UVs). Changing the setup image rescales
+  the points (and deform keys). Triangulation: ear clipping of the outline, interior
+  points inserted by splitting, then Delaunay edge flips that never cross the outline;
+  self-crossing outlines, duplicates (< 0.5 px), interior points on/outside the outline
+  and degenerate triangles are rejected. Weights renormalize to exactly 1 after every
+  edit; subtracting a vertex's only influence hands it to the attachment's bone (no-op
+  when that is the painted bone). Deleting a bone passes its weights to its parent; a
+  missing bone is dropped and the rest renormalized (integrity pass). Re-meshing resets
+  weights and deform keys.
+- **Mesh rendering** (`src/render/draw.ts`): each mesh is drawn into an integer-aligned
+  offscreen layer and composited once with the attachment opacity. Each triangle is
+  clipped to its outline and the image drawn through the triangle's affine map
+  (Canvas2D). Unfolded meshes (all non-degenerate triangles share one orientation — a
+  whole-mesh mirror counts as unfolded) use additive (`lighter`) compositing with no
+  bleed: the anti-aliased clip coverages of triangles sharing an edge sum to 1, so seams
+  are exact even on translucent art (measured: interior alpha min = max = target). A
+  folded mesh (mixed orientations) draws source-over in triangle order with a 0.5 px
+  bleed. Degenerate triangles (screen or texture area ≈ 0) draw nothing. Verified only on
+  headless Chrome for Testing's software raster; GPU-accelerated canvases were not
+  checked. Known limits: a mesh that overlaps itself *without* any reversed triangle would
+  add colours where it overlaps; minified hard texture edges use Canvas2D's single
+  bilinear tap (the reference supersamples coverage only).
 
 ## Runtime export (`rigsmith.runtime`, version 1)
 
@@ -145,6 +173,10 @@ animation's keys, plus `baked[boneName][frame] = [worldX, worldY, worldRotDeg,
 worldScaleX, worldScaleY]` for every frame (after constraints), so a consumer can play it
 without implementing interpolation. Animations with slot or draw-order keys also carry
 `bakedSlots[frame]` = attachments back→front with `{attachment, visible, opacity, image}`.
+Mesh attachments carry `mesh: {uvs, triangles, hull}` (uvs in setup-image pixels), and
+animations of projects with meshes carry `bakedMeshes[attachmentName][frame]` = world
+vertices `[x0,y0,…]` with deform keys and skinning applied (the same `evaluate()` output
+the editor draws).
 
 ## Persistence
 

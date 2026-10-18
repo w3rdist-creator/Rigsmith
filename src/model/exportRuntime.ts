@@ -15,7 +15,11 @@ export interface RuntimeExport {
   version: typeof RUNTIME_FORMAT_VERSION;
   name: string;
   bones: { name: string; parent: string | null; x: number; y: number; rotation: number; scaleX: number; scaleY: number; length: number }[];
-  attachments: { name: string; bone: string | null; image: string; width: number; height: number; x: number; y: number; rotation: number; scaleX: number; scaleY: number; opacity: number }[];
+  attachments: {
+    name: string; bone: string | null; image: string; width: number; height: number; x: number; y: number; rotation: number; scaleX: number; scaleY: number; opacity: number;
+    /** Mesh attachments: texture coordinates (setup-image px), triangles and outline length. */
+    mesh?: { uvs: number[]; triangles: number[]; hull: number };
+  }[];
   animations: {
     name: string;
     duration: number;
@@ -27,6 +31,8 @@ export interface RuntimeExport {
     baked: Record<string, number[][]>;
     /** Only when the animation keys slots or draw order: per frame, attachments back→front with their state. */
     bakedSlots?: { attachment: string; visible: boolean; opacity: number; image: string }[][];
+    /** Only when the project has meshes: bakedMeshes[attachmentName][frame] = world vertices [x0,y0,…] (deform + skinning applied). */
+    bakedMeshes?: Record<string, number[][]>;
   }[];
 }
 
@@ -62,6 +68,7 @@ export function exportRuntime(project: Project): RuntimeExport {
         scaleX: round(a.scaleX),
         scaleY: round(a.scaleY),
         opacity: round(a.opacity),
+        ...(a.mesh ? { mesh: { uvs: a.mesh.points.slice(), triangles: a.mesh.triangles.slice(), hull: a.mesh.hull } } : {}),
       };
     }),
     animations: project.animations.map((anim) => {
@@ -70,10 +77,13 @@ export function exportRuntime(project: Project): RuntimeExport {
       for (const b of ordered) baked[b.name] = [];
       const slotted = !!(anim.drawOrder?.length || Object.keys(anim.slots ?? {}).length);
       const bakedSlots: NonNullable<RuntimeExport['animations'][number]['bakedSlots']> = [];
+      const meshed = project.attachments.filter((a) => a.mesh);
+      const bakedMeshes: Record<string, number[][]> = Object.fromEntries(meshed.map((a) => [a.name, []]));
       for (let f = 0; f < frames; f++) {
         const t = Math.min(anim.duration, f / anim.fps);
         const fr = evaluate(project, anim, t);
         const world = fr.world;
+        for (const a of fr.attachments) if (a.vertices && a.att.name in bakedMeshes) bakedMeshes[a.att.name].push(a.vertices.map((v) => round(v, 3)));
         if (slotted) bakedSlots.push(fr.attachments.map((a) => ({ attachment: a.att.name, visible: a.visible, opacity: round(a.opacity, 4), image: a.image?.name ?? '' })));
         for (const b of ordered) {
           const m = world.get(b.id)!;
@@ -87,7 +97,7 @@ export function exportRuntime(project: Project): RuntimeExport {
         const conv = (ks: typeof track.translate) => ks.map((k) => ({ time: round(k.time, 6), value: k.value.map((v) => round(v)), interp: k.interp }));
         keys[n] = { translate: conv(track.translate), rotate: conv(track.rotate), scale: conv(track.scale) };
       }
-      return { name: anim.name, duration: anim.duration, fps: anim.fps, loop: anim.loop, frames, keys, baked, ...(slotted ? { bakedSlots } : {}) };
+      return { name: anim.name, duration: anim.duration, fps: anim.fps, loop: anim.loop, frames, keys, baked, ...(slotted ? { bakedSlots } : {}), ...(meshed.length ? { bakedMeshes } : {}) };
     }),
   };
 }

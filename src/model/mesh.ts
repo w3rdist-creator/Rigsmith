@@ -1,12 +1,15 @@
-// Mesh attachments: vertex positions in image pixel space double as texture
-// coordinates. Rigid meshes follow the attachment's bone; weighted meshes are skinned
-// with the setup pose as the bind pose:
+// Mesh attachments: vertex positions are in the pixel space of the attachment's *setup*
+// image and double as its texture coordinates. When an image key or skin shows a
+// different image, the geometry stays put and only the texture coordinates scale by the
+// size ratio (normalized UVs). Rigid meshes follow the attachment's bone; weighted meshes
+// are skinned with the setup pose as the bind pose:
 //   v = Σ wᵢ · Wᵢ(now) · Wᵢ(setup)⁻¹ · A(setup) · (p + deform)
-// where A is the attachment's world matrix and p the vertex in attachment-local space.
+// where A is the attachment's world matrix and p the vertex in attachment-local space
+// (centred on the setup image).
 import type { Mat } from './math.ts';
 import { apply, invert, multiply } from './math.ts';
 import { attachmentWorld } from './skeleton.ts';
-import type { Attachment, ImageAsset } from './types.ts';
+import type { Attachment } from './types.ts';
 
 /** Vertex i in attachment-local space (image centred), with an optional deform offset. */
 export function localVertex(points: readonly number[], i: number, im: { width: number; height: number }, deform?: readonly number[]): { x: number; y: number } {
@@ -16,7 +19,7 @@ export function localVertex(points: readonly number[], i: number, im: { width: n
   };
 }
 
-export function meshWorldVertices(att: Attachment, im: ImageAsset, world: ReadonlyMap<string, Mat>, setupWorld: ReadonlyMap<string, Mat>, deform?: readonly number[]): number[] {
+export function meshWorldVertices(att: Attachment, im: { width: number; height: number }, world: ReadonlyMap<string, Mat>, setupWorld: ReadonlyMap<string, Mat>, deform?: readonly number[]): number[] {
   const mesh = att.mesh!;
   const n = mesh.points.length / 2;
   const out = new Array<number>(n * 2);
@@ -54,4 +57,11 @@ export function meshWorldVertices(att: Attachment, im: ImageAsset, world: Readon
     out[2 * i + 1] = y;
   }
   return out;
+}
+
+/** Texture coordinates of a mesh for the image actually shown (points scaled from the setup image). */
+export function meshUvs(points: readonly number[], setup: { width: number; height: number }, shown: { width: number; height: number }): readonly number[] {
+  if (setup.width === shown.width && setup.height === shown.height) return points;
+  const sx = shown.width / setup.width, sy = shown.height / setup.height;
+  return points.map((v, i) => (i % 2 ? v * sy : v * sx));
 }

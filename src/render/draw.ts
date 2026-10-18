@@ -25,7 +25,7 @@ export function drawAttachment(g: CanvasRenderingContext2D, f: AttachmentFrame, 
   const el = images(im);
   g.globalAlpha = f.opacity;
   if (f.vertices && f.att.mesh && el) {
-    drawMesh(g, el, im, f.att.mesh.points, f.att.mesh.triangles, f.vertices, vm);
+    drawMeshLayer(g, el, im, f.uvs ?? f.att.mesh.points, f.att.mesh.triangles, f.vertices, vm, f.opacity);
   } else {
     const m = multiply(vm, f.world);
     g.setTransform(m.a, m.b, m.c, m.d, m.tx, m.ty);
@@ -40,6 +40,95 @@ export function drawAttachment(g: CanvasRenderingContext2D, f: AttachmentFrame, 
 
 /** Below this area (device px²) a triangle is degenerate and skipped. */
 const MIN_AREA = 1e-6;
+
+type Layer = { canvas: OffscreenCanvas | HTMLCanvasElement; g: CanvasRenderingContext2D };
+let layerCache: Layer | null = null;
+function layerOf(w: number, h: number): Layer {
+  if (!layerCache) {
+    const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
+    layerCache = { canvas, g: canvas.getContext('2d') as CanvasRenderingContext2D };
+  }
+  const c = layerCache.canvas;
+  if (c.width < w || c.height < h) {
+    c.width = Math.max(c.width, w);
+    c.height = Math.max(c.height, h);
+  }
+  return layerCache;
+}
+
+/**
+ * Signed device-space areas of the drawable triangles agree in sign (no fold). A mesh
+ * that is mirrored as a whole (negative-scale bone) still agrees; only a mesh folded over
+ * itself mixes orientations.
+ */
+export function meshUnfolded(uvs: readonly number[], triangles: readonly number[], dev: readonly number[]): boolean {
+  let sign = 0;
+  for (let t = 0; t < triangles.length; t += 3) {
+    const i0 = triangles[t], i1 = triangles[t + 1], i2 = triangles[t + 2];
+    const tu = (uvs[2 * i1] - uvs[2 * i0]) * (uvs[2 * i2 + 1] - uvs[2 * i0 + 1]) - (uvs[2 * i2] - uvs[2 * i0]) * (uvs[2 * i1 + 1] - uvs[2 * i0 + 1]);
+    const a = (dev[2 * i1] - dev[2 * i0]) * (dev[2 * i2 + 1] - dev[2 * i0 + 1]) - (dev[2 * i2] - dev[2 * i0]) * (dev[2 * i1 + 1] - dev[2 * i0 + 1]);
+    if (Math.abs(a) / 2 < MIN_AREA || Math.abs(tu) < 1e-9) continue;
+    const s = Math.sign(a) * Math.sign(tu);
+    if (!sign) sign = s;
+    else if (s !== sign) return false;
+  }
+  return true;
+}
+
+/**
+ * Draws a mesh into an offscreen layer at full opacity, then composites the layer once
+ * with the attachment opacity (so triangle overlaps never double the opacity).
+ * Unfolded meshes draw with additive ('lighter') compositing and no bleed: the
+ * anti-aliased clip coverages of two triangles sharing an edge sum to 1, so interior
+ * seams are exact even over translucent texels. Folded meshes (mixed orientations) draw
+ * source-over in triangle order with a 0.5 px bleed so the fold keeps a stable order.
+ */
+export function drawMeshLayer(
+  g: CanvasRenderingContext2D,
+  img: CanvasImageSource,
+  im: { width: number; height: number },
+  uvs: readonly number[],
+  triangles: readonly number[],
+  world: readonly number[],
+  vm: Mat,
+  opacity: number,
+): void {
+  const n = world.length / 2;
+  const dev = new Array<number>(world.length);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = vm.a * world[2 * i] + vm.c * world[2 * i + 1] + vm.tx;
+    const y = vm.b * world[2 * i] + vm.d * world[2 * i + 1] + vm.ty;
+    dev[2 * i] = x;
+    dev[2 * i + 1] = y;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (!Number.isFinite(minX + minY + maxX + maxY)) return;
+  const x0 = Math.max(0, Math.floor(minX) - 1), y0 = Math.max(0, Math.floor(minY) - 1);
+  const x1 = Math.min(g.canvas.width, Math.ceil(maxX) + 1), y1 = Math.min(g.canvas.height, Math.ceil(maxY) + 1);
+  const w = x1 - x0, h = y1 - y0;
+  if (w <= 0 || h <= 0) return;
+  const exact = meshUnfolded(uvs, triangles, dev);
+  const L = layerOf(w, h);
+  const lg = L.g;
+  lg.setTransform(1, 0, 0, 1, 0, 0);
+  lg.globalAlpha = 1;
+  lg.globalCompositeOperation = 'source-over';
+  lg.clearRect(0, 0, w, h);
+  lg.imageSmoothingEnabled = g.imageSmoothingEnabled;
+  lg.imageSmoothingQuality = g.imageSmoothingQuality;
+  lg.globalCompositeOperation = exact ? 'lighter' : 'source-over';
+  drawMesh(lg, img, im, uvs, triangles, world, { ...vm, tx: vm.tx - x0, ty: vm.ty - y0 }, exact ? 0 : 0.5);
+  lg.globalCompositeOperation = 'source-over';
+  g.save();
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalAlpha = opacity;
+  g.drawImage(L.canvas, 0, 0, w, h, x0, y0, w, h);
+  g.restore();
+}
 
 /**
  * Textured triangles on Canvas2D: each triangle is clipped to its destination outline
@@ -78,7 +167,7 @@ export function drawMesh(
     for (let k = 0; k < 3; k++) {
       const dx = p[k].x - cx, dy = p[k].y - cy;
       const len = Math.hypot(dx, dy) || 1;
-      const x = p[k].x + (dx / len) * bleed, y = p[k].y + (dy / len) * bleed;
+      const x = bleed ? p[k].x + (dx / len) * bleed : p[k].x, y = bleed ? p[k].y + (dy / len) * bleed : p[k].y;
       if (k === 0) g.moveTo(x, y);
       else g.lineTo(x, y);
     }

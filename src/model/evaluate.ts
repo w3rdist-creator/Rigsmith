@@ -7,7 +7,7 @@ import { TIME_EPSILON, samplePose, sampleKeys } from './animation.ts';
 import type { Mat, Vec } from './math.ts';
 import { apply } from './math.ts';
 import { applyConstraints } from './constraints.ts';
-import { meshWorldVertices } from './mesh.ts';
+import { meshUvs, meshWorldVertices } from './mesh.ts';
 import { attachmentWorld, computeWorld } from './skeleton.ts';
 import type { Animation, Attachment, ImageAsset, LocalPose, Project } from './types.ts';
 
@@ -29,6 +29,8 @@ export interface AttachmentFrame {
   world: Mat;
   /** World-space mesh vertex positions [x0,y0,…] (mesh attachments only). */
   vertices?: number[];
+  /** Texture coordinates into `image` (pixels) for each mesh vertex. */
+  uvs?: readonly number[];
 }
 
 export interface Frame {
@@ -81,7 +83,9 @@ export function evaluate(project: Project, anim: Animation | null, time: number,
     const frame: AttachmentFrame = { att, image: imageById.get(imageId), visible: vis, opacity: Math.min(1, Math.max(0, opacity)), world: w };
     if (att.mesh && frame.image) {
       const deform = st?.deform?.length ? sampleKeys(st.deform, time, new Array(att.mesh.points.length).fill(0)) : undefined;
-      frame.vertices = meshWorldVertices(att, frame.image, world, setupWorld, deform);
+      const setupIm = imageById.get(att.imageId) ?? frame.image;
+      frame.vertices = meshWorldVertices(att, setupIm, world, setupWorld, deform);
+      frame.uvs = meshUvs(att.mesh.points, setupIm, frame.image);
     }
     return frame;
   });

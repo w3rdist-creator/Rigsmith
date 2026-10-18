@@ -19,6 +19,7 @@ import type { Autosave } from './autosave.ts';
 import { buildDemoImages } from './demoArt.ts';
 import { ExportDialog } from './exportDialog.ts';
 import { CutoutDialog } from './cutoutDialog.ts';
+import { MeshDialog } from './meshDialog.ts';
 import { deleteConstraint, deletePath } from '../model/rigOps.ts';
 import { h } from './dom.ts';
 import { ImageCache, importImageFile } from './images.ts';
@@ -33,6 +34,7 @@ export class App {
   autosave: Autosave | null = null;
   exportDialog!: ExportDialog;
   cutout!: CutoutDialog;
+  meshDialog!: MeshDialog;
   private statusEl!: HTMLElement;
   private toastEl!: HTMLElement;
   private statusTimer = 0;
@@ -46,6 +48,7 @@ export class App {
     this.viewport.onStatus = (m) => this.status(m);
     this.exportDialog = new ExportDialog(this);
     this.cutout = new CutoutDialog(this);
+    this.meshDialog = new MeshDialog(this);
     document.body.append(this.fileInput, this.imageInput);
     this.fileInput.addEventListener('change', () => {
       const f = this.fileInput.files?.[0];
@@ -629,7 +632,11 @@ export class App {
         if (ed.cancelActiveDrag()) break;
         if (this.viewport.isDragging) this.viewport.cancelDrag();
         else if (ed.keySels.length) ed.setKeySelection([]);
-        else ed.select(null);
+        else if (ed.meshTool !== 'off') {
+          ed.meshTool = 'off';
+          ed.meshVertex = -1;
+          ed.emit('selection');
+        } else ed.select(null);
         break;
       case '[':
         this.nudgeKeys(-1);
@@ -706,6 +713,19 @@ export class App {
     const r = this.viewport.canvas.getBoundingClientRect();
     const s = this.viewport.toScreen({ x: m.tx, y: m.ty });
     return { x: r.left + s.x, y: r.top + s.y };
+  }
+
+  /** Client-space positions of a mesh attachment's vertices in the displayed frame. */
+  meshScreen(name: string): { x: number; y: number }[] | null {
+    const f = this.ed.frame().attachments.find((x) => x.att.name === name);
+    if (!f?.vertices) return null;
+    const r = this.viewport.canvas.getBoundingClientRect();
+    const out: { x: number; y: number }[] = [];
+    for (let i = 0; i < f.vertices.length; i += 2) {
+      const s = this.viewport.toScreen({ x: f.vertices[i], y: f.vertices[i + 1] });
+      out.push({ x: r.left + s.x, y: r.top + s.y });
+    }
+    return out;
   }
 
   /** World point under a client-space coordinate (inverse of the view). */

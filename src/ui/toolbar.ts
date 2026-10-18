@@ -104,4 +104,6 @@ export const HELP_ROWS: [string, string][] = [
   ['Constraints · + Path', 'Bezier path: drag squares (nodes) and round handles; tick bones and “Create path constraint”'],
   ['Inspector (image, Setup) · ✂ Cut out piece…', 'Polygon/rectangle mask, pivot, overlap, remainder and flat patch — the source image is kept'],
   ['Inspector (bone, Setup) · Pivot mode', 'Move tool moves only the bone origin; its images and children stay put'],
+  ['Inspector (image) · ▦ Create mesh…', 'Outline + interior points (or Fill grid) → textured triangles that bend with their bones'],
+  ['Mesh · Edit vertices / Paint weights', 'Drag vertices (Setup: on the image · Animate: keys a deform) · paint the brush bone’s weight; Esc leaves the tool'],
 ];
