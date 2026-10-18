@@ -1,4 +1,26 @@
 TERMINAL_STATE: READY_FOR_HERMES_VERIFICATION
+Worker: claude-opus-5-5 (approved later priorities RV-009, RV-010 → RV-012; no other agents/models)
+This is a worker handoff, not a certification. Status: delivered, pending external verification; the
+product review belongs to the next Fable stage.
+
+Record: docs/RV-009-010-012-DELIVERY.md (controls, tests, compatibility/undo/recovery, export
+validation, the full list of gaps) · RV-010 evidence: docs/RV010-CUTOUT-SHORTFALLS.md
+Commits: 58e43fa (RV-009 motion reuse + saved clip sequences), f73ca06 (RV-010 evidence, RV-012
+flat-art guide, cut-dialog scroll fix), then the docs commit with this file. Local only; nothing pushed.
+Latest fresh gates (.hermes/evidence/roadmap/final-f73ca06/summary.txt, run 20261018T200849Z-13692,
+HEAD f73ca06, clean tree): preservation 16/16, unit 240/240, typecheck 0, build 0, e2e 184/184, cli 15/15,
+wiz 31/31, testid-audit 0 (363 ids, 89 allow-listed, 0 never interacted with), profiles 0 — all exit 0.
+Note: the smoke run before f73ca06 (.hermes/evidence/roadmap/rv012-smoke/) failed testid-audit only.
+The guide's btn('guide-…') ids were missed by the static scan; the scan was extended, not the allow-list.
+Partial / not met: the cut tools do not meet the pixel tolerance on real art (Wiz: 3 of 9 pieces, both
+directly and through the guide); the 10 RV-010 shortfalls are documented and unfixed. The guide is
+verified on a synthetic figure (e2e) and on Wiz (evidence script); no person has used it. The starter
+idle's sway rule is a heuristic. RV-009: the scale-0.5 export is nondeterministic (byte identity is
+claimed at scale 1 only); the Sequences dialog has no skin select; the v3 frame clips greeting-v2 by 21 units.
+Preview: not running (no owned vite/Chrome/ffmpeg processes left).
+
+---- History: use-case milestone (superseded by RV-009/010/012 above) ----
+USECASE_STATE (historical): READY_FOR_HERMES_VERIFICATION
 Worker: claude-opus-5-5 (use-case milestone "Wiz v3, authored through the editor": review RV-001 … RV-008; no other agents/models)
 Hermes relays this handoff and adds no product-acceptance stage; this is a worker handoff, not a certification.
 State: implemented; gates passed at 251dd79; awaiting Hermes verification. Visual preference, timing and (g) are operator-owned.

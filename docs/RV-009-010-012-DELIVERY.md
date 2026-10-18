@@ -112,4 +112,17 @@ handoff, not a certification. Product review belongs to the next Fable stage.
   - `npm run wiz:motion-reuse`
   - `npm run wiz:cutout-rv010`
   - `npm run wiz:guide-rv012`
-- Gate output: see `.hermes/STATUS.md` for the run used for this handoff.
+- Gates for this handoff: run 20261018T200849Z-13692 on the clean HEAD f73ca06. All exit 0:
+  - preservation 16/16
+  - unit 240/240
+  - typecheck and build
+  - e2e 184/184
+  - cli 15/15
+  - wiz 31/31
+  - testid-audit: 363 ids, 0 never interacted with
+  - profiles
+
+  Raw output is git-ignored, in `.hermes/evidence/roadmap/final-f73ca06/`.
+- The earlier smoke run failed only the test-id audit. The guide's ids were passed through
+  a `btn()` helper that the static scan did not read. The scan was extended to read them;
+  the allow-list was not used to hide them.
