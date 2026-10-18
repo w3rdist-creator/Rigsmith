@@ -607,9 +607,15 @@ export function validateProject(raw: unknown): ParseResult {
       const imageId = c.str(e, 'imageId', ew);
       if (!attIds.has(attachmentId)) c.fail(`${ew} references missing attachment "${attachmentId}"`);
       if (!imageIds.has(imageId)) c.fail(`${ew} references missing image "${imageId}"`);
-      if (seen.has(attachmentId)) c.fail(`${ew}: attachment "${attachmentId}" appears twice in one skin`);
-      seen.add(attachmentId);
-      entries.push({ attachmentId, imageId });
+      let from: string | undefined;
+      if (e.from !== undefined) {
+        from = c.str(e, 'from', ew);
+        if (!imageIds.has(from)) c.fail(`${ew}.from references missing image "${from}"`);
+      }
+      const key = `${attachmentId}|${from ?? ''}`;
+      if (seen.has(key)) c.fail(`${ew}: attachment "${attachmentId}"${from ? ` with from "${from}"` : ''} appears twice in one skin`);
+      seen.add(key);
+      entries.push(from ? { attachmentId, imageId, from } : { attachmentId, imageId });
     });
     skins.push({ id, name: c.str(s, 'name', w), entries });
   });

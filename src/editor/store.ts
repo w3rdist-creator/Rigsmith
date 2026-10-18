@@ -213,6 +213,12 @@ export class Editor {
     if (anim && this.time > anim.duration) this.time = anim.duration;
   }
 
+  /** Shows a skin in the viewport and exports (null = default images). View state, not undoable. */
+  setSkin(id: string | null): void {
+    this.skinId = id && this.project.skins?.some((s) => s.id === id) ? id : null;
+    this.emit('selection');
+  }
+
   // ---- Selection / mode / time ---------------------------------------------------
 
   select(sel: Selection): void {

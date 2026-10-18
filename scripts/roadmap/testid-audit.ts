@@ -29,7 +29,10 @@ for (const f of sources) {
     if (!ids.has(key)) ids.set(key, path.relative(ROOT, f));
   }
   // testIds passed through helpers: testId: 'x' / keyToggle(…, 'x', …) / checkbox(…, 'x', …)
-  for (const m of text.matchAll(/testId:\s*'([^']+)'/g)) if (!ids.has(m[1])) ids.set(m[1], path.relative(ROOT, f));
+  for (const m of text.matchAll(/testId:\s*(['`])([^'`]+)\1/g)) {
+    const key = m[2].includes('${') ? `${m[2].slice(0, m[2].indexOf('${'))}*` : m[2];
+    if (!ids.has(key)) ids.set(key, path.relative(ROOT, f));
+  }
   // Helper calls: the first hyphenated, space-free string literal argument is the test id.
   for (const m of text.matchAll(/\b(?:keyToggle|checkbox|select|textField|num|check|keyable)\(([^\n]*)/g)) {
     const id = [...m[1].matchAll(/'([a-z][a-z0-9]*(?:-[a-z0-9]+)+)'/g)].map((x) => x[1])[0];

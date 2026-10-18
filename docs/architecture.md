@@ -110,6 +110,8 @@ files that declare version 1 but contain v2 fields, and versions newer than 2.
 | `ImageAsset.derived: {kind, sourceId, offsetX, offsetY, polygon?, synthesized, note?}` | provenance of cutout/remainder/patch images; the source image is kept unmodified |
 | `Attachment.mesh: {points, triangles, hull, weights?}` | textured triangle mesh: `points` in the setup image's pixels (also the texture coordinates), the first `hull` points are the outline in order; `weights[v] = [{bone, w}]` sums to 1 per vertex (absent = rigid on the attachment's bone) |
 | `Animation.slots[attId].deform` | deform keys: `value` = per-vertex offsets `[dx0,dy0,…]` in image pixels (2 per vertex), interpolated |
+| `skins: [{id, name, entries: [{attachmentId, imageId, from?}]}]` | attachment sets: an entry without `from` replaces the attachment's setup image wherever it shows (including through an image key that shows the setup image); an entry with `from` replaces that keyed image. At most one entry per (attachment, from) |
+| `mixes: [{from, to, duration}]` | stored crossfade durations per ordered animation pair (seconds, 0–10; default 0.2 s when absent) |
 
 Evaluation order (`src/model/evaluate.ts`, shared by the viewport, onion skin, sequence
 export and runtime export): sample local pose → IK constraints (array order) → path
@@ -165,6 +167,23 @@ image, skin, draw order) → mesh vertices.
   checked. Known limits: a mesh that overlaps itself *without* any reversed triangle would
   add colours where it overlaps; minified hard texture edges use Canvas2D's single
   bilinear tap (the reference supersamples coverage only).
+
+- **Skins** (`src/model/skinOps.ts`): images are shared by reference and never copied or
+  modified, so reusing one image across skins is safe. Validation (`skinDiagnostics`,
+  shown in the Skins panel) flags aspect-ratio mismatches (warning; a mesh keeps its
+  geometry and stretches the texture), size differences, self-replacements, entries for
+  keyed images no animation shows, empty skins and shared images. Removing an image
+  removes the skin entries and image keys that use it (after a confirm listing them).
+- **Mixing** (`src/model/mix.ts`): a plan is a chain of entries on one clock; entry *k*
+  starts at `start_k` and blends over `mix_k`: `P_k = P_{k−1} + w_k (v_k − P_{k−1})`,
+  `w_k = clamp((T − start_k)/mix_k, 0, 1)`, rotation the shortest way, exact incoming
+  value at `w = 1`. Interrupting a running blend therefore starts from the live blended
+  pose (continuous). Channels the incoming animation does not key either blend to the
+  setup pose (`missing: 'setup'`) or keep the previous pose (`'hold'`). Constraints are
+  solved on the blended local pose; visibility, image, draw order and constraint keys come
+  from the newest entry with weight ≥ 0.5; opacity and mesh deform blend along the chain.
+  The Mix dialog (`src/ui/mixDialog.ts`) previews, plays and exports a transition as a
+  PNG sequence named `<from>-to-<to>`.
 
 ## Runtime export (`rigsmith.runtime`, version 1)
 

@@ -5,6 +5,8 @@ import { evaluate, frameBounds } from '../model/evaluate.ts';
 import type { Mat } from '../model/math.ts';
 import type { SequenceGeometry, SequencePlan, SequenceRequest } from '../model/sequence.ts';
 import { checkCapacity, planSequence, sequenceGeometry } from '../model/sequence.ts';
+import type { MixPlan } from '../model/mix.ts';
+import { evaluateMix, planLength } from '../model/mix.ts';
 import { buildZip } from '../model/zip.ts';
 import type { ZipEntry } from '../model/zip.ts';
 import type { Animation, Project } from '../model/types.ts';
@@ -19,6 +21,29 @@ export interface SequenceSetup {
 }
 
 export type Prepared = { ok: true; setup: SequenceSetup } | { ok: false; errors: string[] };
+
+/**
+ * A transition (mix plan) as a one-shot sequence: frames 0..⌊length·fps⌋ at `fps`,
+ * one stable canvas size, named "<first>-to-<last>".
+ */
+export function prepareMixSequence(project: Project, mix: MixPlan, fps: number, skinId: string | null, scale = 1, padding = 4): Prepared {
+  const length = planLength(project, mix);
+  const names = mix.entries.map((e) => project.animations.find((a) => a.id === e.animId)?.name ?? '?');
+  if (!(length > 0) || names.includes('?')) return { ok: false, errors: ['Choose animations for the transition.'] };
+  if (!Number.isInteger(fps) || fps < 1 || fps > 240) return { ok: false, errors: ['FPS must be a whole number from 1 to 240.'] };
+  const last = Math.floor(length * fps + 1e-9);
+  const frames = Array.from({ length: last + 1 }, (_, f) => f);
+  const times = frames.map((f) => f / fps);
+  const evaluated = times.map((t) => evaluateMix(project, mix, t, { skinId }));
+  let b: Bounds | null = null;
+  for (const f of evaluated) b = frameBounds(f, b);
+  if (!b) return { ok: false, errors: ['Nothing visible to export: attach at least one visible image.'] };
+  const geometry = sequenceGeometry(b, scale, padding);
+  const cap = checkCapacity(geometry, evaluated.length);
+  if (cap.length) return { ok: false, errors: cap };
+  const anim: Animation = { id: 'mix', name: names.join('-to-'), duration: length, fps, loop: false, tracks: {} };
+  return { ok: true, setup: { anim, plan: { times, frames, lastFrame: last }, geometry, frames: evaluated } };
+}
 
 /** Validates the request, samples every frame and computes one stable canvas size. */
 export function prepareSequence(project: Project, animId: string | null, req: SequenceRequest, skinId?: string | null): Prepared {

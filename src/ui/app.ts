@@ -18,6 +18,7 @@ import { drawFrame } from '../render/draw.ts';
 import type { Autosave } from './autosave.ts';
 import { buildDemoImages } from './demoArt.ts';
 import { ExportDialog } from './exportDialog.ts';
+import { MixDialog } from './mixDialog.ts';
 import { CutoutDialog } from './cutoutDialog.ts';
 import { MeshDialog } from './meshDialog.ts';
 import { deleteConstraint, deletePath } from '../model/rigOps.ts';
@@ -33,6 +34,7 @@ export class App {
   viewport!: Viewport;
   autosave: Autosave | null = null;
   exportDialog!: ExportDialog;
+  mixDialog!: MixDialog;
   cutout!: CutoutDialog;
   meshDialog!: MeshDialog;
   private statusEl!: HTMLElement;
@@ -47,6 +49,7 @@ export class App {
     this.viewport = new Viewport(canvas, this.ed, this.images);
     this.viewport.onStatus = (m) => this.status(m);
     this.exportDialog = new ExportDialog(this);
+    this.mixDialog = new MixDialog(this);
     this.cutout = new CutoutDialog(this);
     this.meshDialog = new MeshDialog(this);
     document.body.append(this.fileInput, this.imageInput);
@@ -295,11 +298,21 @@ export class App {
   removeImage(imageId: string): void {
     const im = this.ed.project.images.find((i) => i.id === imageId);
     if (!im) return;
-    const users = this.ed.project.attachments.filter((a) => a.imageId === imageId).length;
-    if (users && !window.confirm(`“${im.name}” is used by ${users} attachment(s). Remove it and them?`)) return;
+    const p0 = this.ed.project;
+    const users = p0.attachments.filter((a) => a.imageId === imageId).length;
+    const skins = (p0.skins ?? []).filter((s) => s.entries.some((e) => e.imageId === imageId || e.from === imageId)).map((s) => s.name);
+    const keyed = p0.animations.filter((an) => Object.values(an.slots ?? {}).some((st) => st.image?.some((k) => k.imageId === imageId))).map((an) => an.name);
+    const uses = [
+      users ? `${users} attachment(s) (removed with it)` : '',
+      skins.length ? `skin(s) ${skins.join(', ')} (those entries are removed)` : '',
+      keyed.length ? `image keys in ${keyed.join(', ')} (those keys are removed)` : '',
+    ].filter(Boolean);
+    if (uses.length && !window.confirm(`“${im.name}” is used by ${uses.join('; ')}. Remove it?`)) return;
     this.ed.mutate(`Remove ${im.name}`, (p) => {
       p.images = p.images.filter((i) => i.id !== imageId);
       p.attachments = p.attachments.filter((a) => a.imageId !== imageId);
+      for (const s of p.skins ?? []) s.entries = s.entries.filter((e) => e.imageId !== imageId && e.from !== imageId);
+      for (const an of p.animations) for (const st of Object.values(an.slots ?? {})) if (st.image) st.image = st.image.filter((k) => k.imageId !== imageId);
     });
   }
 

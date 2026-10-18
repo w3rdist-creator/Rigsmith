@@ -3,6 +3,7 @@ import { Autosave } from './ui/autosave.ts';
 import { h } from './ui/dom.ts';
 import { renderImages, renderInspector, renderSkeleton } from './ui/panels.ts';
 import { renderConstraintList } from './ui/rigPanels.ts';
+import { renderSkinsPanel } from './ui/skinPanels.ts';
 import { Timeline } from './ui/timeline.ts';
 import { HELP_ROWS, renderToolbar, toolHint } from './ui/toolbar.ts';
 import './styles.css';
@@ -23,6 +24,7 @@ const toolbar = $('toolbar');
 const skeleton = $('skeleton-panel');
 const images = $('images-panel');
 const constraints = $('constraints-panel');
+const skinsPanel = $('skins-panel');
 const inspector = $('inspector-panel');
 const modeBadge = $('mode-badge');
 const toolHintEl = $('tool-hint');
@@ -35,6 +37,7 @@ function refresh(full: boolean): void {
     renderSkeleton(app, skeleton);
     constraints.replaceChildren();
     renderConstraintList(app, constraints);
+    renderSkinsPanel(app, skinsPanel);
     renderImages(app, images);
   }
   if (!ed.playing) renderInspector(app, inspector);

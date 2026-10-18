@@ -71,9 +71,10 @@ export function evaluate(project: Project, anim: Animation | null, time: number,
   const attachments: AttachmentFrame[] = drawOrderAt(project, anim, time).map((att) => {
     const st = anim?.slots?.[att.id];
     let imageId = steppedAt(st?.image, time)?.imageId ?? att.imageId;
-    const skinned = skin?.entries.find((e) => e.attachmentId === att.id);
-    // A skin replaces the attachment's setup image; image keys still pick explicitly.
-    if (skinned && !steppedAt(st?.image, time)) imageId = skinned.imageId;
+    // Skin: an entry replaces the shown image — entries without `from` stand for the
+    // setup image (also when an image key shows it), entries with `from` for a keyed image.
+    const skinned = skin?.entries.find((e) => e.attachmentId === att.id && (e.from ?? att.imageId) === imageId);
+    if (skinned) imageId = skinned.imageId;
     // Stepped slot channels (visibility, image, draw order) show the setup value before
     // their first key; interpolated opacity holds its first key like bone channels.
     const visKey = steppedAt(st?.visible, time);

@@ -7,6 +7,7 @@ import type { App } from './app.ts';
 import { append, clear, h, numberField } from './dom.ts';
 import { setAttachmentImage } from '../model/meshOps.ts';
 import { meshSection } from './meshPanels.ts';
+import { skinSection } from './skinPanels.ts';
 import { attachmentSlotSection, boneRigSection, renderConstraintInspector, renderPathInspector } from './rigPanels.ts';
 
 export function renderSkeleton(app: App, root: HTMLElement): void {
@@ -235,6 +236,7 @@ export function renderInspector(app: App, root: HTMLElement): void {
     ),
     ...(animating ? [] : attachmentSlotSection(app, a)),
     ...(animating ? [] : meshSection(app, a)),
+    ...skinSection(app, a),
   );
 }
 

@@ -68,6 +68,11 @@ export class ExportDialog {
     const skins = p.skins ?? [];
     const skinSel = h('select', { 'data-testid': 'seq-skin', 'aria-label': 'Skin' }, h('option', { value: '' }, '(no skin)'), ...skins.map((s) => h('option', { value: s.id }, s.name)));
     skinSel.value = this.app.ed.skinId ?? '';
+    // Exports use the editor's active skin; choosing here switches it (view state).
+    skinSel.addEventListener('change', () => {
+      this.app.ed.setSkin(skinSel.value || null);
+      this.render();
+    });
 
     const prepared = prepareSequence(p, this.animId, req, this.app.ed.skinId);
     const errors = prepared.ok ? [] : prepared.errors;
@@ -106,7 +111,6 @@ export class ExportDialog {
       h('div', { class: 'seq-previews' }, h('figure', {}, first, h('figcaption', {}, 'first')), h('figure', {}, lastC, h('figcaption', {}, 'last'))),
       h('div', { class: 'export-actions' }, progress, progressText, h('span', { class: 'tb-spacer' }), cancelBtn, exportBtn),
     );
-    skinSel.disabled = true;
     if (prepared.ok) {
       this.preview(first, prepared.setup, 0);
       this.preview(lastC, prepared.setup, prepared.setup.frames.length - 1);

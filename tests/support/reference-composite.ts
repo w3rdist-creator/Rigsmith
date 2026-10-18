@@ -81,6 +81,21 @@ export function boneWorlds(project: any, anim: any | null, t: number): Map<strin
   return out;
 }
 
+/** World matrices from explicit local poses (e.g. an independently blended pose). */
+export function worldsFromLocal(project: any, local: Map<string, { x: number; y: number; rotation: number; scaleX: number; scaleY: number }>): Map<string, M> {
+  const out = new Map<string, M>();
+  const pending = [...project.bones];
+  while (pending.length) {
+    const i = pending.findIndex((b: any) => b.parentId === null || out.has(b.parentId));
+    if (i < 0) throw new Error('cycle');
+    const b = pending.splice(i, 1)[0];
+    const l = local.get(b.id) ?? b;
+    const m = trs(l.x, l.y, l.rotation, l.scaleX, l.scaleY);
+    out.set(b.id, b.parentId ? mul(out.get(b.parentId)!, m) : m);
+  }
+  return out;
+}
+
 export interface RefImage {
   width: number;
   height: number;
@@ -97,7 +112,7 @@ export function decodeProjectImages(project: any): Map<string, Decoded> {
  * Composites the project at time t into a w×h transparent RGBA buffer where world point
  * (x,y) maps to pixel ((x - originX)·scale, (y - originY)·scale).
  */
-export function composite(project: any, anim: any | null, t: number, images: Map<string, Decoded>, w: number, h: number, originX: number, originY: number, scale: number, worldOverride?: Map<string, M>): RefImage {
+export function composite(project: any, anim: any | null, t: number, images: Map<string, Decoded>, w: number, h: number, originX: number, originY: number, scale: number, worldOverride?: Map<string, M>, skinId?: string | null): RefImage {
   // Constraints (IK/paths) are not re-solved here: callers that need them pass bone
   // world matrices measured elsewhere and check the constraint geometry separately.
   const worlds = worldOverride ?? boneWorlds(project, anim, t);
@@ -115,7 +130,12 @@ export function composite(project: any, anim: any | null, t: number, images: Map
     const visible = vk ? vk.value[0] >= 0.5 : !a.hidden;
     const opacity = st?.opacity?.length ? sampleTrack(st.opacity, t, [a.opacity])[0] : a.opacity;
     if (!visible || opacity <= 0) continue;
-    const imageId = stepped(st?.image, t)?.imageId ?? a.imageId;
+    let imageId = stepped(st?.image, t)?.imageId ?? a.imageId;
+    // Skin rule (independent restatement): an entry without `from` stands in for the
+    // setup image, an entry with `from` for that keyed image.
+    const skin = skinId ? project.skins?.find((s: any) => s.id === skinId) : null;
+    const rep = skin?.entries.find((e: any) => e.attachmentId === a.id && (e.from ?? a.imageId) === imageId);
+    if (rep) imageId = rep.imageId;
     const meta = project.images.find((i: any) => i.id === imageId);
     const img = images.get(imageId)!;
     const base = a.boneId ? worlds.get(a.boneId)! : ([1, 0, 0, 1, 0, 0] as M);

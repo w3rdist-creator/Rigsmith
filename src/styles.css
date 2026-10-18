@@ -251,3 +251,10 @@ dialog.cutout { width: 580px; }
 .seq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .dialog-actions { display: flex; gap: 8px; margin-top: 10px; }
 .seq-errors { color: #ff8fa8; margin: 6px 0; }
+
+/* Skins and mix preview */
+.skin-diags { margin: 4px 0; padding-left: 16px; font-size: 12px; color: var(--dim); }
+.skin-diags li.warning { color: #ffcf7a; }
+.mix-stage { display: flex; justify-content: center; padding: 6px; background: repeating-conic-gradient(#2a2d36 0 25%, #22252d 0 50%) 0 0 / 16px 16px; border: 1px solid var(--line); }
+.mix-canvas { max-width: 100%; max-height: 260px; }
+.mix-rules { margin: 4px 0; padding-left: 16px; font-size: 12px; }

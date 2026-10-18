@@ -115,6 +115,7 @@ export class Timeline {
       p.animations.length ? animSel : h('span', { class: 'dim' }, 'No animations'),
       h('button', { class: 'mini', 'data-testid': 'new-animation', title: 'New animation', onclick: () => app.newAnimation() }, '+'),
       anim ? h('button', { class: 'mini', title: 'Delete this animation', 'aria-label': 'Delete animation', onclick: () => app.deleteAnimation() }, '🗑') : null,
+      h('button', { class: 'mini', 'data-testid': 'mix-open', title: 'Preview a transition (mix) between animations', disabled: p.animations.length < 2, onclick: () => app.mixDialog.open() }, '⇄ Mix…'),
     );
 
     if (!anim) {

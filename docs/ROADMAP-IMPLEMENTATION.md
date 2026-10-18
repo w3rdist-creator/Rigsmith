@@ -142,8 +142,8 @@ Phase-3 decisions and limits (also in docs/architecture.md):
 ### Phase 4 — follow-ons and pipeline
 | Item | Status | Evidence |
 |---|---|---|
-| Skins / attachment sets, validation | absent | |
-| Animation mixing / transition preview (missing tracks, interrupts) | absent | |
+| Skins / attachment sets, validation | delivered | Skins panel (`skin-add`, `skin-active`, `skin-name`, `skin-duplicate`, `skin-delete`, `skin-summary`, `skin-diagnostics`); attachment inspector `skin-image` (setup image) and `skin-from-<image>` (keyed images); export `seq-skin` switches the editor skin; `src/model/skinOps.ts`; unit `skins-mix.test.ts` (rule incl. keyed images, ops, diagnostics, format rejections); p4-skins-mix: setup + keyed replacement render vs the reference (0 px over tolerance), `seq-skin` changes the pixels, aspect warning, shared-image note, duplicate name rejected, delete + undo, image removal confirm drops entries + undo, save/reopen deep-equal |
+| Animation mixing / transition preview (missing tracks, interrupts) | delivered | `⇄ Mix…` (`mix-open`) dialog: `mix-from/to`, `mix-start`, `mix-duration` (stored per pair in `project.mixes`, undoable), `mix-missing` (blend to setup / keep previous pose), `mix-interrupt` + `mix-interrupt-anim/at/duration`, `mix-time` scrub, `mix-play`, `mix-weights`, `mix-canvas`, `mix-rules` + `mix-rule-delete-*`, `mix-export` (PNG sequence ZIP); `src/model/mix.ts`; unit: endpoints exact, shortest rotation, both missing policies, interruption continuity, IK solved after blending, opacity blend, rules persist/repair; p4-skins-mix: every exported frame of idle→wave (both policies) and an interrupted idle→wave→idle matches a pose blended independently in the test (0 px over tolerance), max step 7.5°/frame, peak 50.6° as derived |
 | Texture atlas packing + round-trip consumer | absent | |
 | Runtime schema + reference player, editor/runtime agreement | absent | |
 | Headless CLI/API + brand-pipeline examples | absent | |

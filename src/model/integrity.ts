@@ -58,7 +58,29 @@ export function repairReferences(p: Project): string[] {
   }
   const constraintIds = new Set([...(p.ik ?? []).map((k) => k.id), ...(p.pathConstraints ?? []).map((k) => k.id)]);
   if (p.skins)
-    for (const s of p.skins) s.entries = s.entries.filter((e) => attIds.has(e.attachmentId) && imageIds.has(e.imageId));
+    for (const s of p.skins) {
+      const seen = new Set<string>();
+      s.entries = s.entries.filter((e) => {
+        const att = p.attachments.find((a) => a.id === e.attachmentId);
+        if (!att || !imageIds.has(e.imageId) || (e.from !== undefined && !imageIds.has(e.from))) return false;
+        // A `from` equal to the setup image is the plain entry; keep one entry per key.
+        if (e.from === att.imageId) delete e.from;
+        const key = `${e.attachmentId}|${e.from ?? ''}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+  if (p.mixes) {
+    const animIds = new Set(p.animations.map((a) => a.id));
+    const seen = new Set<string>();
+    p.mixes = p.mixes.filter((m) => {
+      const key = `${m.from}|${m.to}`;
+      if (!animIds.has(m.from) || !animIds.has(m.to) || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
 
   for (const an of p.animations) {
     for (const id of Object.keys(an.tracks)) if (!boneIds.has(id)) delete an.tracks[id];

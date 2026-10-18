@@ -207,11 +207,21 @@ export interface PathConstraint {
   rotateOffset: number;
 }
 
-/** v2: an attachment set. Entries replace an attachment's image while the skin is active. */
+/**
+ * v2: an attachment set. While the skin is active, an entry replaces the image an
+ * attachment shows: without `from` it replaces the attachment's setup image (wherever
+ * that image is shown, including via image keys); with `from` it replaces that keyed
+ * image on that attachment.
+ */
+export interface SkinEntry {
+  attachmentId: string;
+  imageId: string;
+  from?: string;
+}
 export interface Skin {
   id: string;
   name: string;
-  entries: { attachmentId: string; imageId: string }[];
+  entries: SkinEntry[];
 }
 
 /** v2: default crossfade duration between two animations. */
