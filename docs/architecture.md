@@ -124,7 +124,10 @@ image, skin, draw order) → mesh vertices.
   (non-uniform or mirrored) is undone. There the shoulder→tip length depends only on the
   elbow angle, so the elbow angle solves `|S1·(e + k·(cos r2, sin r2))| = |target − shoulder|`
   (S1 = bone 1's own scale, e = child offset, k = child scaleX × length): |v|² is
-  monotonic between its extremes, so each root is bracketed and bisected to rounding;
+  monotonic between its extremes (located by sampling the elbow angle every 0.5° and
+  bisecting the derivative), so each root is bracketed and bisected to rounding — for
+  every scale, uniform or not; two extremes closer than one 0.5° step (extreme
+  non-uniform scale only) can be missed;
   bone 1 then turns the result onto the target. Unreachable targets take the closest
   length in parent space (straighten toward the target, or fold), a target on the chain
   root leaves the keyed pose. `bendPositive` puts the elbow on the clockwise side of the

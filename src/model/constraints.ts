@@ -11,9 +11,11 @@
 //   tip − o = R(r1) · S1 · (e + k·(cos r2, sin r2)), with S1 bone 1's own scale, e the
 //   child's local offset and k = child scaleX · child length.
 //   R(r1) is a pure rotation, so |tip − o| depends only on r2: the elbow angle solves
-//   |S1 · (e + k·(cos r2, sin r2))| = |t − o| (a closed form when S1 is uniform, found
-//   numerically — exact to rounding — between the extremes of that length otherwise),
-//   then r1 turns the result onto t. A target outside the reachable annulus takes the
+//   |S1 · (e + k·(cos r2, sin r2))| = |t − o| numerically for every scale (uniform or
+//   not): the extremes of that length are bracketed by sampling r2 every 0.5° and
+//   bisected, each monotonic stretch between them holds at most one root, bisected to
+//   rounding; then r1 turns the result onto t. Limitation: two extremes closer than
+//   one 0.5° sample step (only possible for extreme non-uniform scale) can be missed. A target outside the reachable annulus takes the
 //   elbow angle whose length is closest (straightens the chain toward T, or folds it),
 //   measured in parent space. A world distance ≈ 0 (target on the shoulder) leaves the
 //   pose untouched. `bendPositive` puts the elbow on the clockwise side of the
