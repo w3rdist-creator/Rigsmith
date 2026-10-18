@@ -157,7 +157,10 @@ Phase-3 decisions and limits (also in docs/architecture.md):
 Fresh gate runs: `.hermes/evidence/roadmap/phase4{a..f}-gates/` per sub-phase. Final run at
 `dfe27bb`: `.hermes/evidence/roadmap/final-gates/summary.txt` (preservation 16/16, test-id
 audit 0 missing of 263, unit 157/157, typecheck, build, e2e 132/132, cli 13/13, wiz 16/16 —
-all exit 0).
+all exit 0). Superseded: the latest fresh run is `final-2c082f3` at `2c082f3`
+(`.hermes/evidence/post-review/fable-fix/gates/final-2c082f3/summary.txt`: unit 214/214,
+e2e 146/146, cli 13/13, wiz 16/16, test-id audit 288 ids / 0 never interacted with, all
+exit 0); see `docs/ROADMAP-DELIVERY.md` §2.
 
 | Item | Status | Evidence |
 |---|---|---|

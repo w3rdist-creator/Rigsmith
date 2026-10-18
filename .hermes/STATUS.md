@@ -1,6 +1,6 @@
 TERMINAL_STATE: READY_FOR_HERMES_VERIFICATION
 Worker: claude-opus-5-5 (post-review fix pass on the Fable 5.1 findings FR-001 … FR-007; no other agents/models)
-Hermes verification has NOT been performed; this is a worker handoff, not a certification.
+Hermes relays this handoff and adds no product-acceptance stage; this is a worker handoff, not a certification.
 
 Record: docs/POST-REVIEW-DELIVERY.md · report: docs/ROADMAP-DELIVERY.md (§1 commits, §2 latest gates)
 Commits: cf88452 (FR-001), 3252fcd (FR-007), d303832 (FR-002), cf3e968 (FR-004, FR-006),

@@ -155,8 +155,11 @@ hides an exit code (see below).
   - a stale allow-list entry.
   The static reference check stays as a pre-check. The 64 display-only ids in
   `scripts/roadmap/testid-allow.json` each carry a reason.
-- **Gate:** `run-gates.sh` clears the recording, runs the audit after the e2e and Wiz gates,
-  and fails if any gate fails.
+- **Gate:** `run-gates.sh` clears the recording and runs
+  `node scripts/roadmap/testid-audit.ts --recorded <run>/testid-interactions` after the e2e
+  and Wiz gates. It fails if any gate fails. Without `--recorded`, the script runs only the
+  static pre-check and says so (`post/testid-audit-bare.txt`: "static check only … interactions
+  are not verified", exit 0). The gate always passes `--recorded`.
 - **Mutation RED, re-run at HEAD** (`fr004/mutation-3-head/`; same diff as
   `fr004/mutation-2/`):
   - every real `getByTestId('weights-auto').click()` was replaced by `dispatchEvent('click')`
@@ -175,7 +178,9 @@ hides an exit code (see below).
 `docs/ROADMAP-DELIVERY.md` §1 now lists the drwdmrs3 and post-review fix-pass commits.
 §2 names the newest fresh run (HEAD `2c082f3`, run `20261018T142214Z-79749`) with its raw
 path, `.hermes/evidence/post-review/fable-fix/gates/final-2c082f3/summary.txt`.
-`.hermes/STATUS.md` names the same run. Every count was copied from that summary.
+`.hermes/STATUS.md` names the same run. The private roadmap status
+(`.hermes/dispatch/roadmap/STATUS.md`) and `docs/ROADMAP-IMPLEMENTATION.md` phase 4 now
+carry a pointer to it. Every count was copied from that summary.
 
 ### FR-006 — evidence hygiene
 
@@ -187,8 +192,10 @@ path, `.hermes/evidence/post-review/fable-fix/gates/final-2c082f3/summary.txt`.
   any `browser-profiles` tree under `.hermes/evidence/`. It was tested on a planted tree
   (`fr006/check-profiles-negative.txt`, exit 1) and passes clean.
 - **Evidence redirect:** `run-gates.sh` exports `RIGSMITH_EVIDENCE`.
-- **First-pass outputs:** the 48 outputs the first pass rewrote remain as recorded there;
-  this pass used `RIGSMITH_EVIDENCE` for every run.
+- **First-pass outputs:** the 48 outputs the first pass rewrote remain as recorded there.
+  This pass rewrote the same 48 once, in a full `npm test` run without
+  `RIGSMITH_EVIDENCE` (see the output-location deviation under Final gates). Every gate
+  run and every other test run used `RIGSMITH_EVIDENCE`.
 - **Tests:** `tests/unit/gates-script.test.ts`.
 
 ### FR-007 — object URLs
@@ -199,6 +206,64 @@ path, `.hermes/evidence/post-review/fable-fix/gates/final-2c082f3/summary.txt`.
   - Before (`red/fr007-object-urls.json`): live URLs 7, 14, … 140, then 141.
   - After (`green/fr007-object-urls.json`): 0 live after every load.
   - The canvas checksum is unchanged across loads, and there are no page errors.
+
+## drwdmrs3 findings after this pass
+
+The first pass's record (`docs/DRWDMRS3-FIX-DELIVERY.md`) left four items open.
+
+| ID | First pass | Now |
+|---|---|---|
+| DRW-004 (Lottie in a third-party player) | unresolved | fixed by FR-001 (lottie-web 5.13.0 canvas) |
+| DRW-006 (a player check that shares no model code) | unresolved, partial | fixed by FR-003 |
+| DRW-007 (the test-id audit only checks references) | unresolved | fixed by FR-004 |
+| DRW-009 (subjective / external playback / codec / jointed Wiz v2 / parity) | operator-owned | unchanged, operator-owned |
+
+Every other drwdmrs3 item keeps its first-pass disposition. Fable confirmed those:
+P1-1, P2-1, P2-2, P3-1, P3-2, P3-3, DRW-001, DRW-003, DRW-005 and DRW-008 fixed;
+DRW-002 not applicable. FR-002 and FR-007 changed P1-1's Auto weights and the player
+loader again. Their earlier regressions (`tests/e2e/review-fixes.e2e.test.ts`,
+`tests/unit/mesh.test.ts`) still pass.
+
+## Delivered, partial, absent
+
+"Delivered" means a visible control (or a documented CLI command) exists and a browser
+test exercises it. The per-row matrix is `docs/ROADMAP-DELIVERY.md` §3, with ids and
+measurements in `docs/ROADMAP-IMPLEMENTATION.md`. Changes in this pass:
+
+- **Lottie exporter:** still graded `delivered (subset)`. The subset is now also checked
+  in lottie-web 5.13.0's canvas renderer, which is what the contract's "only where
+  fidelity is provable" asked for. It is not checked in other players.
+- **Auto weights (`weights-auto`):** delivered, and now continuous.
+- **Reference player:** delivered. Its independent check no longer uses baked poses.
+- **Control coverage:** every non-display UI id is interacted with by a browser test in
+  the gate run (0 of 288 unexercised).
+
+Not delivered, unchanged from the roadmap report:
+- the optional jointed Wiz v2 (not produced);
+- HEVC-alpha, ProRes 4444, animated WebP and audio (absent);
+- WebM/MP4 from the CLI only, through a local ffmpeg.
+
+## How to run
+
+```sh
+npm ci                                        # once; installs the lottie-web devDependency too
+npm run build                                 # dist/ (editor, player.html, render.html)
+sh scripts/roadmap/run-gates.sh mylabel       # all gates fresh → .hermes/evidence/roadmap/mylabel/
+npm test; npm run typecheck; npm run test:e2e; npm run test:cli; npm run test:wiz
+node scripts/roadmap/testid-audit.ts             # static pre-check only; the recorded audit runs inside run-gates.sh
+node scripts/post-review/fr002-autoweights-probe.ts out.json                 # FR-002 continuity probe
+npm run preview                               # http://127.0.0.1:47613/ (local only); player at /player.html
+```
+
+Requirements:
+- headless Chrome for Testing at the path in `tests/e2e/harness.ts` (or `RIGSMITH_CFT`);
+- `python3` with Pillow, for the media checks.
+
+In the editor:
+- Lottie export: **Export Lottie…**;
+- Auto weights: the mesh panel's **Auto weights** in Setup;
+- the player: `player.html` → the file input (`player-files`), which takes the runtime
+  JSON, an atlas JSON and the page images.
 
 ## Gate wrapper
 
@@ -228,7 +293,18 @@ the ordering/exports. No npm script pipes or masks an exit code.
 | profiles | exit 0 — no profile tree under `.hermes/evidence/` |
 
 `wiz:build` and `wiz:capture` were never run. No existing Wiz/STAKE output was
-overwritten; preservation was 16/16 at the end of the run.
+overwritten. The preservation gate ran first in this run (16/16). After the last browser
+runs of the pass (the FR-004 mutation re-run, e2e + Wiz), it was rerun separately, again
+16/16 (`post/preservation-after-mutation3.txt`).
+
+**Output-location deviation.** A scan for files written since the pass started, outside
+its evidence folder (`post/outside-writes.txt`, `post/outside-writes-NOTE.txt`), found 48
+regenerated, git-ignored unit-test outputs under `.hermes/evidence/roadmap/unit-media/`
+and `unit-cutout-select/`. They were written by one full `npm test` run
+(`green/fr002-npm-test.txt`) made without `RIGSMITH_EVIDENCE`. This is the same set the
+first pass reported. They are test outputs, not originals, and were left in place. The
+only other write is the intentional FR-006 edit of `first-fix/probes/rh.ts`. Nothing under
+`.hermes/assets/` changed.
 
 ## Sanitization for private publication (`ef91c07`)
 
@@ -245,7 +321,7 @@ overwritten; preservation was 16/16 at the end of the run.
   - no prompts, logs, credentials or secrets;
   - no image binaries; the only embedded images are 1×1 test PNGs.
 - **History does contain:**
-  - the commit identity `w3rdist-creator <w3rdist@gmail.com>`;
+  - the commit author identity (name and e-mail address) in every commit's metadata;
   - local absolute paths under `/Users/w3rd/` — the Chrome for Testing path in
     `tests/e2e/harness.ts:14` and `scripts/lib/rigsmith-api.ts:184`, plus paths in
     `docs/rea-evidence.md` and `docs/WIZ-ANIMATION-DELIVERY.md`;
@@ -253,6 +329,9 @@ overwritten; preservation was 16/16 at the end of the run.
     (`docs/WIZ-ANIMATION-DELIVERY.md:1,33`), without its art.
 
   These are reported here rather than rewritten, because history must not be altered.
+  Commit `83a5acf` (this pass's first version of this file) quoted the author e-mail in
+  this list. A later commit removes it, but `83a5acf` keeps it in history. It is the same
+  value as every commit's author field.
   Whether they are acceptable in a private repository is the controller's/operator's call.
 
 ## Limitations and residual uncertainty
