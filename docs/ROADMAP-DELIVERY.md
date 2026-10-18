@@ -28,34 +28,41 @@ measurements, not quality verdicts.
 | 4f | `468a13b` | Animated media: APNG + GIF (editor and CLI), WebM/MP4 via ffmpeg (CLI) |
 | docs | `e4c4180` | First version of this report, README/architecture/matrix sync, STATUS |
 | 2 (completion) | `dfe27bb` | Colour selection (flood fill / threshold), selection cuts, speck removal; media format-note wording; CLI media cancel after the last frame is piped |
-| docs | the commit that updates this file | Final numbers, STATUS |
+| docs | `1fb854e` | Final numbers at `dfe27bb`, STATUS |
+| drwdmrs3 fix pass | `e383f3f` … `2e4b795` | Gate wrapper exits non-zero on failure, `RIGSMITH_EVIDENCE`; P1-1, P2-1, P2-2, P3-1, P3-2, P3-3, DRW-001, DRW-003, DRW-005, DRW-006 (partial). Record: `docs/DRWDMRS3-FIX-DELIVERY.md` |
+| post-review (Fable) fix pass | `cf88452` … `2c082f3`, then docs | FR-001 lottie-web playback test, FR-007 object URLs, FR-002 continuous Auto weights, FR-004/FR-006 recorded-interaction audit and profile check, sanitization, FR-003 independent IK/path/mix reference. Record: `docs/POST-REVIEW-DELIVERY.md` |
 
-## 2. Final gate run, fresh, at HEAD `dfe27bb`
+## 2. Latest gate run, fresh, at HEAD `2c082f3`
 
-- **Run:** `sh scripts/roadmap/run-gates.sh final-gates`, finished 2026-10-18T05:59Z.
-- **Raw logs:** `.hermes/evidence/roadmap/final-gates/<gate>.log`, with a summary in
-  `summary.txt`.
-- **Tree:** clean at run time; this docs update came after the run.
-- **Earlier final run:** an earlier `final-gates` run on `468a13b` was superseded and its
-  folder replaced.
+- **Run:** `sh scripts/roadmap/run-gates.sh $PWD/.hermes/evidence/post-review/fable-fix/gates/final-2c082f3`,
+  run id `20261018T142214Z-79749`, summary written 2026-10-18T14:25Z.
+- **Raw logs:** `.hermes/evidence/post-review/fable-fix/gates/final-2c082f3/<gate>.log`,
+  summary in `summary.txt` (the counts below are copied from it); the HEAD echoed before
+  the run is in `head-echo-before-run.txt`.
+- **Tree:** clean at run time. All code is final at `2c082f3`; the commits after it touch
+  docs only.
+- **Superseded runs:** `final-gates` at `dfe27bb` (`.hermes/evidence/roadmap/final-gates/`)
+  and `final-a0183ec` at `a0183ec` (`.hermes/evidence/post-review/first-fix/gates/`).
 
 | Gate | Command | Exit | Result |
 |---|---|---|---|
-| Preservation | `python3 -I scripts/roadmap/check_preservation.py` | 0 | 16/16 protected originals match `preservation-baseline.json` (SHA-256) |
-| Control coverage | `node scripts/roadmap/testid-audit.ts` | 0 | 263 UI test ids, 0 allow-listed, 0 never referenced by a test |
-| Unit | `npm test` | 0 | 157/157 pass |
+| Preservation | `python3 -I scripts/roadmap/check_preservation.py` | 0 | 16/16 protected originals unchanged (`preservation-baseline.json`, SHA-256) |
+| Unit | `npm test` | 0 | 214/214 pass |
 | Typecheck | `npm run typecheck` (app + tests/scripts/examples) | 0 | — |
 | Build | `npm run build` | 0 | `tsc --noEmit` + Vite (index, player, render pages) |
-| Browser e2e | `npm run test:e2e` (headless Chrome for Testing 155.0.8059.39, project-local profiles) | 0 | 132/132 pass |
+| Browser e2e | `npm run test:e2e` (headless Chrome for Testing 155.0.8059.39, project-local profiles) | 0 | 146/146 pass |
 | CLI | `npm run test:cli` | 0 | 13/13 pass |
 | Wiz acceptance | `npm run test:wiz` | 0 | 16/16 pass |
+| Control coverage | `node scripts/roadmap/testid-audit.ts --recorded` (after e2e and wiz) | 0 | 288 UI test ids; 64 allow-listed (display-only, reason each); 0 never referenced; 278 interacted with in this run's recordings (18); 0 never interacted with |
+| Profiles | `node scripts/roadmap/check-profiles.ts` | 0 | no browser-profile tree under `.hermes/evidence/` |
 
 Failure buckets: none in this run. The historical baseline counts (43 unit, 20 browser,
 11 Wiz) are from before the roadmap work (`.hermes/evidence/roadmap/baseline/`). They are
 **not** results of this run. No original regression assertion was removed or weakened.
 `wiz:build` and `wiz:capture` were never run.
 
-Per-phase gate runs, each fresh, all exit 0 (`.hermes/evidence/roadmap/<label>/summary.txt`):
+Gate runs, each fresh, all exit 0 (`<evidence folder>/summary.txt`; per-phase runs are
+under `.hermes/evidence/roadmap/<label>/`):
 
 | Run | Unit | e2e | CLI | Wiz |
 |---|---|---|---|---|
@@ -70,6 +77,8 @@ Per-phase gate runs, each fresh, all exit 0 (`.hermes/evidence/roadmap/<label>/s
 | `phase4e-gates` | 145 | 122 | 9 | 16 |
 | `phase4f-gates` | 152 | 129 | 12 | 16 |
 | `final-gates` (at `dfe27bb`) | 157 | 132 | 13 | 16 |
+| `final-a0183ec` (drwdmrs3 fix pass) | 192 | 144 | 13 | 16 |
+| `final-2c082f3` (post-review fix pass) | 214 | 146 | 13 | 16 |
 
 ## 3. Matrix against the contract
 

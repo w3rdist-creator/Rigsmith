@@ -1,4 +1,19 @@
 TERMINAL_STATE: READY_FOR_HERMES_VERIFICATION
+Worker: claude-opus-5-5 (post-review fix pass on the Fable 5.1 findings FR-001 … FR-007; no other agents/models)
+Hermes verification has NOT been performed; this is a worker handoff, not a certification.
+
+Record: docs/POST-REVIEW-DELIVERY.md · report: docs/ROADMAP-DELIVERY.md (§1 commits, §2 latest gates)
+Commits: cf88452 (FR-001), 3252fcd (FR-007), d303832 (FR-002), cf3e968 (FR-004, FR-006),
+ef91c07 (sanitization), 024c427 (FR-003), 2c082f3 (docs), then the docs commit with this file.
+Latest fresh gates (.hermes/evidence/post-review/fable-fix/gates/final-2c082f3/summary.txt,
+run 20261018T142214Z-79749, HEAD 2c082f3, clean tree):
+preservation 16/16, unit 214/214, typecheck 0, build 0, e2e 146/146, cli 13/13, wiz 16/16,
+testid-audit 0 (288 ids, 64 allow-listed, 0 never interacted with), profiles 0 — all exit 0.
+Open (operator-owned, unchanged): DRW-009 subjective/playback/codec/jointed-Wiz judgements.
+Preview: not running (no owned vite/Chrome/ffmpeg processes left).
+
+---- History: roadmap handoff (superseded by the post-review fix pass above) ----
+ROADMAP_STATE (historical): READY_FOR_HERMES_VERIFICATION
 Worker: claude-opus-5-5 (roadmap builder; no other agents/models)
 Scope: approved Fable roadmap, phases 1–4 (contract .hermes/dispatch/roadmap/BUILD-CONTRACT.md)
 Hermes verification has NOT been performed; this is a worker handoff, not a certification.
@@ -7,7 +22,7 @@ Final report: docs/ROADMAP-DELIVERY.md · matrix: docs/ROADMAP-IMPLEMENTATION.md
 Roadmap status: .hermes/dispatch/roadmap/STATUS.md
 Commits: 8aef453 (1), efcda86 + 0c07e0a + dfe27bb (2), fdb56e8 (3), ff1916b (4a), 69cc9b4 (4b),
 a71e917 (4c), ec57b7e (4d), 10aa08a (4e Lottie), 468a13b (4f media), e4c4180 + final docs commit.
-Final fresh gates (.hermes/evidence/roadmap/final-gates/, 2026-10-18T05:59Z, HEAD dfe27bb, clean tree):
+Final fresh gates at the time (.hermes/evidence/roadmap/final-gates/, 2026-10-18T05:59Z, HEAD dfe27bb, clean tree):
 preservation 16/16, test-id audit 0 missing of 263, unit 157/157, typecheck 0, build 0,
 e2e 132/132, cli 13/13, wiz 16/16 — all exit 0.
 Stated limits (report §3–4): optional jointed Wiz v2 not produced; Lottie verified by the
