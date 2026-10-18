@@ -6,7 +6,7 @@ import { CURVE_PRESETS } from '../model/curve.ts';
 import type { KeyRef } from '../model/keys.ts';
 import { allLanes, boneLane, closeLoopSeam, copyKeys, deleteKeys, findKey, laneKeys, pasteKeys, sameRef, shiftKeys } from '../model/keys.ts';
 import { buildDemoProject } from '../model/demo.ts';
-import { exportRuntime } from '../model/exportRuntime.ts';
+import { exportRuntime, runtimeProblems } from '../model/exportRuntime.ts';
 import { parseProject, serializeProject } from '../model/format.ts';
 import { apply, invert } from '../model/math.ts';
 import { keyChannels, makeBone, uniqueName } from '../model/ops.ts';
@@ -219,9 +219,11 @@ export class App {
 
   exportRuntimeJson(): void {
     if (!this.ed.project.bones.length) return this.error('Nothing to export', ['Create at least one bone first.']);
+    const problems = runtimeProblems(this.ed.project);
+    if (problems.length) return this.error('Runtime export needs unique names', problems);
     const data = exportRuntime(this.ed.project);
     download(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }), `${this.fileBaseName()}.runtime.json`);
-    this.status('Exported runtime JSON (keys + baked per-frame world transforms).');
+    this.status('Exported runtime JSON v2 (keys, constraints, meshes, skins, mixes + baked per-frame world transforms).');
   }
 
   /** Renders the current pose without editor chrome to a transparent PNG cropped to the art. */

@@ -261,3 +261,8 @@ dialog.cutout { width: 580px; }
 .atlas-pages { display: flex; flex-wrap: wrap; gap: 8px; max-height: 320px; overflow: auto; }
 .atlas-pages figure { margin: 0; }
 .atlas-page { max-width: 300px; background: repeating-conic-gradient(#2a2d36 0 25%, #22252d 0 50%) 0 0 / 16px 16px; image-rendering: pixelated; border: 1px solid var(--line); }
+/* Runtime player page */
+body.player-page { display: block; height: auto; min-height: 100vh; overflow: auto; }
+.player { max-width: 900px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.player h1 { font-size: 16px; margin: 0; }
+.player-canvas { max-width: 100%; }

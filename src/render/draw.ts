@@ -6,7 +6,32 @@ import type { Mat } from '../model/math.ts';
 import { determinant, multiply } from '../model/math.ts';
 import type { ImageAsset } from '../model/types.ts';
 
-export type ImageLookup = (asset: ImageAsset) => CanvasImageSource | null;
+/**
+ * A rectangle of a texture page standing in for an image (texture atlas): source pixel
+ * (offsetX + i, offsetY + j) of the image is page pixel (x + i, y + j); the image is
+ * transparent outside the rectangle.
+ */
+export interface ImageRegion {
+  source: CanvasImageSource;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+export type ImageLookup = (asset: ImageAsset) => CanvasImageSource | ImageRegion | null;
+
+function isRegion(v: CanvasImageSource | ImageRegion): v is ImageRegion {
+  return typeof (v as ImageRegion).offsetX === 'number' && 'source' in v;
+}
+
+/** Draws an image (or its atlas region) into the rectangle [ox, ox+w] × [oy, oy+h] of the current transform. */
+function drawImageOrRegion(g: CanvasRenderingContext2D, el: CanvasImageSource | ImageRegion, ox: number, oy: number, w: number, h: number): void {
+  if (isRegion(el)) g.drawImage(el.source, el.x, el.y, el.width, el.height, ox + el.offsetX, oy + el.offsetY, el.width, el.height);
+  else g.drawImage(el, ox, oy, w, h);
+}
 
 export interface DrawOptions {
   /** Draw a translucent red box where an image is missing (editor only). */
@@ -29,7 +54,7 @@ export function drawAttachment(g: CanvasRenderingContext2D, f: AttachmentFrame, 
   } else {
     const m = multiply(vm, f.world);
     g.setTransform(m.a, m.b, m.c, m.d, m.tx, m.ty);
-    if (el) g.drawImage(el, -im.width / 2, -im.height / 2, im.width, im.height);
+    if (el) drawImageOrRegion(g, el, -im.width / 2, -im.height / 2, im.width, im.height);
     else if (opts.missingPlaceholder) {
       g.fillStyle = 'rgba(255,80,80,0.4)';
       g.fillRect(-im.width / 2, -im.height / 2, im.width, im.height);
@@ -48,10 +73,13 @@ function layerOf(w: number, h: number): Layer {
     const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
     layerCache = { canvas, g: canvas.getContext('2d') as CanvasRenderingContext2D };
   }
+  // Exactly the mesh's size every time: Chrome's anti-aliased clipping measurably
+  // depends on the layer's size, so a grow-only cache made a frame's pixels depend on
+  // which frames were drawn before it (found by the runtime-player agreement test).
   const c = layerCache.canvas;
-  if (c.width < w || c.height < h) {
-    c.width = Math.max(c.width, w);
-    c.height = Math.max(c.height, h);
+  if (c.width !== w || c.height !== h) {
+    c.width = w;
+    c.height = h;
   }
   return layerCache;
 }
@@ -85,7 +113,7 @@ export function meshUnfolded(uvs: readonly number[], triangles: readonly number[
  */
 export function drawMeshLayer(
   g: CanvasRenderingContext2D,
-  img: CanvasImageSource,
+  img: CanvasImageSource | ImageRegion,
   im: { width: number; height: number },
   uvs: readonly number[],
   triangles: readonly number[],
@@ -138,7 +166,7 @@ export function drawMeshLayer(
  */
 export function drawMesh(
   g: CanvasRenderingContext2D,
-  img: CanvasImageSource,
+  img: CanvasImageSource | ImageRegion,
   im: { width: number; height: number },
   uvs: readonly number[],
   triangles: readonly number[],
@@ -174,7 +202,7 @@ export function drawMesh(
     g.closePath();
     g.clip();
     g.setTransform(tex.a, tex.b, tex.c, tex.d, tex.tx, tex.ty);
-    g.drawImage(img, 0, 0, im.width, im.height);
+    drawImageOrRegion(g, img, 0, 0, im.width, im.height);
     g.restore();
   }
 }

@@ -289,7 +289,14 @@ describe('mesh integrity and format', () => {
     keyDeform(p.animations[0], attId, 0.2, new Array(att.mesh!.points.length).fill(3));
     const rt = exportRuntime(p);
     const ra = rt.attachments.find((a) => a.name === att.name)!;
-    assert.deepEqual(ra.mesh, { uvs: att.mesh!.points, triangles: att.mesh!.triangles, hull: att.mesh!.hull });
+    const boneName = new Map(p.bones.map((b) => [b.id, b.name]));
+    assert.deepEqual(ra.mesh, {
+      uvs: att.mesh!.points,
+      triangles: att.mesh!.triangles,
+      hull: att.mesh!.hull,
+      // v2: weights by bone name.
+      weights: att.mesh!.weights!.map((l) => l.map((x) => ({ bone: boneName.get(x.bone)!, w: x.w }))),
+    });
     const an = rt.animations[0];
     for (const f of [0, 7, 15]) {
       const want = evaluate(p, p.animations[0], f / p.animations[0].fps).attachments.find((x) => x.att.id === attId)!.vertices!;

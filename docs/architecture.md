@@ -185,7 +185,7 @@ image, skin, draw order) → mesh vertices.
   The Mix dialog (`src/ui/mixDialog.ts`) previews, plays and exports a transition as a
   PNG sequence named `<from>-to-<to>`.
 
-## Runtime export (`rigsmith.runtime`, version 1)
+## Runtime export (`rigsmith.runtime`, version 2 — full schema in docs/runtime.md)
 
 Bones/attachments by **name** (images referenced by file name, bytes not embedded), each
 animation's keys, plus `baked[boneName][frame] = [worldX, worldY, worldRotDeg,
@@ -195,7 +195,11 @@ without implementing interpolation. Animations with slot or draw-order keys also
 Mesh attachments carry `mesh: {uvs, triangles, hull}` (uvs in setup-image pixels), and
 animations of projects with meshes carry `bakedMeshes[attachmentName][frame]` = world
 vertices `[x0,y0,…]` with deform keys and skinning applied (the same `evaluate()` output
-the editor draws).
+the editor draws). Version 2 adds everything needed to evaluate from keys (curves, slot,
+draw-order and constraint keys, IK/paths, mesh weights, skins, mixes) at full precision;
+the reference player (`player.html`) plays it with a texture atlas. Mesh layers are sized
+exactly to each mesh every draw: a grow-only layer cache made Chrome's anti-aliased clip
+coverage depend on previously drawn frames.
 
 ## Persistence
 

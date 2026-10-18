@@ -1,5 +1,6 @@
 // "Delivered = a visible control exists and a test exercises it" — audit.
-// Lists every data-testid literal in src/ui, src/main.ts and index.html, and fails if a
+// Lists every data-testid literal in src/ui, src/main.ts, src/player-main.ts, index.html and
+// player.html, and fails if a
 // static id is never referenced by any file under tests/. Templated ids
 // (`tree-bone-${name}`) are checked by their static prefix. Exceptions need a reason
 // in scripts/roadmap/testid-allow.json.
@@ -19,7 +20,7 @@ function files(dir: string, ext: RegExp): string[] {
   return out;
 }
 
-const sources = [...files(path.join(ROOT, 'src/ui'), /\.ts$/), path.join(ROOT, 'src/main.ts'), path.join(ROOT, 'index.html')];
+const sources = [...files(path.join(ROOT, 'src/ui'), /\.ts$/), ...['src/main.ts', 'src/player-main.ts', 'index.html', 'player.html'].map((f) => path.join(ROOT, f))];
 const ids = new Map<string, string>(); // id or prefix* -> file
 for (const f of sources) {
   const text = readFileSync(f, 'utf8');
