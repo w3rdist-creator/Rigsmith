@@ -18,29 +18,39 @@ later.
 
 ## Summary
 
-| ID | Disposition | Commit(s) |
-|---|---|---|
-| P1-1 Auto weights throws on distant vertices | fixed | `f07524a`, follow-up `998c7b3` |
-| P2-1 Two-bone IK under non-uniform scale | fixed (stated sampling limit) | `25ef689`, `b189509`, `608c4b1` |
-| P2-2 Player accepts malformed runtime files | fixed | `b189509` |
-| P3-1 Player keeps the previous frame after a load error | fixed | `b189509` |
-| P3-2 Undo history ≈ 1.1 GB | fixed (sharing + no-op skip; no byte budget) | `690350d` |
-| P3-3 provenance omits ffmpeg | fixed | `d3f431d` |
-| DRW-001 Whole deform track deleted | fixed | `48b79e8` |
-| DRW-002 Cancel can't interrupt pre-evaluation | not_applicable (grounded) | — |
-| DRW-003 Autosave mid-gesture | fixed | `59834ad` |
-| DRW-004 Lottie in a third-party player | **unresolved (blocker)** | — |
-| DRW-005 WebM alpha in a browser | fixed for Chrome for Testing only | `ce7b1a0` |
-| DRW-006 A player that doesn't share the editor's model code | **unresolved (blocker)**; partial check added | `594fb5e`, `97b7a64`, `a0183ec` |
-| DRW-007 Testid audit only checks references | **unresolved (blocker)** | — |
-| DRW-008 Auto-weight test geometry is narrow | fixed (by the P1-1 tests) | `f07524a`, `998c7b3` |
-| DRW-009 Remaining subjective/operator checks | **unresolved (operator-owned blocker)** | — |
+| ID | Reviewer's words (verbatim; P-items: the finding heading) | Disposition | Commit(s) |
+|---|---|---|---|
+| P1-1 | "Auto weights throws and does nothing when a vertex is more than 100 px from every candidate bone (reproduced in the UI)" | fixed | `f07524a`, follow-up `998c7b3` |
+| P2-1 | "Two-bone IK misses reachable targets under non-uniform ancestor scale, and the code comment overclaims (reproduced, model level)" | fixed (stated sampling limit) | `25ef689`, `b189509`, `608c4b1` |
+| P2-2 | "The runtime loader and reference player accept malformed runtime files as "Loaded" (reproduced in the player UI)" | fixed | `b189509` |
+| P3-1 | "The player keeps the previous file's frame after a load error (reproduced)" | fixed | `b189509` |
+| P3-2 | "Undo history memory reaches about 1.1 GB for a large rig (measured limit)" | fixed (sharing + no-op skip; no byte budget) | `690350d` |
+| P3-3 | "`docs/provenance.md` omits ffmpeg" | fixed | `d3f431d` |
+| DRW-001 | "`src/model/integrity.ts:96` deletes an attachment's *entire* deform track if any one key has the wrong vertex count." | fixed | `48b79e8` |
+| DRW-002 | "`prepareSequence` (`src/render/sequence.ts`) evaluates every frame synchronously before the cancellable encode loop starts, so long sequences can't be cancelled during that phase." | not_applicable (grounded) | — |
+| DRW-003 | "Autosave may serialize while a drag is in progress. I saw no harm from it." | fixed | `59834ad` |
+| DRW-004 | "Lottie in a third-party player" (Missing verification) | **unresolved (blocker)** | — |
+| DRW-005 | "WebM alpha in a browser" (Missing verification) | fixed for Chrome for Testing only | `ce7b1a0` |
+| DRW-006 | "a player that doesn't share the editor's model code" (Missing verification) | **unresolved (blocker)**; partial check added | `594fb5e`, `97b7a64`, `a0183ec` |
+| DRW-007 | "the testid audit only checks that each id is referenced" (Coverage gaps) | **unresolved (blocker)** | — |
+| DRW-008 | "the auto-weight test geometry is narrow" (Coverage gaps) | fixed (by the P1-1 tests) | `f07524a`, `998c7b3` |
+| DRW-009 | "Remaining subjective/operator checks" (motion appeal, visual quality, external playback, codec / jointed-Wiz acceptability, parity) | **unresolved (operator-owned blocker)** | — |
 
 Process fix (not a review finding): `e383f3f`. `scripts/roadmap/run-gates.sh` ended with an
 `echo` and always exited 0, which hid failed gates. It now exits 1 and prints
 `GATES FAILED: <names>`. The regression test is `tests/unit/gates-script.test.ts`, which
 uses PATH shims (`red/gates-wrapper.txt`, `green/gates-wrapper.txt`). `fbc5435` adds
-`RIGSMITH_EVIDENCE` so that test output can be redirected.
+`RIGSMITH_EVIDENCE` so that test output can be redirected. The gate-script regression
+ran RED 0/3 → GREEN 3/3 (`red/gates-script.test.txt`, `green/gates-script.test.txt`).
+
+**Output-location deviation.** One full unit run in this pass (`green/drw-001-unit-all.txt`,
+02:56) ran without `RIGSMITH_EVIDENCE`. It rewrote 48 generated, git-ignored unit-test
+outputs (media and cutout-select decodes) in the default `.hermes/evidence/roadmap/unit-media/`
+and `unit-cutout-select/`, outside this pass's allowed output directory. They are regenerated
+test outputs, not originals: preservation stayed 16/16. They were left in place, and the
+list is in `post/outside-writes.txt`. No other file under `.hermes/` outside the allowed
+directories changed during this pass. A scratch file this pass wrote to `/tmp` (the gate
+HEAD hash) was removed.
 
 ## Final gates (executed, `gates/final-a0183ec/summary.txt`)
 
@@ -89,6 +99,9 @@ Chrome for Testing process remains; ports 47613–47617 are free. `wiz:build` an
     `red/p1-1-mesh.test.txt`; `red/p1-1b-mesh-weights-unchanged.txt` →
     `green/p1-1b-mesh-weights-unchanged.txt`; full e2e `green/p3-2-e2e-all-2.txt`
     (140/140 at the time).
+- **Executed:** RED e2e 0/2 pass → GREEN 2/2; RED mesh unit 16/18 → full unit 162/162
+  (`green/p1-1-unit-all.txt`); follow-up RED 18/19 → GREEN 19/19, then unit 188/188
+  and the mesh/demo e2e files 15/15 (`green/p1-1b-unit.txt`, `green/p1-1b-e2e.txt`).
 - **Limitation:** beyond 100 px a vertex is bound to its single nearest bone, with no
   blending.
 
@@ -105,6 +118,8 @@ Chrome for Testing process remains; ports 47613–47617 are free. `wiz:build` an
   P2-1)", which checks reach and bend side against forward kinematics and the brute-force
   probe. RED/GREEN: `red/p2-1-constraints.test.txt`, `red/p2-1-constraints-nonfinite.test.txt`
   → `green/p2-1-*.txt`; `green/p2-1-p2-rig.e2e.txt`.
+- **Executed:** RED 15/22 → GREEN 22/22; non-finite guard RED 22/23 → GREEN 23/23; unit
+  169/169 (`green/p2-1-unit-all.txt`); p2-rig e2e 16/16.
 - **Limitation (documented):** the extremes are located by sampling every 0.5°. Two extremes
   closer than one step (extreme non-uniform scale only) can be missed.
 
@@ -123,6 +138,8 @@ Chrome for Testing process remains; ports 47613–47617 are free. `wiz:build` an
   `player-files`). RED/GREEN: `red/p2-2-runtime.test.txt`, `red/p2-2-p3-1-review-fixes.e2e.txt`
   → `green/p2-2-runtime.test.txt`, `green/p2-2-p3-1-review-fixes.e2e.txt`,
   `green/p2-2-p4-player.e2e.txt`.
+- **Executed (P2-2 and P3-1 together):** runtime unit RED 6/16 → GREEN 16/16; review-fixes
+  e2e RED 2/8 → GREEN 8/8; p4-player e2e 9/9.
 - **Limitation:** the baked v1 data (`baked`, `bakedMeshes`, `frames`) is not read and not
   validated.
 
@@ -145,6 +162,8 @@ Chrome for Testing process remains; ports 47613–47617 are free. `wiz:build` an
 - **Tests:** `tests/unit/history-memory.test.ts` ("undo history memory (review P3-2)",
   "shareUnchanged / History options"). RED/GREEN: `red/p3-2-history-memory.test.txt` →
   `green/p3-2-history-memory.test.txt`.
+- **Executed:** RED 1/4 pass → GREEN 6/6 (the RED run had 4 tests, the final file has 6); full
+  e2e 140/140 (`green/p3-2-e2e-all-2.txt`).
 - **Limitations:**
   - An edit that rewrites a large subtree (re-meshing a big mesh) still retains a full
     copy of what it changes, for every such step.
@@ -160,6 +179,7 @@ Chrome for Testing process remains; ports 47613–47617 are free. `wiz:build` an
 - **Test:** `tests/unit/provenance.test.ts` inventories every spawned program name in the
   code and fails if any is missing from `docs/provenance.md`. RED/GREEN:
   `red/p3-3-provenance.test.txt` → `green/p3-3-provenance.test.txt`.
+- **Executed:** RED 0/2 → GREEN 2/2.
 
 ### DRW-001 — Whole deform track deleted
 > "Whole deform track deleted. `src/model/integrity.ts:96` deletes an attachment's *entire* deform track if any one key has the wrong vertex count. That can happen after pasting an old deform key into a re-meshed attachment. It can be undone and is reported in the status bar, but it is a coarse data-loss path."
@@ -173,6 +193,8 @@ Chrome for Testing process remains; ports 47613–47617 are free. `wiz:build` an
     grid controls → key frames 10 and 20 → paste at 15. Keys [10, 20] are kept, and the
     status reads "Pasted 0 key(s) at frame 15. 1 deform key(s) of sheet removed …".
   - RED/GREEN: `red/drw-001-*.txt` → `green/drw-001-*.txt`.
+- **Executed:** unit RED 0/2 → GREEN 2/2; e2e RED 0/1 → GREEN 1/1; full unit 192/192
+  (`green/drw-001-unit-all.txt`); affected e2e files 20/20.
 
 ### DRW-002 — Cancel can't interrupt pre-evaluation
 > "Cancel can't interrupt pre-evaluation. `prepareSequence` (`src/render/sequence.ts`) evaluates every frame synchronously before the cancellable encode loop starts, so long sequences can't be cancelled during that phase."
@@ -201,6 +223,8 @@ Chrome for Testing process remains; ports 47613–47617 are free. `wiz:build` an
 - **Test:** `tests/e2e/review-fixes.e2e.test.ts` "DRW-003 …": hold a drag 2.3 s, check that
   the stored x equals the committed x; Esc; then a finished drag autosaves.
   GREEN: `green/drw-003-e2e-files.txt` (21/21).
+- **Executed:** RED 1/2 pass (the new test failed) → GREEN 21/21 across the affected e2e
+  files.
 
 ### DRW-004 — Lottie in a third-party player
 > Missing verification: "Lottie in a third-party player"; remaining checks: "External playback: Lottie output in an actual Lottie player (e.g. lottie-web)".
@@ -280,8 +304,10 @@ Chrome for Testing process remains; ports 47613–47617 are free. `wiz:build` an
   - All 248 static, non-allow-listed ids are referenced in browser-run test files.
     `anim-select` is referenced only in `tests/acceptance` (run by `test:wiz`, also in a
     browser).
-  - 56 ids are reached only through helper wrappers (e.g. `setField(page, 'anim-fps', …)`),
-    so a stricter literal-selector rule would be noisy.
+  - 56 ids never appear as a literal selector (`getByTestId('id')` / `data-testid="id"`):
+    they are passed through helpers or variables (e.g. `setField(page, 'anim-fps', …)`, or
+    the id loops at `tests/e2e/controls.e2e.test.ts:96` and `:190`), so a stricter
+    literal-selector rule would be noisy.
 - A real "exercised" check would need the browser harness to record interactions. That was
   not done in this pass, and the audit was left unchanged.
 
