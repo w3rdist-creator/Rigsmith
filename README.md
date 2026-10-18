@@ -9,8 +9,9 @@ animation data or PNG frames. Everything runs locally in the browser.
 
 ## Run
 
-Requires Node ≥ 22.6 (developed on Node 25.9.0; unit tests rely on Node's built-in
-TypeScript type stripping).
+Developed and tested only on Node 25.9.0. The tests run `.ts` files directly through
+Node's built-in type stripping, which is on by default from Node 23.6 / 22.18, so those
+are the expected minimums (untested here).
 
 ```sh
 npm install

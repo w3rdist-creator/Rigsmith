@@ -455,6 +455,113 @@ describe('save / load roundtrip', () => {
   });
 });
 
+describe('view navigation and remaining tools', () => {
+  it('wheel zooms around the cursor, middle-drag pans, Fit frames everything', async () => {
+    await page.getByTestId('frame-all').click();
+    const b0 = await bone('upperarm');
+    const at = b0.mid;
+    const w0 = await probe<{ x: number; y: number }>(page, 'worldAt', at.x, at.y);
+    const len0 = Math.hypot(b0.tip.x - b0.origin.x, b0.tip.y - b0.origin.y);
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.wheel(0, -300);
+    await page.waitForTimeout(50);
+    const w1 = await probe<{ x: number; y: number }>(page, 'worldAt', at.x, at.y);
+    const b1 = await bone('upperarm');
+    near(w1.x, w0.x, 0.5, 'world point under cursor stays put (x)');
+    near(w1.y, w0.y, 0.5, 'world point under cursor stays put (y)');
+    assert.ok(Math.hypot(b1.tip.x - b1.origin.x, b1.tip.y - b1.origin.y) > len0 * 1.2, 'zoomed in');
+
+    // Middle-button drag pans the view without touching the model.
+    const stage = (await page.getByTestId('stage').boundingBox())!;
+    const start = { x: stage.x + 30, y: stage.y + stage.height - 40 };
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down({ button: 'middle' });
+    await page.mouse.move(start.x + 50, start.y - 30, { steps: 5 });
+    await page.mouse.up({ button: 'middle' });
+    const b2 = await bone('upperarm');
+    near(b2.origin.x, b1.origin.x + 50, 1, 'pan x');
+    near(b2.origin.y, b1.origin.y - 30, 1, 'pan y');
+    near(b2.world.x, b1.world.x, 1e-9, 'pan does not move the bone in world space');
+
+    await page.getByTestId('frame-all').click();
+    for (const name of ['upperarm', 'forearm']) {
+      const b = await bone(name);
+      for (const p of [b.origin, b.tip]) {
+        assert.ok(p.x >= stage.x && p.x <= stage.x + stage.width && p.y >= stage.y && p.y <= stage.y + stage.height, `${name} inside stage after Fit`);
+      }
+    }
+    await shot('50-fit');
+  });
+
+  it('Scale tool drag scales the selected bone (setup mode)', async () => {
+    await page.getByTestId('mode-setup').click();
+    await page.getByTestId('tree-bone-upperarm').click();
+    await page.getByTestId('tool-scale').click();
+    const b = await bone('upperarm');
+    const dir = { x: b.tip.x - b.origin.x, y: b.tip.y - b.origin.y };
+    const from = { x: b.origin.x + dir.x * 0.5, y: b.origin.y + dir.y * 0.5 };
+    const to = { x: b.origin.x + dir.x * 0.75, y: b.origin.y + dir.y * 0.75 };
+    const s0 = (await project()).bones[0];
+    await drag(from, to);
+    const s1 = (await project()).bones[0];
+    near(s1.scaleX, s0.scaleX * 1.5, 0.05, 'scaleX ×1.5');
+    near(s1.scaleY, s0.scaleY * 1.5, 0.05, 'scaleY ×1.5');
+    await page.getByTestId('tool-move').click();
+  });
+
+  it('dragging a key diamond retimes it as one undo step', async () => {
+    const fId = (await project()).bones.find((b: any) => b.name === 'forearm').id;
+    const diamond = page.getByTestId('key-forearm-rotate-15');
+    const box = (await diamond.boundingBox())!;
+    const lanes = (await page.getByTestId('timeline-lanes').boundingBox())!;
+    const undo0 = (await state()).undo;
+    await drag({ x: box.x + box.width / 2, y: box.y + box.height / 2 }, { x: lanes.x + lanes.width * (20 / 30), y: box.y + box.height / 2 }, 6);
+    await page.getByTestId('key-forearm-rotate-20').waitFor();
+    const times = (await project()).animations[0].tracks[fId].rotate.map((k: any) => k.time);
+    near(times[1], 20 / 30, 1e-9, 'key moved to frame 20');
+    assert.equal(times.length, 3);
+    assert.equal((await state()).undo, undo0 + 1, 'retime is one undo step');
+  });
+
+  it('renames, adds and deletes animations', async () => {
+    await fill('anim-name', 'swing');
+    assert.equal((await project()).animations[0].name, 'swing');
+    await page.getByTestId('new-animation').click();
+    assert.equal((await project()).animations.length, 2);
+    await page.getByRole('button', { name: 'Delete animation' }).click();
+    const p = await project();
+    assert.deepEqual(p.animations.map((a: any) => a.name), ['swing']);
+  });
+
+  it('imports an image dropped onto the canvas', async () => {
+    const before = (await project()).images.length;
+    const b64 = makePng(16, 16, [120, 220, 90]).toString('base64');
+    // Playwright cannot perform an OS-level file drag, so the drop event (with a real
+    // DataTransfer carrying a File) is dispatched on the canvas, as the browser would.
+    await page.evaluate((data) => {
+      const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+      const dt = new DataTransfer();
+      dt.items.add(new File([bytes], 'dropped.png', { type: 'image/png' }));
+      const canvas = document.querySelector('[data-testid="stage"]')!;
+      canvas.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
+      canvas.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    }, b64);
+    await page.getByTestId('image-dropped.png').waitFor();
+    assert.equal((await project()).images.length, before + 1);
+  });
+
+  it('shows the controls help dialog', async () => {
+    await page.getByTestId('help').click();
+    const dlg = page.getByTestId('help-dialog');
+    await dlg.waitFor({ state: 'visible' });
+    assert.ok((await dlg.locator('tr').count()) >= 10);
+    assert.match((await dlg.textContent()) ?? '', /Undo/);
+    await shot('51-help');
+    await dlg.getByRole('button', { name: 'Close' }).click();
+    await dlg.waitFor({ state: 'hidden' });
+  });
+});
+
 describe('page health', () => {
   it('raised no uncaught page errors', () => {
     assert.deepEqual(pageErrors, []);

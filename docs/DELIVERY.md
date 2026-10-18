@@ -11,14 +11,14 @@ with stated limits; **Absent** = not built.
 
 | Requirement | Status | Where it is proven |
 |---|---|---|
-| Local image import (picker + drag-drop), PNG/JPEG/WebP/GIF, type/size/decode errors | Implemented (drag-drop is implemented but not browser-tested) | e2e "imports a local image…" (picker path + non-image rejection toast) |
+| Local image import (picker + drag-drop), PNG/JPEG/WebP/GIF, type/size/decode errors | Implemented | e2e "imports a local image…" (picker + non-image rejection toast); e2e "imports an image dropped onto the canvas" (synthetic `drop` event with a real `DataTransfer`/`File` — Playwright cannot do an OS file drag) |
 | Image list with thumbnails, attach/place, remove | Implemented | e2e import/attach test; demo shows 7 images |
-| Canvas pan / zoom / fit | Implemented | wheel zoom at cursor, middle/right/Alt-drag or empty-drag pan, F/double-click fit. Pan/zoom are **not** directly asserted by e2e (used implicitly); manual/screenshot evidence only |
+| Canvas pan / zoom / fit | Implemented | e2e: wheel zoom keeps the world point under the cursor fixed (±0.5) and enlarges bones; middle-button drag pans by the drag delta without moving the model; Fit puts every bone inside the stage. (Right-drag, Alt-drag, empty-canvas drag and F/double-click share the same code paths but are not separately tested) |
 | Selectable art on canvas | Implemented | e2e drags the image by clicking on it; a selected image stays grabbable over bones |
 | Bone create / select / parent | Implemented | e2e Bone-tool drags create root + child (`parentId` asserted); tree selection; Parent dropdown |
 | Correctly composed parent transforms | Implemented | unit: 3-bone chain, non-uniform scale, out-of-order bones, world→local under rotated+scaled parent; e2e: rotating parent moves child to the expected screen point, child world angle = 180° |
 | Cycle prevention | Implemented | unit: `wouldCreateCycle`, `reparentBone` throws `CycleError` and leaves state unchanged, loader rejects cyclic files; e2e: descendants/self absent from Parent options; e2e: cyclic file rejected with visible error |
-| Transform posing (move/rotate/scale tools + inspector) | Implemented | e2e rotate-drag, move-drag (joint lands under cursor ±2 px), inspector edits. Scale tool on canvas **not** e2e-tested (inspector scale is) |
+| Transform posing (move/rotate/scale tools + inspector) | Implemented | e2e rotate-drag, move-drag (joint lands under cursor ±2 px), Scale-tool drag (×1.5 ±0.05), inspector edits |
 | Attach images to bones, edit attachment offsets | Implemented | e2e: attach to selected bone, set x/y/rotation in inspector, drag offset on canvas, attachment follows bone rotation |
 | Timeline: translate/rotate/scale keys | Implemented | e2e: K keys all three channels; inspector + canvas edits key rotate at frames 15 and 30 |
 | Scrubbing | Implemented | e2e: ruler clicks set time (frame-snapped), pose matches keys |
@@ -33,8 +33,9 @@ with stated limits; **Absent** = not built.
 | Keyboard/mouse controls, help, practical layout, empty/error states | Implemented | `?` help dialog, tool hints, empty-stage panel, empty panel texts, error toasts; screenshots in `.hermes/evidence/` |
 | Animation-data export | Implemented (`rigsmith.runtime` v1: keys + baked per-frame world transforms) | e2e checks format, frame count, baked rows |
 | PNG frame export | Implemented (current frame, transparent, cropped) | e2e checks PNG signature |
-| Multiple animations per project | Implemented (select / new / rename / delete) | demo has 2; rename/delete not e2e-tested |
-| Key retime by dragging ◆ | Implemented | not e2e-tested |
+| Multiple animations per project | Implemented (select / new / rename / delete) | e2e renames, adds and deletes; demo has 2 |
+| Key retime by dragging ◆ | Implemented | e2e: frame 15 → 20, exactly one undo step |
+| Controls help | Implemented | e2e opens the `?` dialog (≥10 rows), closes it |
 | Mesh deformation, IK, skins, slots/attachment swapping over time, curve editor, onion skin, atlas packing, sequence (multi-frame) PNG export | **Absent** | out of scope for this slice |
 
 ## Commands and real results (final run, build `index-bftQBcAc.js`)
@@ -77,11 +78,16 @@ own `vite preview` on a verified-free loopback port.
 ✔ save/load › rejects an invalid project with a visible error and keeps the current one
 ✔ save/load › saves to browser storage and restores after reload
 ✔ save/load › exports runtime animation data and a PNG frame
+✔ view › wheel zooms around the cursor, middle-drag pans, Fit frames everything
+✔ view › Scale tool drag scales the selected bone (setup mode)
+✔ view › dragging a key diamond retimes it as one undo step
+✔ view › renames, adds and deletes animations
+✔ view › imports an image dropped onto the canvas
+✔ view › shows the controls help dialog
 ✔ page health › raised no uncaught page errors
-ℹ tests 13  ℹ pass 13  ℹ fail 0   exit=0
+ℹ tests 19  ℹ pass 19  ℹ fail 0   exit=0
 ```
-Repeat runs: 13/13 twice more (`e2e-repeat-runs.txt`; those were on the build before the
-pause-snap fix, the final build was run once in full). The pause regression assertion
+Repeat runs on the final build: 19/19 twice more (`e2e-repeat-runs.txt`). The pause regression assertion
 **failed on the pre-fix build** (`expected 23.070000000022354 ≈ 23`) and passes now.
 Screenshots: `.hermes/evidence/e2e/*.png` (frames a/b, posed rig, attached image, keys
 and scrub, undo, reloaded project, invalid-file error) and `.hermes/evidence/screens/*.png`.
@@ -117,8 +123,12 @@ written, not a certified clean-room.
 ## Remaining gaps
 
 - Absent features listed above (meshes, IK, skins, attachment keying, curve editor, etc.).
-- Not browser-tested: drag-drop import, canvas Scale tool, pan/zoom gestures, key retime
-  drag, animation rename/delete, attachment draw-order buttons, help dialog contents.
+- Not browser-tested: right-/Alt-/empty-canvas-drag pan variants, F/double-click fit,
+  attachment draw-order buttons, image removal, bone deletion via UI (model-tested only),
+  OS-level file drag (only a synthetic drop event is tested), the confirm-discard dialog.
+- Left uncommitted on purpose: `.hermes/dispatch/` (operator orchestration files) and
+  `.hermes/assets/` (created by another process during this run); also all git-ignored
+  evidence, profiles, `dist/`, `node_modules/`.
 - Skew from rotated + non-uniformly scaled parents is dropped when reparenting with
   keep-world (documented in architecture).
 - Large projects: every undo step clones bones/keys (images shared); fine for slice-sized
