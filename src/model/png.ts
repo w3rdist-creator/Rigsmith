@@ -122,7 +122,8 @@ export async function decodePngExact(bytes: Uint8Array): Promise<Rgba> {
   return { width, height, data: out };
 }
 
-function chunk(kind: string, body: Uint8Array): Uint8Array {
+/** One PNG chunk: length, type, body, CRC. */
+export function pngChunk(kind: string, body: Uint8Array): Uint8Array {
   const out = new Uint8Array(12 + body.length);
   const dv = new DataView(out.buffer);
   dv.setUint32(0, body.length);
@@ -134,17 +135,15 @@ function chunk(kind: string, body: Uint8Array): Uint8Array {
 
 /** 8-bit RGBA PNG; deterministic for the same platform zlib. */
 export async function encodePngExact(img: Rgba): Promise<Uint8Array> {
-  const { width, height, data } = img;
-  const raw = new Uint8Array((width * 4 + 1) * height);
-  for (let y = 0; y < height; y++) raw.set(data.subarray(y * width * 4, (y + 1) * width * 4), y * (width * 4 + 1) + 1);
+  const { width, height } = img;
   const ihdr = new Uint8Array(13);
   const dv = new DataView(ihdr.buffer);
   dv.setUint32(0, width);
   dv.setUint32(4, height);
   ihdr[8] = 8;
   ihdr[9] = 6;
-  const idat = await pipe(raw, new CompressionStream('deflate'));
-  const parts = [new Uint8Array(SIG), chunk('IHDR', ihdr), chunk('IDAT', idat), chunk('IEND', new Uint8Array(0))];
+  const idat = await pngImageData(img);
+  const parts = [new Uint8Array(SIG), pngChunk('IHDR', ihdr), pngChunk('IDAT', idat), pngChunk('IEND', new Uint8Array(0))];
   const out = new Uint8Array(parts.reduce((s, x) => s + x.length, 0));
   let p = 0;
   for (const x of parts) {
@@ -153,6 +152,16 @@ export async function encodePngExact(img: Rgba): Promise<Uint8Array> {
   }
   return out;
 }
+
+/** zlib-compressed 8-bit RGBA scanlines (filter 0): the IDAT payload of `encodePngExact`. */
+export async function pngImageData(img: Rgba): Promise<Uint8Array> {
+  const { width, height, data } = img;
+  const raw = new Uint8Array((width * 4 + 1) * height);
+  for (let y = 0; y < height; y++) raw.set(data.subarray(y * width * 4, (y + 1) * width * 4), y * (width * 4 + 1) + 1);
+  return pipe(raw, new CompressionStream('deflate'));
+}
+
+export const PNG_SIGNATURE: readonly number[] = SIG;
 
 /** Bytes of a `data:` URL. */
 export function dataUrlBytes(url: string): Uint8Array {

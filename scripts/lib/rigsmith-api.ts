@@ -8,6 +8,7 @@
 // project-local profile, serves the built `dist/` through request interception (no
 // network socket is opened) and loads `render.html` — a dedicated render entry, not the
 // editor. The browser is always closed before `withRenderer` returns or throws.
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
@@ -16,6 +17,8 @@ import { DEFAULT_ATLAS, atlasItems, atlasMeta, packAtlas, renderAtlasPages } fro
 import type { RuntimeExport } from '../../src/model/exportRuntime.ts';
 import { exportRuntime, runtimeProblems } from '../../src/model/exportRuntime.ts';
 import { parseProject, serializeProject } from '../../src/model/format.ts';
+import type { MediaFormat } from '../../src/model/media.ts';
+import { MediaCancelled, encodeAnimated, mediaErrors } from '../../src/model/media.ts';
 import { setMixRule } from '../../src/model/mix.ts';
 import { dataUrlBytes, decodePngExact, encodePngExact } from '../../src/model/png.ts';
 import { addSkin, setSkinEntry } from '../../src/model/skinOps.ts';
@@ -253,4 +256,90 @@ export async function withRenderer<T>(fn: (r: Renderer) => Promise<T>, opts: { p
 export function sequenceZip(r: SequenceResult): Uint8Array {
   const dir = r.files[0]?.name.split('/')[0] ?? 'sequence';
   return zip([...r.files, { name: `${dir}/sequence.json`, data: new TextEncoder().encode(JSON.stringify(r.meta, null, 1)) }]);
+}
+
+// ---- Animated media -------------------------------------------------------------------
+// APNG / GIF: the same pure-TS encoders as the editor (src/model/media.ts) over the
+// rendered PNG frames. WebM (VP9 + alpha) / MP4 (H.264, no alpha): encoded by the local
+// ffmpeg if it exists and has the encoder (exit 3 otherwise); single-threaded bitexact
+// settings so repeated runs on one machine give the same bytes.
+
+export type CliMediaFormat = MediaFormat | 'webm' | 'mp4';
+export const FFMPEG = process.env.RIGSMITH_FFMPEG ?? 'ffmpeg';
+
+export function ffmpegEncoder(format: 'webm' | 'mp4'): string {
+  const enc = format === 'webm' ? 'libvpx-vp9' : 'libx264';
+  const r = spawnSync(FFMPEG, ['-hide_banner', '-encoders'], { encoding: 'utf8', maxBuffer: 16 << 20 });
+  if (r.status !== 0 || r.error) throw new ApiError(`${format.toUpperCase()} needs ffmpeg (not found as “${FFMPEG}”; set RIGSMITH_FFMPEG). APNG, GIF and the PNG sequence need nothing extra.`, undefined, EXIT.environment);
+  if (!new RegExp(`\\s${enc}\\s`).test(r.stdout)) throw new ApiError(`This ffmpeg has no ${enc} encoder, needed for ${format.toUpperCase()}.`, undefined, EXIT.environment);
+  return enc;
+}
+
+export function mediaLabel(format: CliMediaFormat, loop: boolean, background?: string): string {
+  const plays = loop ? 'loops forever' : 'plays once';
+  switch (format) {
+    case 'apng':
+      return `APNG: lossless, full 8-bit alpha, ${plays}`;
+    case 'gif':
+      return `GIF: 256-colour palette, 1-bit alpha (α ≥ 128 opaque), centisecond delays, ${plays}`;
+    case 'webm':
+      return 'WebM VP9 (yuva420p): lossy, 8-bit alpha; no loop flag in the file (the player decides); alpha verified by ffmpeg libvpx-vp9 decode on this machine';
+    case 'mp4':
+      return `MP4 H.264 (yuv420p): lossy, NO alpha — composited on ${background}; padded to even width/height; no loop flag`;
+  }
+}
+
+export async function encodeMedia(r: SequenceResult, format: CliMediaFormat, out: string, o: { background?: string; isCancelled?: () => boolean; onProgress?: (d: number, t: number) => void } = {}): Promise<{ stats: Record<string, unknown> }> {
+  const fps = r.meta.fps;
+  const loop = !!r.meta.loop;
+  if (format === 'apng' || format === 'gif') {
+    const errors = mediaErrors(format, fps);
+    if (errors.length) throw new ApiError(errors[0], errors);
+    try {
+      const { bytes, stats } = await encodeAnimated(format, r.files.length, (i) => r.files[i].data, { fps, loop, isCancelled: o.isCancelled, onProgress: o.onProgress });
+      writeOutput(out, bytes);
+      return { stats: { ...stats, label: mediaLabel(format, loop) } };
+    } catch (e) {
+      if (e instanceof MediaCancelled) throw new ApiError('Cancelled — nothing was written.', undefined, EXIT.failed);
+      throw e;
+    }
+  }
+  const enc = ffmpegEncoder(format);
+  const bg = o.background ?? '#ffffff';
+  if (!/^#[0-9a-f]{6}$/i.test(bg)) throw new ApiError(`--background must be #rrggbb (got “${bg}”).`, undefined, EXIT.usage);
+  const { width: w, height: h } = r.meta;
+  const codec =
+    format === 'webm'
+      ? ['-c:v', enc, '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '18', '-deadline', 'good', '-cpu-used', '1', '-row-mt', '0', '-auto-alt-ref', '0']
+      : ['-filter_complex', `color=c=0x${bg.slice(1)}:s=${w}x${h}:r=${fps}[bg];[bg][0:v]overlay=shortest=1:format=auto,pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0:color=0x${bg.slice(1)},format=yuv420p`, '-c:v', enc, '-preset', 'medium', '-crf', '16', '-x264-params', 'threads=1', '-movflags', '+faststart'];
+  mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
+  const tmp = `${out}.partial`;
+  const args = ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'png', '-i', '-', ...codec, '-threads', '1', '-r', String(fps), '-fflags', '+bitexact', '-flags', '+bitexact', '-f', format, tmp];
+  const child = spawn(FFMPEG, args, { stdio: ['pipe', 'ignore', 'pipe'] });
+  let stderr = '';
+  child.stderr!.on('data', (c) => (stderr += c.toString()));
+  const done = new Promise<number | null>((resolve) => {
+    child.on('exit', (code) => resolve(code));
+    child.on('error', () => resolve(-1));
+  });
+  child.stdin!.on('error', () => undefined);
+  let cancelled = false;
+  for (let i = 0; i < r.files.length; i++) {
+    if (o.isCancelled?.()) {
+      cancelled = true;
+      break;
+    }
+    if (!child.stdin!.write(r.files[i].data)) await new Promise<void>((res) => child.stdin!.once('drain', res));
+    o.onProgress?.(i + 1, r.files.length);
+  }
+  if (cancelled) child.kill('SIGKILL');
+  else child.stdin!.end();
+  const code = await done;
+  if (cancelled || code !== 0) {
+    rmSync(tmp, { force: true });
+    if (cancelled) throw new ApiError('Cancelled — nothing was written.', undefined, EXIT.failed);
+    throw new ApiError(`ffmpeg failed (exit ${code})`, stderr.trim().split('\n').slice(-5), EXIT.failed);
+  }
+  renameSync(tmp, out);
+  return { stats: { format, frames: r.files.length, width: format === 'mp4' ? w + (w % 2) : w, height: format === 'mp4' ? h + (h % 2) : h, encoder: enc, label: mediaLabel(format, loop, bg), ...(format === 'mp4' ? { background: bg } : {}) } };
 }

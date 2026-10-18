@@ -110,8 +110,15 @@ declare module 'node:child_process' {
   interface Readable {
     on(event: 'data', fn: (chunk: Buffer) => void): this;
   }
+  interface Writable {
+    write(chunk: Uint8Array, cb?: (err?: Error | null) => void): boolean;
+    end(): void;
+    once(event: 'drain', fn: () => void): this;
+    on(event: 'error', fn: (err: Error) => void): this;
+  }
   export interface ChildProcess {
     pid?: number;
+    stdin: Writable | null;
     stdout: Readable | null;
     stderr: Readable | null;
     kill(signal?: string): boolean;
@@ -120,6 +127,7 @@ declare module 'node:child_process' {
   }
   export function spawn(cmd: string, args: readonly string[], opts?: { cwd?: string; stdio?: readonly ('ignore' | 'pipe' | 'inherit')[]; env?: Record<string, string | undefined> }): ChildProcess;
   export function execFileSync(cmd: string, args: readonly string[], opts?: { cwd?: string; encoding?: 'utf8'; stdio?: readonly ('ignore' | 'pipe' | 'inherit')[]; maxBuffer?: number }): string;
+  export function spawnSync(cmd: string, args: readonly string[], opts: { cwd?: string; encoding: 'buffer'; maxBuffer?: number; input?: Uint8Array }): { status: number | null; stdout: Buffer; stderr: Buffer; error?: Error };
   export function spawnSync(cmd: string, args: readonly string[], opts?: { cwd?: string; encoding?: 'utf8'; maxBuffer?: number; input?: string | Uint8Array; env?: Record<string, string | undefined> }): { status: number | null; stdout: string; stderr: string; error?: Error };
 }
 

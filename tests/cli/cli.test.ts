@@ -14,6 +14,7 @@ import { parseProject, serializeProject } from '../../src/model/format.ts';
 import { decodePng } from '../support/png-decode.ts';
 import { encodePng } from '../support/png-encode.ts';
 import { lottieProject } from '../support/lottie-fixture.ts';
+import { ffmpegFrames, ffprobe, hasFfmpeg } from '../support/media-check.ts';
 import { richProject } from '../support/runtime-fixture.ts';
 import { readZip } from '../support/zip-read.ts';
 import { EVIDENCE, ROOT, launchIsolated, pickPort, startPreview } from '../e2e/harness.ts';
@@ -250,6 +251,99 @@ describe('rendering (headless Chrome for Testing via render.html)', () => {
   });
 });
 
+describe('media: WebM (VP9 alpha) / MP4 (H.264) via the local ffmpeg; decoded by ffmpeg, compared with the PNG sequence', { skip: !hasFfmpeg() && 'ffmpeg is not installed' }, () => {
+  let ref: { width: number; height: number; data: Uint8Array }[] = [];
+  before(() => {
+    const out = path.join(OUT, 'media-ref.zip');
+    assert.equal(cli('render', RIG, '--anim', 'wave', '--out', out).code, 0);
+    const z = readZip(readFileSync(out));
+    ref = z.filter((f) => f.name.endsWith('.png')).sort((a, b) => (a.name < b.name ? -1 : 1)).map((f) => decodePng(f.data));
+  });
+
+  it('webm: VP9 with alpha_mode 1, 30 frames at 30/1; alpha and colour within measured bounds; deterministic; plain decode drops alpha', () => {
+    const a = path.join(OUT, 'wave-a.webm'), b = path.join(OUT, 'wave-b.webm');
+    const r = cli('media', RIG, '--anim', 'wave', '--format', 'webm', '--out', a);
+    assert.equal(r.code, 0, JSON.stringify(r.json));
+    assert.match(r.json.label, /8-bit alpha; no loop flag/);
+    assert.equal(cli('media', RIG, '--anim', 'wave', '--format', 'webm', '--out', b).code, 0);
+    assert.equal(sha(a), sha(b), 'two runs, identical bytes (single-threaded bitexact)');
+    const p = ffprobe(a);
+    assert.deepEqual([p.codec, p.width, p.height, p.frames, p.rate, p.tags.alpha_mode], ['vp9', ref[0].width, ref[0].height, 30, '30/1', '1']);
+    const frames = ffmpegFrames(a, p.width, p.height, true);
+    assert.equal(frames.length, 30);
+    let aErr = 0, aMax = 0, cErr = 0, cN = 0, px = 0;
+    frames.forEach((f, i) => {
+      const d = ref[i].data;
+      for (let k = 0; k < f.length; k += 4) {
+        const e = Math.abs(f[k + 3] - d[k + 3]);
+        aErr += e;
+        aMax = Math.max(aMax, e);
+        px++;
+        if (d[k + 3] === 255 && f[k + 3] === 255) for (let c = 0; c < 3; c++, cN++) cErr += Math.abs(f[k + c] - d[k + c]);
+      }
+    });
+    const line = `webm: alpha mean abs error ${(aErr / px).toFixed(3)} (max ${aMax}), opaque colour mean abs error ${(cErr / cN).toFixed(2)}`;
+    report.push(line);
+    assert.ok(aErr / px < 1 && cErr / cN < 4, line);
+    // The pitfall, recorded: ffmpeg's native vp9 decoder ignores the alpha side data.
+    const plain = ffmpegFrames(a, p.width, p.height, false);
+    assert.ok(plain[0].every((v, k) => k % 4 !== 3 || v === 255), 'native decoder: opaque');
+  });
+
+  it('mp4: H.264, no alpha, composited on the background, padded to even height; colour within measured bounds', () => {
+    for (const bg of ['#ffffff', '#203040']) {
+      const out = path.join(OUT, `wave-${bg.slice(1)}.mp4`);
+      const r = cli('media', RIG, '--anim', 'wave', '--format', 'mp4', '--background', bg, '--out', out);
+      assert.equal(r.code, 0, JSON.stringify(r.json));
+      assert.match(r.json.label, /NO alpha — composited on #/);
+      const p = ffprobe(out);
+      const w = ref[0].width + (ref[0].width % 2), h = ref[0].height + (ref[0].height % 2);
+      assert.deepEqual([p.codec, p.width, p.height, p.frames, p.rate], ['h264', w, h, 30, '30/1']);
+      const bgc = [1, 3, 5].map((i) => parseInt(bg.slice(i, i + 2), 16));
+      let err = 0, n = 0;
+      ffmpegFrames(out, w, h).forEach((f, i) => {
+        const d = ref[i];
+        for (let y = 0; y < h; y++)
+          for (let x = 0; x < w; x++) {
+            const o = (y * w + x) * 4;
+            assert.equal(f[o + 3], 255);
+            const inside = x < d.width && y < d.height;
+            const s = (y * d.width + x) * 4;
+            const al = inside ? d.data[s + 3] / 255 : 0;
+            for (let c = 0; c < 3; c++, n++) err += Math.abs(f[o + c] - ((inside ? d.data[s + c] : 0) * al + bgc[c] * (1 - al)));
+          }
+      });
+      const line = `mp4 on ${bg}: ${w}×${h} (source ${ref[0].width}×${ref[0].height}), colour mean abs error vs straight-alpha composite ${(err / n).toFixed(2)}`;
+      report.push(line);
+      assert.ok(err / n < 3, line);
+    }
+  });
+
+  it('errors: missing ffmpeg exit 3, GIF over 50 fps exit 1, bad format / background exit 2; nothing written; cancel kills ffmpeg (exit 4)', async () => {
+    const out = path.join(OUT, 'err.webm');
+    const env = spawnSync(process.execPath, [path.join(ROOT, 'scripts/rigsmith.ts'), 'media', RIG, '--anim', 'wave', '--format', 'webm', '--out', out], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, RIGSMITH_FFMPEG: '/nonexistent/ffmpeg' } });
+    assert.equal(env.status, 3);
+    assert.match(JSON.parse(env.stdout).error, /needs ffmpeg/);
+    const gif = cli('media', RIG, '--anim', 'wave', '--format', 'gif', '--fps', '60', '--out', path.join(OUT, 'err.gif'));
+    assert.equal(gif.code, 1);
+    assert.match(gif.json.error, /at most 50 fps for GIF/);
+    assert.equal(cli('media', RIG, '--anim', 'wave', '--format', 'avi', '--out', out).code, 2);
+    assert.equal(cli('media', RIG, '--anim', 'wave', '--format', 'mp4', '--background', 'white', '--out', out).code, 2);
+    assert.ok(![out, path.join(OUT, 'err.gif')].some((f) => existsSync(f) || existsSync(`${f}.partial`)));
+    const big = path.join(OUT, 'cancelled.webm');
+    const child = spawn(process.execPath, [path.join(ROOT, 'scripts/rigsmith.ts'), 'media', RIG, '--anim', 'wave', '--format', 'webm', '--fps', '120', '--scale', '2', '--out', big], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    child.stdout!.on('data', (c: Buffer) => (stdout += c.toString()));
+    await new Promise<void>((resolve) => child.stderr!.on('data', (c: Buffer) => /encode [1-9]\d*\//.test(c.toString()) && resolve()));
+    child.kill('SIGINT');
+    const code = await new Promise<number | null>((resolve) => child.on('exit', (c: number | null) => resolve(c)));
+    assert.equal(code, 4);
+    assert.match(JSON.parse(stdout).error, /Cancelled/);
+    assert.ok(!existsSync(big) && !existsSync(`${big}.partial`), 'nothing written');
+    assert.equal(spawnSync('pgrep', ['-f', `ffmpeg.*${path.basename(big)}`], { encoding: 'utf8' }).stdout.trim(), '', 'ffmpeg was stopped');
+  });
+});
+
 describe('brand pipeline example', () => {
   it('runs end to end through the CLI and is reproducible (identical manifest twice)', () => {
     const runs = ['brand-a', 'brand-b'].map((d) => {
@@ -260,7 +354,7 @@ describe('brand pipeline example', () => {
     });
     assert.deepEqual(runs[0], runs[1]);
     const files = runs[0].map((f) => f.file);
-    for (const b of ['base', 'tidewater', 'ember', 'grove']) for (const f of ['wave.zip', 'idle-to-wave.zip']) assert.ok(files.includes(`${b}/${f}`), `${b}/${f}`);
+    for (const b of ['base', 'tidewater', 'ember', 'grove']) for (const f of ['wave.zip', 'idle-to-wave.zip', 'wave.gif', ...(hasFfmpeg() ? ['wave.webm'] : [])]) assert.ok(files.includes(`${b}/${f}`), `${b}/${f}`);
     assert.ok(files.includes('mascot.runtime.json') && files.includes('atlas/mascot.atlas.json'));
     // Skins really recolour: brand frames differ from base, geometry identical.
     const frame0 = (b: string) => {

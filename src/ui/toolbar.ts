@@ -30,7 +30,7 @@ export function renderToolbar(app: App, root: HTMLElement, onHelp: () => void): 
     h('div', { class: 'tb-group', role: 'group', 'aria-label': 'Export' },
       h('button', { 'data-testid': 'export-runtime', title: 'Export animation data (rigsmith.runtime JSON)', onclick: () => app.exportRuntimeJson() }, 'Export data'),
       h('button', { 'data-testid': 'export-png', title: 'Export the current frame as a transparent PNG', onclick: () => app.exportPngFrame() }, 'Export PNG'),
-      h('button', { 'data-testid': 'export-sequence', title: 'Export an animation as a transparent PNG sequence (ZIP)', onclick: () => app.exportDialog.open() }, 'Export sequence…'),
+      h('button', { 'data-testid': 'export-sequence', title: 'Export an animation as a transparent PNG sequence (ZIP), APNG or GIF', onclick: () => app.exportDialog.open() }, 'Export sequence…'),
       h('button', { 'data-testid': 'export-atlas', title: 'Pack every image into texture pages (PNG + atlas JSON)', onclick: () => void app.atlasDialog.open() }, 'Export atlas…'),
       h('button', { 'data-testid': 'export-lottie', title: 'Export an animation as Lottie JSON (supported subset, with diagnostics)', onclick: () => app.lottieDialog.open() }, 'Export Lottie…'),
     ),

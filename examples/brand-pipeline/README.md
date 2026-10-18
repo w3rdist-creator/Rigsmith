@@ -21,7 +21,9 @@ What it does (see `pipeline-log.txt` in the output for the exact commands):
 5. `rigsmith runtime` (one runtime JSON for all brands) and `rigsmith atlas` (one atlas
    with every colourway).
 6. Per palette (base + brands): `rigsmith render --anim wave [--skin <brand>]` and
-   `rigsmith mix --from idle --to wave --at 0.5 [--skin <brand>]`.
+   `rigsmith mix --from idle --to wave --at 0.5 [--skin <brand>]`, `rigsmith media
+   --format gif` (`wave.gif`) and, when a local ffmpeg with libvpx-vp9 exists,
+   `rigsmith media --format webm` (`wave.webm`, VP9 with alpha). The log records which.
 7. `manifest.json`: every output file with its size and sha256.
 
 Adding a brand = adding an entry to `brands.json`. Running twice on the same machine

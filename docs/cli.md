@@ -27,6 +27,7 @@ read-only test probe.
 | `render <project> --anim A --out f.zip [--skin S] [--fps N] [--start F] [--end F] [--scale X] [--padding P]` | yes | transparent PNG sequence ZIP; identical bytes to **Export sequence…** with the same settings |
 | `mix <project> --from A --to B --at T --out f.zip [--duration S] [--missing setup\|hold] [--skin S] [--fps N]` | yes | transition sequence (stored mix duration unless `--duration`); identical bytes to the Mix dialog export |
 | `lottie <project> --anim A --out f.json [--skin S]` | no | Lottie supported subset (docs/lottie.md); exit 1 with every refusal when the rig is outside it; identical bytes to **Export Lottie…** |
+| `media <project> --format apng\|gif\|webm\|mp4 (--anim A \| --from A --to B --at T) --out f [render options] [--background #rrggbb]` | yes (+ ffmpeg for webm/mp4) | one animated file from the same PNG frames as `render` (docs/media.md). APNG/GIF: built in, the editor's encoders (GIF bytes identical to the editor's; APNG identical pixels). WebM (VP9 + alpha) / MP4 (H.264, no alpha, on `--background`, default white): need a local `ffmpeg` (or `RIGSMITH_FFMPEG`) with libvpx-vp9 / libx264, else exit 3. JSON includes the codec/alpha label and, for GIF, the alpha-loss counts |
 | `add-image <project> --file x.png [--name n] --out p2` | no | adds a PNG (id derived from the name — reproducible) |
 | `replace-image <project> --image n --file x.png [--allow-resize] --out p2` | no | swaps pixels keeping the id (attachments, keys and skins follow); a size change needs `--allow-resize` |
 | `skin <project> --name S [--set att=image …] [--keyed att:fromImage=image …] --out p2` | no | creates/extends a skin (setup-image and keyed-image entries) |
@@ -61,7 +62,7 @@ with `errors[]` and an exit `code`.
 — see `examples/brand-pipeline/README.md`. It draws original procedural mascot art in a
 base palette and three brand palettes (`brands.json`), builds the rig with the model API,
 then only uses CLI commands: `add-image` ×15, `skin` ×3, `set-mix`, `validate`,
-`runtime`, `atlas`, and per palette `render` (wave) + `mix` (idle → wave). It writes `manifest.json` (sha256 per output);
+`runtime`, `atlas`, and per palette `render` (wave) + `mix` (idle → wave) + `media` (wave.gif, and wave.webm when ffmpeg exists). It writes `manifest.json` (sha256 per output);
 `tests/cli/cli.test.ts` runs it twice and requires identical manifests — reproducible
 on this Chrome for Testing build (other Chrome builds may encode PNG bytes differently).
 
@@ -73,5 +74,9 @@ atlas deterministic, reconstructs every image, equals the editor's atlas metadat
 pixels; render (plain, and skin + sub-range + 24 fps + scale 1.5) and mix ZIPs
 byte-identical to the editor UI exports; unknown animation/skin, scale and capacity
 limits, inverted range → exit 1 with nothing written; missing Chrome → exit 3; Ctrl+C
-mid-render → exit 4, no output, no browser left running; authoring commands; the brand
+mid-render → exit 4, no output, no browser left running; `lottie` (subset export, refusal
+exit 1); `media` WebM/MP4 decoded by ffmpeg vs the PNG sequence (alpha_mode 1, measured
+error bounds, deterministic bytes), missing ffmpeg exit 3, Ctrl+C during the ffmpeg phase
+exit 4 with nothing left behind (GIF/APNG CLI vs editor are checked in
+`tests/e2e/p4-media.e2e.test.ts`); authoring commands; the brand
 pipeline twice with identical manifests and recoloured-but-identical silhouettes.

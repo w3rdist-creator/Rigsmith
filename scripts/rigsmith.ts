@@ -8,7 +8,8 @@ import path from 'node:path';
 import type { MissingPolicy } from '../src/model/mix.ts';
 import { safeName } from '../src/render/sequence.ts';
 import { exportLottie } from '../src/model/lottie.ts';
-import { ApiError, EXIT, addImage, atlas, readProject, replaceImage, runtime, sequenceZip, setMix, setSkin, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
+import type { CliMediaFormat } from './lib/rigsmith-api.ts';
+import { ApiError, EXIT, addImage, atlas, encodeMedia, ffmpegEncoder, readProject, replaceImage, runtime, sequenceZip, setMix, setSkin, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
 
 const USAGE = `rigsmith <command> [options]
   validate <project.rig.json>
@@ -18,6 +19,7 @@ const USAGE = `rigsmith <command> [options]
   render <project> --anim <name> --out <file.zip> [--skin <name>] [--fps N] [--start F] [--end F] [--scale S] [--padding P]
   mix <project> --from <anim> --to <anim> --at <seconds> --out <file.zip> [--duration S] [--missing setup|hold] [--skin <name>] [--fps N]
   lottie <project> --anim <name> --out <file.json> [--skin <name>]
+  media <project> --format apng|gif|webm|mp4 (--anim <name> | --from <a> --to <b> --at <s>) --out <file> [render options] [--background #rrggbb]
   add-image <project> --file <image.png> [--name <name>] --out <project>
   replace-image <project> --image <name> --file <image.png> [--allow-resize] --out <project>
   skin <project> --name <skin> [--set attachment=image ...] [--keyed attachment:fromImage=image ...] --out <project>
@@ -103,14 +105,27 @@ async function main(): Promise<Record<string, unknown>> {
       return { outputs: [metaFile, ...outputs], pages: a.meta.pages, regions: a.meta.regions.length };
     }
     case 'render':
-    case 'mix': {
+    case 'mix':
+    case 'media': {
       const out = need('out');
+      const format = (cmd === 'media' ? need('format') : 'zip') as CliMediaFormat | 'zip';
+      if (!['zip', 'apng', 'gif', 'webm', 'mp4'].includes(format)) usage(`--format must be apng, gif, webm or mp4 (got “${format}”).`);
+      // Fail before rendering when ffmpeg / the encoder is missing.
+      if (format === 'webm' || format === 'mp4') ffmpegEncoder(format);
+      const bgFlag = flag('background');
+      if (bgFlag !== undefined && !/^#[0-9a-f]{6}$/i.test(bgFlag)) usage(`--background must be #rrggbb (got “${bgFlag}”).`);
+      const asSequence = cmd === 'render' || (cmd === 'media' && !flag('from'));
       const req =
-        cmd === 'render'
+        asSequence
           ? { kind: 'sequence' as const, anim: need('anim'), skin: flag('skin') ?? null, fps: num('fps'), start: num('start'), end: num('end'), scale: num('scale'), padding: num('padding') }
           : { kind: 'mix' as const, from: need('from'), to: need('to'), at: num('at') ?? usage('--at is required.'), duration: num('duration'), missing: (flag('missing') ?? 'setup') as MissingPolicy, skin: flag('skin') ?? null, fps: num('fps'), scale: num('scale'), padding: num('padding') };
       const r = await withRenderer((rd) => rd.render(p, req, { onProgress: progress, isCancelled: () => cancelled }));
       process.stderr.write('\n');
+      if (format !== 'zip') {
+        const m = await encodeMedia(r, format, out, { background: flag('background'), isCancelled: () => cancelled, onProgress: (d, t) => process.stderr.write(`\rencode ${d}/${t}`) });
+        process.stderr.write('\n');
+        return { outputs: [out], animation: r.meta.animation, fps: r.meta.fps, ...m.stats };
+      }
       writeOutput(out, sequenceZip(r));
       return { outputs: [out], frames: r.files.length, width: r.meta.width, height: r.meta.height, animation: r.meta.animation };
     }

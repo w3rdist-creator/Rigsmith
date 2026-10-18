@@ -8,7 +8,8 @@
 //
 // Steps: 1 draw base + brand art · 2 build the base rig (model API) · 3 per brand:
 // add-image ×5, skin --set … · 4 set-mix · 5 validate · 6 runtime + atlas · 7 per brand:
-// render (wave), mix (idle → wave) · 8 manifest.json with
+// render (wave), mix (idle → wave), media wave.gif (+ wave.webm with VP9 alpha when a local
+// ffmpeg with libvpx-vp9 exists — recorded in the log) · 8 manifest.json with
 // sha256 of every output (identical across runs on the same Chrome for Testing build).
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -170,10 +171,15 @@ async function main(): Promise<void> {
   const out = path.join(OUT, 'out');
   cli('runtime', project, '--out', path.join(out, 'mascot.runtime.json'));
   cli('atlas', project, '--out', path.join(out, 'atlas'));
+  const webm = spawnSync(process.env.RIGSMITH_FFMPEG ?? 'ffmpeg', ['-hide_banner', '-encoders'], { encoding: 'utf8' });
+  const hasWebm = webm.status === 0 && /\slibvpx-vp9\s/.test(webm.stdout);
+  log.push(hasWebm ? 'ffmpeg with libvpx-vp9 found: also writing wave.webm' : 'no ffmpeg/libvpx-vp9: skipping wave.webm (GIF and PNG sequences need nothing extra)');
   for (const b of [{ name: 'base' }, ...config.brands]) {
     const skin = b.name === 'base' ? [] : ['--skin', b.name];
     cli('render', project, '--anim', 'wave', ...skin, '--out', path.join(out, b.name, 'wave.zip'));
     cli('mix', project, '--from', 'idle', '--to', 'wave', '--at', '0.5', ...skin, '--out', path.join(out, b.name, 'idle-to-wave.zip'));
+    cli('media', project, '--anim', 'wave', '--format', 'gif', ...skin, '--out', path.join(out, b.name, 'wave.gif'));
+    if (hasWebm) cli('media', project, '--anim', 'wave', '--format', 'webm', ...skin, '--out', path.join(out, b.name, 'wave.webm'));
   }
   const manifest = files(out).sort().map((f) => ({ file: path.relative(out, f), bytes: statSync(f).size, sha256: createHash('sha256').update(readFileSync(f)).digest('hex') }));
   writeFileSync(path.join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 1) + '\n');
