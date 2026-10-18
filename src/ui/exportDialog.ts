@@ -94,8 +94,8 @@ export class ExportDialog {
     const cs = gifDelays(Math.min(6, req.fps > 0 ? req.fps : 1), req.fps > 0 ? req.fps : 1).join('/');
     const formatNote = {
       zip: 'One transparent PNG per frame + sequence.json. Full 8-bit alpha, lossless. The reliable path for alpha.',
-      apng: `One file, the PNG frames exactly (lossless, full 8-bit alpha), 1/${req.fps} s per frame, ${plays}. Checked with Pillow, ffmpeg and Chrome for Testing on this machine; other players not tested.`,
-      gif: `One file, one 256-colour palette (no dithering) and 1-bit alpha: pixels with alpha ≥ 50% become opaque, the rest transparent (soft edges lose their blend; the count is reported). Delays are whole 1/100 s (${cs} cs…), up to ${GIF_MAX_FPS} fps, ${plays}. Checked with Pillow, ffmpeg and Chrome for Testing on this machine.`,
+      apng: `One file, the PNG frames exactly (lossless, full 8-bit alpha), 1/${req.fps} s per frame, ${plays}. Verified in Rigsmith’s test suite with Pillow, ffmpeg and Chrome for Testing; other players not tested.`,
+      gif: `One file, one 256-colour palette (no dithering) and 1-bit alpha: pixels with alpha ≥ 50% become opaque, the rest transparent (soft edges lose their blend; the count is reported). Delays are whole 1/100 s (${cs} cs…), up to ${GIF_MAX_FPS} fps, ${plays}. Verified in Rigsmith’s test suite with Pillow, ffmpeg and Chrome for Testing; other players not tested.`,
     }[this.format];
     const last = anim ? lastExportFrame(anim, Number.isInteger(req.fps) && req.fps > 0 ? req.fps : anim.fps) : 0;
     const policy = anim

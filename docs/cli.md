@@ -77,6 +77,6 @@ limits, inverted range → exit 1 with nothing written; missing Chrome → exit 
 mid-render → exit 4, no output, no browser left running; `lottie` (subset export, refusal
 exit 1); `media` WebM/MP4 decoded by ffmpeg vs the PNG sequence (alpha_mode 1, measured
 error bounds, deterministic bytes), missing ffmpeg exit 3, Ctrl+C during the ffmpeg phase
-exit 4 with nothing left behind (GIF/APNG CLI vs editor are checked in
+exit 4 with nothing left behind, also after the last frame was piped (stand-in encoder) (GIF/APNG CLI vs editor are checked in
 `tests/e2e/p4-media.e2e.test.ts`); authoring commands; the brand
 pipeline twice with identical manifests and recoloured-but-identical silhouettes.

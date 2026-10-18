@@ -297,7 +297,7 @@ export function validateProject(raw: unknown): ParseResult {
       if (!isObj(d)) c.fail(`${w}.derived must be an object`);
       else {
         const kind = d.kind as DerivedImage['kind'];
-        if (!['cutout', 'remainder', 'patch', 'extension'].includes(kind)) c.fail(`${w}.derived.kind "${String(kind)}" is not supported`);
+        if (!['cutout', 'remainder', 'patch', 'extension', 'cleanup'].includes(kind)) c.fail(`${w}.derived.kind "${String(kind)}" is not supported`);
         const der: DerivedImage = {
           kind,
           sourceId: c.str(d, 'sourceId', `${w}.derived`),

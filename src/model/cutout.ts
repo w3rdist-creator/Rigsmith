@@ -317,3 +317,243 @@ export function parseHexColor(hex: string): [number, number, number] | null {
   const n = parseInt(m[1], 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
+
+// ---- Pixel selections and clean-up (the remaining Wiz preparation steps as tools) ------
+// The Wiz prep script (scripts/wiz/prepare_cutouts.py) chose limb pixels by per-channel
+// colour ranges on visible pixels, took gloves as the 4-connected region of such pixels
+// from a seed (PIL ImageDraw.floodfill), and dropped faint matte specks (0 < α < 100) not
+// within 6 px (a 13×13 max filter) of solid matte (α > 200). The same semantics, with the
+// constants as editable parameters:
+
+export interface PixelMask {
+  width: number;
+  height: number;
+  /** 1 = selected, row-major. */
+  data: Uint8Array;
+  count: number;
+}
+
+export interface ColourSelect {
+  /** Per-channel tolerance: |r − r₀|, |g − g₀|, |b − b₀| ≤ tolerance (a colour box, like the script's ranges). */
+  tolerance: number;
+  /** Only pixels with α > minAlpha are candidates (the script's `A > aMin`). */
+  minAlpha: number;
+  /** true: the 4-connected region containing the seed (flood fill); false: every matching pixel. */
+  contiguous: boolean;
+}
+
+/** Selects pixels by colour from a seed pixel. Empty if the seed itself is not a candidate. */
+export function selectColour(src: Rgba, seedX: number, seedY: number, o: ColourSelect): PixelMask {
+  const { width: w, height: h, data: d } = src;
+  const out = new Uint8Array(w * h);
+  const sx = Math.floor(seedX), sy = Math.floor(seedY);
+  if (sx < 0 || sy < 0 || sx >= w || sy >= h) return { width: w, height: h, data: out, count: 0 };
+  const s = (sy * w + sx) * 4;
+  const r0 = d[s], g0 = d[s + 1], b0 = d[s + 2];
+  const tol = Math.max(0, o.tolerance);
+  const ok = (i: number) => {
+    const p = i * 4;
+    return d[p + 3] > o.minAlpha && Math.abs(d[p] - r0) <= tol && Math.abs(d[p + 1] - g0) <= tol && Math.abs(d[p + 2] - b0) <= tol;
+  };
+  let count = 0;
+  if (!ok(sy * w + sx)) return { width: w, height: h, data: out, count: 0 };
+  if (!o.contiguous) {
+    for (let i = 0; i < w * h; i++) if (ok(i)) (out[i] = 1), count++;
+    return { width: w, height: h, data: out, count };
+  }
+  const stack = [sy * w + sx];
+  out[sy * w + sx] = 1;
+  count = 1;
+  while (stack.length) {
+    const i = stack.pop()!;
+    const x = i % w, y = (i - x) / w;
+    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) {
+      if (j < 0 || out[j] || !ok(j)) continue;
+      out[j] = 1;
+      count++;
+      stack.push(j);
+    }
+  }
+  return { width: w, height: h, data: out, count };
+}
+
+export function unionMask(a: PixelMask, b: PixelMask): PixelMask {
+  const data = new Uint8Array(a.data.length);
+  let count = 0;
+  for (let i = 0; i < data.length; i++) if (a.data[i] || b.data[i]) (data[i] = 1), count++;
+  return { width: a.width, height: a.height, data, count };
+}
+
+export function maskBounds(m: PixelMask): Rect | null {
+  let x0 = m.width, y0 = m.height, x1 = -1, y1 = -1;
+  for (let y = 0; y < m.height; y++)
+    for (let x = 0; x < m.width; x++)
+      if (m.data[y * m.width + x]) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+  return x1 < 0 ? null : { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
+}
+
+/** Pixel-centre mean of the selection. */
+export function maskCentroid(m: PixelMask): Vec2 {
+  let sx = 0, sy = 0;
+  for (let i = 0; i < m.data.length; i++) if (m.data[i]) (sx += (i % m.width) + 0.5), (sy += Math.floor(i / m.width) + 0.5);
+  return { x: sx / Math.max(1, m.count), y: sy / Math.max(1, m.count) };
+}
+
+/** Centre of the selected pixel farthest from `from` (the piece direction for a joint bone). */
+export function farthestMaskPixel(m: PixelMask, from: Vec2): Vec2 {
+  let best = -1, q = from;
+  for (let i = 0; i < m.data.length; i++) {
+    if (!m.data[i]) continue;
+    const x = (i % m.width) + 0.5, y = Math.floor(i / m.width) + 0.5;
+    const d = (x - from.x) ** 2 + (y - from.y) ** 2;
+    if (d > best) (best = d), (q = { x, y });
+  }
+  return q;
+}
+
+/** The selection grown by a disc of radius `grow` px (pixel centres within `grow`). */
+export function dilateMask(m: PixelMask, grow: number): PixelMask {
+  const r = Math.max(0, Math.floor(grow));
+  if (!r) return m;
+  const { width: w, height: h } = m;
+  const out = new Uint8Array(m.data);
+  const offs: [number, number][] = [];
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dy * dy <= grow * grow && (dx || dy)) offs.push([dx, dy]);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (!m.data[i]) continue;
+      // Interior pixels (all 4 neighbours selected) add nothing new.
+      if (x > 0 && x < w - 1 && y > 0 && y < h - 1 && m.data[i - 1] && m.data[i + 1] && m.data[i - w] && m.data[i + w]) continue;
+      for (const [dx, dy] of offs) {
+        const X = x + dx, Y = y + dy;
+        if (X >= 0 && Y >= 0 && X < w && Y < h) out[Y * w + X] = 1;
+      }
+    }
+  let count = 0;
+  for (let i = 0; i < out.length; i++) count += out[i];
+  return { width: w, height: h, data: out, count };
+}
+
+/**
+ * Cuts a pixel selection out of `src`: the piece keeps source pixels under the selection
+ * grown by `overlap`; the remainder loses exactly the selected pixels (complementary at
+ * overlap 0). Selections are pixel-exact, so edges are not re-antialiased.
+ */
+export function cutOutMask(src: Rgba, mask: PixelMask, overlap: number): CutResult {
+  const grown = dilateMask(mask, Math.max(0, overlap));
+  const b = maskBounds(grown) ?? { x: 0, y: 0, width: 1, height: 1 };
+  const full = new Uint8ClampedArray(b.width * b.height * 4);
+  const rem = new Uint8ClampedArray(src.data);
+  let hole = 0;
+  for (let y = 0; y < b.height; y++)
+    for (let x = 0; x < b.width; x++) {
+      const i = (b.y + y) * src.width + b.x + x;
+      const s = i * 4, o = (y * b.width + x) * 4;
+      if (grown.data[i] && src.data[s + 3]) full.set(src.data.subarray(s, s + 4), o);
+      if (mask.data[i]) {
+        if (src.data[s + 3]) hole++;
+        rem[s] = rem[s + 1] = rem[s + 2] = rem[s + 3] = 0;
+      }
+    }
+  // Tighten to pixels that carry alpha.
+  let mx = b.width, my = b.height, Mx = -1, My = -1;
+  for (let y = 0; y < b.height; y++) for (let x = 0; x < b.width; x++) if (full[(y * b.width + x) * 4 + 3]) {
+    if (x < mx) mx = x;
+    if (x > Mx) Mx = x;
+    if (y < my) my = y;
+    if (y > My) My = y;
+  }
+  if (Mx < 0) mx = my = Mx = My = 0;
+  const w = Mx - mx + 1, h = My - my + 1;
+  const piece = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) piece.set(full.subarray(((my + y) * b.width + mx) * 4, ((my + y) * b.width + mx + w) * 4), y * w * 4);
+  return { piece: { width: w, height: h, data: piece }, offsetX: b.x + mx, offsetY: b.y + my, remainder: { width: src.width, height: src.height, data: rem }, holePixels: hole };
+}
+
+/** `patchBehind` for a pixel selection: flat colour behind the remainder, capped by `limit` alpha. */
+export function patchBehindMask(src: Rgba, mask: PixelMask, rgb: [number, number, number], limit: Rgba): PatchResult {
+  const out = new Uint8ClampedArray(src.data);
+  let synthesized = 0;
+  for (let i = 0; i < mask.data.length; i++) {
+    if (!mask.data[i]) continue;
+    const s = i * 4;
+    const target = limit.data[s + 3] / 255;
+    const da = out[s + 3] / 255;
+    const pa = target - da;
+    if (pa <= 0) continue;
+    for (let k = 0; k < 3; k++) out[s + k] = Math.round((out[s + k] * da + rgb[k] * pa) / target);
+    out[s + 3] = Math.round(target * 255);
+    if (pa >= 0.5) synthesized++;
+  }
+  return { image: { width: src.width, height: src.height, data: out }, synthesized };
+}
+
+export interface SpeckOptions {
+  /** Faint pixels: 0 < α < faintBelow (script: 100). */
+  faintBelow: number;
+  /** Solid pixels: α > solidAbove (script: 200). */
+  solidAbove: number;
+  /** A faint pixel is kept if a solid one is within this Chebyshev distance (script: 6, i.e. a 13×13 max filter). */
+  distance: number;
+}
+
+export const DEFAULT_SPECKS: SpeckOptions = { faintBelow: 100, solidAbove: 200, distance: 6 };
+
+/** Faint pixels with no solid pixel within `distance` (square window), as a mask. */
+export function findSpecks(src: Rgba, o: SpeckOptions): PixelMask {
+  const { width: w, height: h, data: d } = src;
+  const r = Math.max(0, Math.floor(o.distance));
+  // Separable max filter of "solid" over a (2r+1)² window: rows, then columns.
+  const solid = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) solid[i] = d[i * 4 + 3] > o.solidAbove ? 1 : 0;
+  const rows = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    let last = -Infinity;
+    // Distance to the nearest solid pixel to the left (inclusive), then to the right.
+    const left = new Float64Array(w);
+    for (let x = 0; x < w; x++) {
+      if (solid[y * w + x]) last = x;
+      left[x] = x - last;
+    }
+    last = Infinity;
+    for (let x = w - 1; x >= 0; x--) {
+      if (solid[y * w + x]) last = x;
+      rows[y * w + x] = Math.min(left[x], last - x) <= r ? 1 : 0;
+    }
+  }
+  const out = new Uint8Array(w * h);
+  let count = 0;
+  for (let x = 0; x < w; x++) {
+    const up = new Float64Array(h);
+    let last = -Infinity;
+    for (let y = 0; y < h; y++) {
+      if (rows[y * w + x]) last = y;
+      up[y] = y - last;
+    }
+    last = Infinity;
+    for (let y = h - 1; y >= 0; y--) {
+      if (rows[y * w + x]) last = y;
+      const near = Math.min(up[y], last - y) <= r;
+      const a = d[(y * w + x) * 4 + 3];
+      if (!near && a > 0 && a < o.faintBelow) {
+        out[y * w + x] = 1;
+        count++;
+      }
+    }
+  }
+  return { width: w, height: h, data: out, count };
+}
+
+/** A copy of `src` with the specks made fully transparent. */
+export function removeSpecks(src: Rgba, o: SpeckOptions): { image: Rgba; removed: number } {
+  const m = findSpecks(src, o);
+  const data = new Uint8ClampedArray(src.data);
+  for (let i = 0; i < m.data.length; i++) if (m.data[i]) data[i * 4] = data[i * 4 + 1] = data[i * 4 + 2] = data[i * 4 + 3] = 0;
+  return { image: { width: src.width, height: src.height, data }, removed: m.count };
+}

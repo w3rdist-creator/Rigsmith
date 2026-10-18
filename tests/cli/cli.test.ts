@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { BrowserContext, Page } from 'playwright-core';
@@ -341,6 +341,26 @@ describe('media: WebM (VP9 alpha) / MP4 (H.264) via the local ffmpeg; decoded by
     assert.match(JSON.parse(stdout).error, /Cancelled/);
     assert.ok(!existsSync(big) && !existsSync(`${big}.partial`), 'nothing written');
     assert.equal(spawnSync('pgrep', ['-f', `ffmpeg.*${path.basename(big)}`], { encoding: 'utf8' }).stdout.trim(), '', 'ffmpeg was stopped');
+  });
+
+  it('Ctrl+C after every frame was piped, while ffmpeg is still encoding: exit 4, nothing written, encoder stopped', async () => {
+    // A stand-in encoder (RIGSMITH_FFMPEG) that lists libvpx-vp9, reads all frames, then
+    // keeps "encoding": the cancel must land in the post-pipe phase deterministically.
+    const stub = path.join(OUT, 'slow-ffmpeg.sh');
+    writeFileSync(stub, '#!/bin/sh\nif [ "$2" = "-encoders" ]; then echo " V....D libvpx-vp9           libvpx VP9"; exit 0; fi\ncat > /dev/null\nexec sleep 59.75\n');
+    chmodSync(stub, 0o755);
+    const out = path.join(OUT, 'slow-cancel.webm');
+    const child = spawn(process.execPath, [path.join(ROOT, 'scripts/rigsmith.ts'), 'media', RIG, '--anim', 'wave', '--format', 'webm', '--out', out], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, RIGSMITH_FFMPEG: stub } });
+    let stdout = '';
+    child.stdout!.on('data', (c: Buffer) => (stdout += c.toString()));
+    await new Promise<void>((resolve) => child.stderr!.on('data', (c: Buffer) => /encode 30\/30/.test(c.toString()) && resolve()));
+    await new Promise((r) => setTimeout(r, 300));
+    child.kill('SIGINT');
+    const code = await new Promise<number | null>((resolve) => child.on('exit', (c: number | null) => resolve(c)));
+    assert.equal(code, 4, stdout);
+    assert.match(JSON.parse(stdout).error, /Cancelled/);
+    assert.ok(!existsSync(out) && !existsSync(`${out}.partial`), 'nothing written');
+    assert.equal(spawnSync('pgrep', ['-f', 'slow-ffmpeg.sh|sleep 59.75'], { encoding: 'utf8' }).stdout.trim(), '', 'stand-in encoder stopped');
   });
 });
 

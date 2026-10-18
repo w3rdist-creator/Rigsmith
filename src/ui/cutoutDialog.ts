@@ -3,15 +3,22 @@
 // + attachment exactly where it was (optionally with a joint bone at the pivot and the
 // source replaced by its remainder, optionally patched with a flat colour). The source
 // image is never modified and stays in the project.
-import type { Rgba } from '../model/cutout.ts';
-import { cutOut, extendPiece, parseHexColor, patchBehind, polygonBounds, polygonCentroid, polygonProblem } from '../model/cutout.ts';
+// Pixel tools (the remaining Wiz-prep steps): "Select colour" picks pixels by colour —
+// the 4-connected region from the clicked pixel (flood fill) or, unticked, every pixel in
+// the colour box (threshold); Shift+click adds. A selection replaces the outline for the
+// cut. "Remove specks" makes a cleaned copy (faint pixels far from solid art removed) and
+// points the attachment at it in one undo step.
+import type { PixelMask, Rgba, SpeckOptions } from '../model/cutout.ts';
+import { DEFAULT_SPECKS, cutOut, cutOutMask, extendPiece, farthestMaskPixel, findSpecks, maskBounds, maskCentroid, parseHexColor, patchBehind, patchBehindMask, polygonBounds, polygonCentroid, polygonProblem, removeSpecks, selectColour, unionMask } from '../model/cutout.ts';
+import { encodePngExact } from '../model/png.ts';
 import { placeCutout } from '../model/rigOps.ts';
 import type { ImageAsset } from '../model/types.ts';
 import { newId } from '../model/types.ts';
 import type { App } from './app.ts';
+import { imagePixels } from './atlasDialog.ts';
 import { append, clear, h } from './dom.ts';
 
-type Mode = 'polygon' | 'rect' | 'pivot' | 'pick';
+type Mode = 'polygon' | 'rect' | 'pivot' | 'pick' | 'wand';
 const VIEW_W = 520;
 const VIEW_H = 400;
 
@@ -36,6 +43,14 @@ export class CutoutDialog {
   private busy = false;
   private canvas: HTMLCanvasElement | null = null;
   private rectStart: { x: number; y: number } | null = null;
+  private seeds: { x: number; y: number }[] = [];
+  private mask: PixelMask | null = null;
+  private tolerance = 32;
+  private minAlpha = 0;
+  private contiguous = true;
+  private specks: SpeckOptions = { ...DEFAULT_SPECKS };
+  private exact: { id: string; px: Rgba } | null = null;
+  private speckCache: { key: string; count: number } | null = null;
 
   constructor(app: App) {
     this.app = app;
@@ -67,8 +82,44 @@ export class CutoutDialog {
     this.behind = false;
     this.name = `${att.name}-piece`;
     this.parentId = att.boneId;
+    this.seeds = [];
+    this.mask = null;
+    this.tolerance = 32;
+    this.minAlpha = 0;
+    this.contiguous = true;
+    this.specks = { ...DEFAULT_SPECKS };
     this.render();
     this.dlg.showModal();
+    void this.loadExact();
+  }
+
+  /** Exact source pixels (PNG decoded without a canvas round trip) for the pixel tools. */
+  private async loadExact(): Promise<Rgba | null> {
+    const src = this.source();
+    if (!src) return null;
+    if (this.exact?.id !== src.im.id) {
+      this.exact = { id: src.im.id, px: (await imagePixels(this.app, src.im)).pixels };
+      if (this.dlg.open) this.render();
+    }
+    return this.exact.px;
+  }
+
+  private reselect(): void {
+    const px = this.exact?.px;
+    if (!px || !this.seeds.length) {
+      this.mask = null;
+      return;
+    }
+    const o = { tolerance: this.tolerance, minAlpha: this.minAlpha, contiguous: this.contiguous };
+    this.mask = this.seeds.map((q) => selectColour(px, q.x, q.y, o)).reduce((a, b) => unionMask(a, b));
+  }
+
+  private speckCount(): number | null {
+    const px = this.exact?.px;
+    if (!px || this.exact!.id !== this.source()?.im.id) return null;
+    const key = `${this.exact!.id}|${this.specks.faintBelow}|${this.specks.solidAbove}|${this.specks.distance}`;
+    if (this.speckCache?.key !== key) this.speckCache = { key, count: findSpecks(px, this.specks).count };
+    return this.speckCache.count;
   }
 
   private source() {
@@ -105,8 +156,8 @@ export class CutoutDialog {
     this.attachPointer(canvas, im);
     const modeBtn = (m: Mode, label: string, title: string) =>
       h('button', { class: `mini${this.mode === m ? ' on' : ''}`, 'data-testid': `cut-mode-${m}`, 'aria-pressed': this.mode === m ? 'true' : 'false', title, onclick: () => ((this.mode = m), this.render()) }, label);
-    const num = (testId: string, label: string, value: number, set: (v: number) => void) => {
-      const input = h('input', { type: 'number', min: 0, max: 64, step: 1, value: String(value), 'data-testid': testId, 'aria-label': label, class: 'w-num' });
+    const num = (testId: string, label: string, value: number, set: (v: number) => void, max = 64) => {
+      const input = h('input', { type: 'number', min: 0, max, step: 1, value: String(value), 'data-testid': testId, 'aria-label': label, class: 'w-num' });
       input.addEventListener('change', () => (set(Number(input.value)), this.render()));
       return h('label', { class: 'field inline' }, h('span', { class: 'field-label' }, label), input);
     };
@@ -122,9 +173,16 @@ export class CutoutDialog {
     parentSel.addEventListener('change', () => (this.parentId = parentSel.value || null));
     const color = h('input', { type: 'color', value: this.patchColor, 'data-testid': 'cut-patch-color', 'aria-label': 'Patch colour', disabled: !this.patch || !this.replace });
     color.addEventListener('change', () => (this.patchColor = color.value));
-    const problem = polygonProblem(this.poly, im.width, im.height);
+    const problem = this.cutProblem(im);
     const b = this.poly.length >= 2 ? polygonBounds(this.poly) : null;
-    const summary = `${this.poly.length / 2} point(s)${b ? ` · outline ${Math.round(b.width)}×${Math.round(b.height)} px at ${Math.round(b.x)},${Math.round(b.y)}` : ''} · overlap ${this.overlap} px · pivot ${this.pivot ? `${Math.round(this.pivot.x)},${Math.round(this.pivot.y)}` : 'not set'}`;
+    const mb = this.mask ? maskBounds(this.mask) : null;
+    const shape = this.mask
+      ? `selection ${this.mask.count} px${mb ? ` · ${mb.width}×${mb.height} px at ${mb.x},${mb.y}` : ''} (${this.contiguous ? 'flood fill' : 'colour threshold'}, tolerance ${this.tolerance}, α > ${this.minAlpha}${this.seeds.length > 1 ? `, ${this.seeds.length} clicks` : ''})`
+      : `${this.poly.length / 2} point(s)${b ? ` · outline ${Math.round(b.width)}×${Math.round(b.height)} px at ${Math.round(b.x)},${Math.round(b.y)}` : ''}`;
+    const summary = `${shape} · overlap ${this.overlap} px · pivot ${this.pivot ? `${Math.round(this.pivot.x)},${Math.round(this.pivot.y)}` : 'not set'}`;
+    const specks = this.speckCount();
+    const speckNum = (testId: string, label: string, key: keyof SpeckOptions, max: number) => num(testId, label, this.specks[key], (v) => (this.specks = { ...this.specks, [key]: Math.min(max, Math.max(0, Math.round(v) || 0)) }), max);
+    const reselectNum = (testId: string, label: string, value: number, set: (v: number) => void, max: number) => num(testId, label, value, (v) => (set(Math.min(max, Math.max(0, Math.round(v) || 0))), this.reselect()), max);
     append(this.body,
       h('p', { class: 'dim' }, `Source: ${im.name} (${im.width}×${im.height}) — never modified. The piece keeps its exact position.`),
       h('div', { class: 'row-key' },
@@ -132,8 +190,14 @@ export class CutoutDialog {
         modeBtn('rect', 'Rectangle', 'Drag a crop rectangle'),
         modeBtn('pivot', 'Pivot', 'Click the joint (rotation point) of the piece'),
         modeBtn('pick', 'Pick colour', 'Click the image to take the patch colour from it'),
+        modeBtn('wand', 'Select colour', 'Click a colour to select it (Shift+click adds); the selection is cut instead of an outline'),
         h('button', { class: 'mini', 'data-testid': 'cut-undo-point', disabled: !this.poly.length, onclick: () => (this.poly.splice(-2), this.render()) }, 'Undo point'),
-        h('button', { class: 'mini', 'data-testid': 'cut-clear', onclick: () => ((this.poly = []), (this.pivot = null), this.render()) }, 'Clear'),
+        h('button', { class: 'mini', 'data-testid': 'cut-clear', onclick: () => ((this.poly = []), (this.pivot = null), (this.seeds = []), (this.mask = null), this.render()) }, 'Clear'),
+      ),
+      h('div', { class: 'seq-grid' },
+        reselectNum('cut-tolerance', 'Colour tolerance', this.tolerance, (v) => (this.tolerance = v), 255),
+        reselectNum('cut-min-alpha', 'Only alpha above', this.minAlpha, (v) => (this.minAlpha = v), 254),
+        check('cut-contiguous', 'Contiguous (flood fill)', this.contiguous, (v) => ((this.contiguous = v), this.reselect())),
       ),
       canvas,
       h('p', { class: 'dim', 'data-testid': 'cut-summary' }, summary),
@@ -153,6 +217,16 @@ export class CutoutDialog {
       ),
       h('p', { class: 'hint' }, 'Extension sweeps the piece’s cross-section back past the pivot, only under fully opaque art (hidden at rest); synthesized pixels are counted.'),
       check('cut-bone', 'Create a joint bone at the pivot', this.makeBone, (v) => (this.makeBone = v)),
+      h('p', { class: 'hint' }, 'Clean up: remove faint specks — pixels with alpha below the first value and no pixel above the second within the distance. Makes a cleaned copy; the source image is kept.'),
+      h('div', { class: 'seq-grid' },
+        speckNum('cut-speck-faint', 'Faint: alpha below', 'faintBelow', 255),
+        speckNum('cut-speck-solid', 'Solid: alpha above', 'solidAbove', 254),
+        speckNum('cut-speck-dist', 'Within (px)', 'distance', 64),
+      ),
+      h('div', { class: 'row-key' },
+        h('span', { class: 'dim', 'data-testid': 'cut-speck-count' }, specks === null ? 'Counting specks…' : `${specks} speck px in ${im.name}`),
+        h('button', { class: 'mini', 'data-testid': 'cut-despeckle', disabled: !specks || this.busy, onclick: () => void this.despeckle() }, 'Remove specks'),
+      ),
       h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Bone parent'), parentSel),
       this.errors.length ? h('ul', { class: 'seq-errors', role: 'alert', 'data-testid': 'cut-errors' }, ...this.errors.map((e) => h('li', {}, e))) : null,
       h('div', { class: 'dialog-actions' },
@@ -183,6 +257,20 @@ export class CutoutDialog {
         this.patchColor = `#${[0, 1, 2].map((k) => px.data[i + k].toString(16).padStart(2, '0')).join('')}`;
         this.patch = true;
         return this.render();
+      }
+      if (this.mode === 'wand') {
+        void this.loadExact().then(() => {
+          this.seeds = e.shiftKey ? [...this.seeds, q] : [q];
+          this.poly = [];
+          this.reselect();
+          this.render();
+        });
+        return;
+      }
+      if (this.seeds.length) {
+        // Drawing an outline replaces a colour selection.
+        this.seeds = [];
+        this.mask = null;
       }
       if (this.mode === 'rect') {
         canvas.setPointerCapture(e.pointerId);
@@ -220,6 +308,17 @@ export class CutoutDialog {
     }
     const el = this.app.images.get(src.im);
     if (el) g.drawImage(el, geo.ox, geo.oy, src.im.width * geo.scale, src.im.height * geo.scale);
+    if (this.mask) {
+      const ov = document.createElement('canvas');
+      ov.width = this.mask.width;
+      ov.height = this.mask.height;
+      const id = new ImageData(this.mask.width, this.mask.height);
+      for (let i = 0; i < this.mask.data.length; i++) if (this.mask.data[i]) id.data.set([255, 209, 102, 150], i * 4);
+      ov.getContext('2d')!.putImageData(id, 0, 0);
+      g.imageSmoothingEnabled = false;
+      g.drawImage(ov, geo.ox, geo.oy, src.im.width * geo.scale, src.im.height * geo.scale);
+      g.imageSmoothingEnabled = true;
+    }
     const pts = [];
     for (let i = 0; i < this.poly.length; i += 2) pts.push({ x: geo.ox + this.poly[i] * geo.scale, y: geo.oy + this.poly[i + 1] * geo.scale });
     if (pts.length) {
@@ -276,11 +375,54 @@ export class CutoutDialog {
     return { id: newId('img'), name, mime: 'image/png', width: rgba.width, height: rgba.height, dataUrl: c.toDataURL('image/png'), derived };
   }
 
+  private cutProblem(im: ImageAsset): string | null {
+    if (this.mask) return this.mask.count ? null : 'The selection is empty: click a visible pixel, or raise the tolerance.';
+    if (this.seeds.length) return 'Reading the image…';
+    return polygonProblem(this.poly, im.width, im.height);
+  }
+
+  private async exactAsset(rgba: Rgba, name: string, derived: ImageAsset['derived']): Promise<ImageAsset> {
+    const bytes = await encodePngExact(rgba);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return { id: newId('img'), name, mime: 'image/png', width: rgba.width, height: rgba.height, dataUrl: `data:image/png;base64,${btoa(bin)}`, derived };
+  }
+
+  /** Cleaned copy of the source (specks removed); the attachment points at it (one undo step). */
+  private async despeckle(): Promise<void> {
+    const src = this.source();
+    if (!src || this.busy) return;
+    const { att, im } = src;
+    this.busy = true;
+    try {
+      const px = await this.loadExact();
+      const res = removeSpecks(px!, this.specks);
+      const base = im.name.replace(/\.[a-z0-9]+$/i, '');
+      const o = this.specks;
+      const clean = await this.exactAsset(res.image, `${base}-clean.png`, { kind: 'cleanup', sourceId: im.id, offsetX: 0, offsetY: 0, synthesized: 0, note: `${res.removed} faint speck px removed (alpha < ${o.faintBelow} with no alpha > ${o.solidAbove} within ${o.distance} px)` });
+      await this.app.images.decodeAll([clean]);
+      this.app.ed.mutate(`Remove specks from ${im.name}`, (p) => {
+        p.images.push(clean);
+        p.attachments.find((a) => a.id === att.id)!.imageId = clean.id;
+      });
+      this.seeds = [];
+      this.mask = null;
+      this.app.status(`Removed ${res.removed} speck px: ${att.name} now uses ${clean.name}. ${im.name} is unchanged.`);
+    } catch (e) {
+      this.errors = [(e as Error).message];
+    } finally {
+      this.busy = false;
+      this.render();
+      void this.loadExact();
+    }
+  }
+
   private async apply(): Promise<void> {
     const src = this.source();
     if (!src || this.busy) return;
     const { att, im } = src;
     this.errors = [];
+    if (this.mask) return this.applyMask(this.mask);
     const problem = polygonProblem(this.poly, im.width, im.height);
     if (problem) {
       this.errors = [problem];
@@ -338,6 +480,59 @@ export class CutoutDialog {
       this.dlg.close();
       this.app.ed.select(placed.boneId ? { kind: 'bone', id: placed.boneId } : { kind: 'attachment', id: placed.attId });
       this.app.status(`Cut “${this.name}” (${res.piece.width}×${res.piece.height}) from ${im.name}${placed.boneId ? ' with a joint bone' : ''}. The source image is unchanged.`);
+    } catch (e) {
+      this.errors = [(e as Error).message];
+      this.render();
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Cut of a colour selection: same options as an outline cut (overlap, remainder, patch, extension, bone). */
+  private async applyMask(mask: PixelMask): Promise<void> {
+    const src = this.source()!;
+    const { att, im } = src;
+    if (!mask.count) {
+      this.errors = ['The selection is empty.'];
+      return this.render();
+    }
+    if ((this.extend > 0 || this.makeBone) && !this.pivot) {
+      this.errors = ['Set a pivot (Pivot mode, click the joint) or untick “Create a joint bone”.'];
+      return this.render();
+    }
+    this.busy = true;
+    try {
+      const base = im.name.replace(/\.[a-z0-9]+$/i, '');
+      const srcPx = (await this.loadExact())!;
+      const res = cutOutMask(srcPx, mask, this.overlap);
+      let pieceRgba = res.piece, ox = res.offsetX, oy = res.offsetY, synth = 0;
+      if (this.extend > 0 && this.pivot) {
+        const c = maskCentroid(mask);
+        const ext = extendPiece(res.piece, res.offsetX, res.offsetY, this.pivot, { x: c.x - this.pivot.x, y: c.y - this.pivot.y }, this.extend, this.replace ? res.remainder : srcPx);
+        pieceRgba = ext.piece;
+        ox = ext.offsetX;
+        oy = ext.offsetY;
+        synth = ext.synthesized;
+      }
+      const how = `${this.contiguous ? 'flood fill' : 'colour threshold'} from ${this.seeds.map((q) => `${Math.floor(q.x)},${Math.floor(q.y)}`).join(' + ')}, tolerance ${this.tolerance}, alpha > ${this.minAlpha}: ${mask.count} px`;
+      const piece = await this.exactAsset(pieceRgba, `${base}-${this.name}.png`, { kind: synth ? 'extension' : 'cutout', sourceId: im.id, offsetX: ox, offsetY: oy, synthesized: synth, note: `${how}; overlap ${this.overlap}px${synth ? `; joint extension ${this.extend}px, ${synth} px synthesized` : ''}` });
+      let remainder: ImageAsset | undefined;
+      if (this.replace) {
+        if (this.patch) {
+          const patched = patchBehindMask(res.remainder, mask, parseHexColor(this.patchColor) ?? [128, 128, 128], srcPx);
+          remainder = await this.exactAsset(patched.image, `${base}-rest.png`, { kind: 'patch', sourceId: im.id, offsetX: 0, offsetY: 0, synthesized: patched.synthesized, note: `${how}; hole filled with flat ${this.patchColor}; ${patched.synthesized} px synthesized` });
+        } else remainder = await this.exactAsset(res.remainder, `${base}-rest.png`, { kind: 'remainder', sourceId: im.id, offsetX: 0, offsetY: 0, synthesized: 0, note: how });
+      }
+      await this.app.images.decodeAll(remainder ? [piece, remainder] : [piece]);
+      const ids = { att: newId('att'), bone: newId('bone') };
+      const far = this.pivot ? farthestMaskPixel(mask, this.pivot) : maskCentroid(mask);
+      let placed = { attId: '', boneId: null as string | null };
+      this.app.ed.mutate(`Cut out ${this.name}`, (p) => {
+        placed = placeCutout(p, { sourceAttId: att.id, piece, remainder, name: this.name, pivot: this.pivot, createBone: this.makeBone, boneParentId: this.parentId, polygon: [far.x, far.y], ids, behind: this.behind });
+      });
+      this.dlg.close();
+      this.app.ed.select(placed.boneId ? { kind: 'bone', id: placed.boneId } : { kind: 'attachment', id: placed.attId });
+      this.app.status(`Cut “${this.name}” (${res.piece.width}×${res.piece.height}, ${mask.count} selected px) from ${im.name}${placed.boneId ? ' with a joint bone' : ''}. The source image is unchanged.`);
     } catch (e) {
       this.errors = [(e as Error).message];
       this.render();

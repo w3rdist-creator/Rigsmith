@@ -118,7 +118,7 @@ describe('animated media export (APNG / GIF) from the Export sequence dialog', (
   it('APNG: every frame equals the PNG sequence exactly (Pillow and Chrome for Testing); 1/30 s; loops', async () => {
     await openExport('apng');
     assert.equal(await page.getByTestId('seq-export').innerText(), 'Export APNG');
-    assert.match(await page.getByTestId('seq-format-note').innerText(), /lossless, full 8-bit alpha\), 1\/30 s per frame, loops forever/);
+    assert.match(await page.getByTestId('seq-format-note').innerText(), /lossless, full 8-bit alpha\), 1\/30 s per frame, loops forever\. Verified in Rigsmith’s test suite with Pillow, ffmpeg and Chrome for Testing; other players not tested\.$/);
     const file = await download('wave.apng');
     assert.match(await page.getByTestId('status').innerText(), /Exported 30 frames \(\d+×\d+\) as runtime-rig-wave-30fps\.apng\. APNG: lossless, full alpha\./);
     const d = pillow(file);
@@ -147,7 +147,7 @@ describe('animated media export (APNG / GIF) from the Export sequence dialog', (
 
   it('GIF: binary alpha exactly at 50%, palette error measured, reported alpha loss = independent count, centisecond timing (Pillow, Chrome, ffprobe)', async () => {
     await openExport('gif');
-    assert.match(await page.getByTestId('seq-format-note').innerText(), /256-colour palette \(no dithering\) and 1-bit alpha.*3\/4\/3\/3\/4\/3 cs/s);
+    assert.match(await page.getByTestId('seq-format-note').innerText(), /256-colour palette \(no dithering\) and 1-bit alpha.*3\/4\/3\/3\/4\/3 cs.*Verified in Rigsmith’s test suite with Pillow, ffmpeg and Chrome for Testing; other players not tested\.$/s);
     const file = await download('wave.gif');
     const status = await page.getByTestId('status').innerText();
     const m = status.match(/GIF: (\d+) colours \((exact|reduced, no dithering)\); (\d+) of (\d+) px had partial alpha and became binary \((\d+) opaque, (\d+) transparent\)\./);

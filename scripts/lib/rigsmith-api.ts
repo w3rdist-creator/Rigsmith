@@ -334,7 +334,20 @@ export async function encodeMedia(r: SequenceResult, format: CliMediaFormat, out
   }
   if (cancelled) child.kill('SIGKILL');
   else child.stdin!.end();
-  const code = await done;
+  // Ctrl+C while ffmpeg is still encoding (after the last frame was piped) also cancels.
+  const code = await new Promise<number | null>((resolve) => {
+    const poll = setInterval(() => {
+      if (!cancelled && o.isCancelled?.()) {
+        cancelled = true;
+        child.kill('SIGKILL');
+      }
+    }, 50);
+    void done.then((c) => {
+      clearInterval(poll);
+      resolve(c);
+    });
+  });
+  if (!cancelled && o.isCancelled?.()) cancelled = true;
   if (cancelled || code !== 0) {
     rmSync(tmp, { force: true });
     if (cancelled) throw new ApiError('Cancelled — nothing was written.', undefined, EXIT.failed);

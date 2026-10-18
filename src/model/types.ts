@@ -27,7 +27,7 @@ export interface Bone {
 
 /** How a derived image was produced from another one (v2, cutout tools). */
 export interface DerivedImage {
-  kind: 'cutout' | 'remainder' | 'patch' | 'extension';
+  kind: 'cutout' | 'remainder' | 'patch' | 'extension' | 'cleanup';
   /** Image the pixels came from (never modified). */
   sourceId: string;
   /** Top-left of this image inside the source, in source pixels. */

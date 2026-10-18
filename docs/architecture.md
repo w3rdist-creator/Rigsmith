@@ -107,7 +107,7 @@ files that declare version 1 but contain v2 fields, and versions newer than 2.
 | `ik: [{id, name, bones: [parent, child] or [bone], target, mix, bendPositive}]` | IK constraints |
 | `paths: [{id, name, boneId, closed, nodes: [{x,y,inX,inY,outX,outY}]}]` | cubic Bezier paths in a bone's space (null = world); handles relative to their node |
 | `pathConstraints: [{id, name, pathId, bones, position, spacing, mix, rotate, rotateOffset}]` | bones placed along a path |
-| `ImageAsset.derived: {kind, sourceId, offsetX, offsetY, polygon?, synthesized, note?}` | provenance of cutout/remainder/patch images; the source image is kept unmodified |
+| `ImageAsset.derived: {kind, sourceId, offsetX, offsetY, polygon?, synthesized, note?}` | provenance of cutout/remainder/patch/extension/cleanup images; the source image is kept unmodified |
 | `Attachment.mesh: {points, triangles, hull, weights?}` | textured triangle mesh: `points` in the setup image's pixels (also the texture coordinates), the first `hull` points are the outline in order; `weights[v] = [{bone, w}]` sums to 1 per vertex (absent = rigid on the attachment's bone) |
 | `Animation.slots[attId].deform` | deform keys: `value` = per-vertex offsets `[dx0,dy0,…]` in image pixels (2 per vertex), interpolated |
 | `skins: [{id, name, entries: [{attachmentId, imageId, from?}]}]` | attachment sets: an entry without `from` replaces the attachment's setup image wherever it shows (including through an image key that shows the setup image); an entry with `from` replaces that keyed image. At most one entry per (attachment, from) |
@@ -133,6 +133,13 @@ image, skin, draw order) → mesh vertices.
 - **Integrity**: every undoable edit runs `repairReferences` (same undo step) so deleting
   bones/attachments/images drops or fixes dependent constraints, slot keys, skin entries
   and draw-order keys, and the project always re-opens.
+- **Pixel selections** (`selectColour`, `cutOutMask`, `findSpecks` in `src/model/cutout.ts`),
+  with the Wiz prep script's semantics: a per-channel colour box around the clicked pixel
+  on pixels with α > min; contiguous = the 4-connected region (PIL flood fill), otherwise
+  every matching pixel (threshold). A selection cut is pixel-exact (remainder = source
+  minus the selected pixels; overlap = disc dilation). Specks = 0 < α < faint with no
+  α > solid in a (2d+1)² window (default 100 / 200 / 6, the script's constants); removal
+  writes a `cleanup` copy and re-points the attachment (one undo step).
 - **Cutouts** (`src/model/cutout.ts`): coverage from the signed distance to the outline
   (1-px anti-aliased edge, exact outward overlap); piece and remainder are complementary
   at overlap 0; patches fill only transparent pixels inside the outline with a flat
