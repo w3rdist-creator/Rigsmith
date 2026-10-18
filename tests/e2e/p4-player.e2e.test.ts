@@ -15,7 +15,6 @@ import { serializeProject } from '../../src/model/format.ts';
 import { decodePng } from '../support/png-decode.ts';
 import type { Decoded } from '../support/png-decode.ts';
 import { boneWorlds, composite, decodeProjectImages, diffImages } from '../support/reference-composite.ts';
-import type { M } from '../support/reference-composite.ts';
 import { richProject } from '../support/runtime-fixture.ts';
 import { readZip } from '../support/zip-read.ts';
 import { EVIDENCE, launchIsolated, pickPort, startPreview } from './harness.ts';
