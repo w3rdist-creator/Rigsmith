@@ -201,6 +201,18 @@ the reference player (`player.html`) plays it with a texture atlas. Mesh layers 
 exactly to each mesh every draw: a grow-only layer cache made Chrome's anti-aliased clip
 coverage depend on previously drawn frames.
 
+## Lottie and animated media exports
+
+- `src/model/lottie.ts` writes a Lottie *subset* (bones → parented null layers, flat
+  images → image layers, exact easing mapping; discrete keys and skins → in/out-point
+  layer runs) and refuses IK, paths, meshes, deform/draw-order/constraint keys with named
+  diagnostics. Verified only by an in-repo evaluator (`tests/support/lottie-eval.ts`).
+  Details: docs/lottie.md.
+- `src/model/media.ts` turns the PNG-sequence frames into APNG (lossless) or GIF (global
+  palette, 1-bit alpha, centisecond delays); pure TS, shared by the export dialog and
+  the CLI. WebM (VP9 alpha) / MP4 (H.264, no alpha) are CLI-only via a local ffmpeg
+  (`scripts/lib/rigsmith-api.ts`). Details: docs/media.md.
+
 ## Persistence
 
 - Save = download of `<name>.rig.json` (images embedded). Open = file picker or drag &

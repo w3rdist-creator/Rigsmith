@@ -56,8 +56,11 @@ Set `RIGSMITH_CFT=/path/to/Google Chrome for Testing` if your binary lives elsew
 | Timeline | Click/drag to scrub (snaps to frames); click a ◆ to select it, drag to retime, change its interpolation (linear/step/smooth), Delete to remove. Set length (s), FPS and loop; ▶ Play / Space |
 | Undo | Ctrl/⌘+Z, Ctrl/⌘+Shift+Z or Ctrl+Y, or the toolbar buttons |
 | Save | **Save** downloads `<name>.rig.json` (images embedded); **Open…** loads it; **Save to browser / Restore** use localStorage |
-| Export | **Export data** → `<name>.runtime.json` (keys + baked per-frame world transforms); **Export PNG** → current frame, transparent, cropped to the art |
+| Export | **Export data** → `<name>.runtime.json` (runtime v2, docs/runtime.md); **Export PNG** → current frame, transparent, cropped to the art |
+| Export animation | **Export sequence…** → Format: transparent PNG sequence (ZIP, the reliable alpha path), APNG (lossless, full alpha) or GIF (256 colours, 1-bit alpha) — docs/media.md. **⇄ Mix…** exports transitions. **Export atlas…** packs texture pages; `player.html` plays runtime + atlas. **Export Lottie…** writes the supported subset or lists what blocks it (docs/lottie.md) |
+| Headless | `node scripts/rigsmith.ts <command>` — validate, render, mix, media (also WebM/MP4 with a local ffmpeg), runtime, atlas, lottie, authoring (docs/cli.md); `examples/brand-pipeline` |
 | Navigate | Wheel = zoom at cursor; middle/right-drag, Alt+drag or drag empty canvas = pan; F / double-click = fit; H = hide bones; **?** = all controls |
 
-Docs: `docs/architecture.md` (model, formats), `docs/provenance.md`,
-`docs/rea-evidence.md`, `docs/DELIVERY.md`.
+Docs: `docs/architecture.md` (model, formats), `docs/runtime.md`, `docs/cli.md`,
+`docs/lottie.md`, `docs/media.md`, `docs/provenance.md`, `docs/rea-evidence.md`,
+`docs/DELIVERY.md`, `docs/ROADMAP-DELIVERY.md` (roadmap report).

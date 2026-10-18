@@ -1,4 +1,22 @@
 TERMINAL_STATE: READY_FOR_HERMES_VERIFICATION
+Worker: claude-opus-5-5 (roadmap builder; no other agents/models)
+Scope: approved Fable roadmap, phases 1–4 (contract .hermes/dispatch/roadmap/BUILD-CONTRACT.md)
+Hermes verification has NOT been performed; this is a worker handoff, not a certification.
+
+Final report: docs/ROADMAP-DELIVERY.md · matrix: docs/ROADMAP-IMPLEMENTATION.md
+Roadmap status: .hermes/dispatch/roadmap/STATUS.md
+Commits: 8aef453 (1), efcda86 + 0c07e0a (2), fdb56e8 (3), ff1916b (4a), 69cc9b4 (4b),
+a71e917 (4c), ec57b7e (4d), 10aa08a (4e Lottie), 468a13b (4f media), + docs commit.
+Final fresh gates (.hermes/evidence/roadmap/final-gates/, 2026-10-18T05:43Z, tree of 468a13b):
+preservation 16/16, test-id audit 0 missing of 260, unit 152/152, typecheck 0, build 0,
+e2e 129/129, cli 12/12, wiz 16/16 — all exit 0.
+Stated partials/limits (see report §3–4): Wiz-prep colour-threshold/flood-fill/speck tools
+not offered; optional jointed Wiz v2 not produced; Lottie verified by in-repo evaluator
+only; WebM/MP4 CLI-only via local ffmpeg; no third-party player/platform tests.
+Preview: not running (no owned vite/Chrome processes left).
+
+---- History: original vertical-slice handoff (superseded by the roadmap work above) ----
+ORIGINAL_SLICE_STATE (historical): READY_FOR_HERMES_VERIFICATION
 Worker: claude-opus-5-5
 Effort: high
 Scope: initial usable independently implemented animation editor ("Rigsmith")
