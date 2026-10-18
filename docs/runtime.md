@@ -130,22 +130,59 @@ What the agreement tests show (`tests/unit/runtime.test.ts`, `tests/e2e/p4-playe
 - Because evaluation and drawing are shared code, these tests do not independently
   re-derive the maths; the independent checks are the reference rasterizer tests of the
   editor renderer (`tests/support/reference-composite.ts`, phases 1–4).
-- Since the drwdmrs3 fix pass (DRW-006), the **player's own canvas** is also compared,
-  frame by frame (wave, 30 frames), with that independent reference. The reference
-  imports nothing from `src/` and does its own key sampling (bezier included), bone
-  hierarchy, slot / draw-order rules, mesh skinning + deform and compositing. It does
-  not solve IK or path constraints: the four constraint-driven bones take their world
-  pose from the runtime file's `baked` rows, i.e. from the shared-code exporter. Result:
-  9 strict mismatches (solid vs clear, or opaque colour) in 30 frames, against 32 376
-  for a control without the constrained poses. The rest are alpha-only differences on
-  the outline of the deformed mesh `band` (≤ 3.2 % of covered pixels per frame; the
-  budget was set from the first observed run). Observed: the mesh never folds, the skinned
-  vertices equal the exporter's `bakedMeshes` within 1e-3 px, and the player's outline
-  carries ~45–50 px less alpha per frame than the reference with the interior equal.
-  Inferred, not proven: edge sampling/coverage differences (canvas texture filtering at
-  the image border vs the reference's 4×4 subsampled coverage). Not covered: constraint solving by a non-shared
-  implementation, the skin and the transition (still player vs editor only), and any
-  third-party runtime — none exists for this format.
+- Since the post-review fix pass (FR-003, superseding the drwdmrs3 DRW-006 check), the
+  **player's own canvas** is compared frame by frame with an independent reference for
+  wave (30 frames), wave with skin `alt` (30) and the wave → rest transition (31; mix at
+  0.5 s, stored 0.3 s, missing channels to setup). The reference
+  (`tests/support/reference-composite.ts` + `reference-constraints.ts`) imports nothing
+  from `src/` — checked transitively, with planted-import controls, by
+  `tests/unit/reference-independence.test.ts` — and reads only the project file: no
+  runtime-file data is an input (the baked rows are compared only afterwards, as a
+  diagnostic: max |Δ| 4.98e-4 px/deg over x, y, rotation, scaleX, scaleY, i.e. the bake's
+  3-decimal rounding). It re-derives key sampling, the bone chain, slot / draw-order /
+  skin rules, mesh skinning + deform, compositing, and now also:
+  - **Two-bone IK** by closed-form circle intersection in the chain parent's local space
+    (src samples and bisects the elbow-length function). Covered: bone 1 with uniform own
+    scale (any parent the TRS chain produces); other chains throw rather than guess.
+    `bendPositive` is read as cross(shoulder→target, shoulder→elbow) > 0 in parent space
+    with y down — inferred from "clockwise side" in docs/architecture.md.
+  - **Path constraints** with the documented approximation (32 chords per cubic, curve
+    parameter interpolated between table rows, analytic tangent). Diagnostic: the table
+    is 2.6e-2 px shorter than the exact arc length of this fixture's path.
+  - **Mixing** per docs/architecture.md (chain blend, shortest rotation, discrete state
+    and constraint keys from the newest entry with w ≥ 0.5, opacity/deform blended).
+  Unit checks of the reference itself (forward-kinematics reach, bend side under
+  non-uniform and mirrored parents, straighten/fold, mix 0.5, path clamp/wrap, shortest
+  rotation, `setup`/`hold`): `tests/unit/reference-constraints.test.ts`.
+
+  Result (`report.txt` of p4-player): strict mismatches (solid vs clear, or opaque colour
+  differing by > 24) — wave **9**, skin alt **7**, transition **11**. Each strict pixel is
+  classified in the test (`explained === strict` is asserted, and each case's budget is
+  that classified count): all 27 are **the anti-aliased edge of `upper` over the opaque
+  `torso`**. Over an opaque layer a coverage difference becomes a colour difference, which
+  the strict rule cannot tell from a wrong colour; the test recomposites the reference
+  without `upper` (U) and with `upper` alone (X) and accepts a pixel only if both the
+  player's and the reference's colour lie on the line U → X (residual ≤ 6/255, observed
+  ≤ 0.7) with partial coverage on both sides. The coverage gap of these pixels is 2.0–4.2
+  of 16 subsamples (player covers more). Root cause: the reference's 4×4 subsampled
+  coverage of a quad edge vs the canvas's analytic coverage — the art is opaque up to its
+  image border, so the edge is the quad's geometric boundary. Checks that rule out a pose
+  or size error: measured along the whole edge of `upper` (≈ 700 px per side per case),
+  the mean coverage gap is −0.04…+0.09/16 on both sides of the bone, over a clear
+  background and over the torso alike (asserted |mean| ≤ 0.25/16; a 0.1 px edge offset
+  would move it by 1.6/16), with the same positive tail over a clear background (up to
+  3.6/16, where it is an alpha-only difference); world scaleY and determinants agree with
+  the bake (≤ 4.6e-5, none mirrored); region and image sizes agree (56 × 14). The strict
+  gaps also lie within the gaps on all edges over a clear background (worst 7.4/16,
+  asserted). The remaining over-tolerance pixels are alpha-only edge differences (worst
+  3.20 % of covered pixels, mean ≤ 0.26); their thresholds (4 %, 0.5) are fixed limits,
+  not derived counts. Controls through the same reference: no constraints 32 376 / 32 070
+  / 33 458 strict pixels, the elbow flipped 8 245 / 8 184 / 7 031 (each asserted > 100 ×
+  the case's strict count). A mutation of src's path spacing (× 1.1) passes every
+  player-vs-editor comparison and the old baked-row check, and fails this one (1 181
+  strict, 9 explained). Not covered: any third-party runtime — none exists for this
+  format; IK chains whose first bone has non-uniform own scale (the reference refuses
+  them; this fixture has none).
 
 Limits: Canvas2D only (no WebGL path); verified in headless Chrome for Testing only; one
 skin at a time (no skin composition); transitions in the player are a single A → B

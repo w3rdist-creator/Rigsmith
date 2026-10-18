@@ -63,6 +63,14 @@ function stepped(keys: any[] | undefined, t: number): any {
   return out;
 }
 
+/** Keyed opacity of every attachment at time t (the value composite() uses). */
+export function slotOpacities(project: any, anim: any | null, t: number): Map<string, number> {
+  return new Map(project.attachments.map((a: any) => {
+    const keys = anim?.slots?.[a.id]?.opacity;
+    return [a.id, keys?.length ? sampleTrack(keys, t, [a.opacity])[0] : a.opacity];
+  }));
+}
+
 /** World matrix per bone id at time t (anim null = setup pose). No constraints. */
 export function boneWorlds(project: any, anim: any | null, t: number): Map<string, M> {
   const out = new Map<string, M>();
@@ -96,6 +104,12 @@ export function worldsFromLocal(project: any, local: Map<string, { x: number; y:
   return out;
 }
 
+/** Blended continuous slot channels (a mixed frame): opacity and mesh deform per attachment id. */
+export interface SlotOverride {
+  opacity: Map<string, number>;
+  deform: Map<string, number[]>;
+}
+
 export interface RefImage {
   width: number;
   height: number;
@@ -112,9 +126,10 @@ export function decodeProjectImages(project: any): Map<string, Decoded> {
  * Composites the project at time t into a w×h transparent RGBA buffer where world point
  * (x,y) maps to pixel ((x - originX)·scale, (y - originY)·scale).
  */
-export function composite(project: any, anim: any | null, t: number, images: Map<string, Decoded>, w: number, h: number, originX: number, originY: number, scale: number, worldOverride?: Map<string, M>, skinId?: string | null): RefImage {
-  // Constraints (IK/paths) are not re-solved here: callers that need them pass bone
-  // world matrices measured elsewhere and check the constraint geometry separately.
+export function composite(project: any, anim: any | null, t: number, images: Map<string, Decoded>, w: number, h: number, originX: number, originY: number, scale: number, worldOverride?: Map<string, M>, skinId?: string | null, slotOverride?: SlotOverride): RefImage {
+  // Constraints (IK/paths) and mixing are not solved here: callers pass bone world
+  // matrices (e.g. from reference-constraints.ts) and, for a blended frame, the blended
+  // opacity/deform; (anim, t) then supply only the stepped slot and draw-order state.
   const worlds = worldOverride ?? boneWorlds(project, anim, t);
   // Premultiplied float accumulation.
   const acc = new Float64Array(w * h * 4);
@@ -128,7 +143,7 @@ export function composite(project: any, anim: any | null, t: number, images: Map
     // Stepped channels show the setup value before their first key.
     const vk = stepped(st?.visible, t);
     const visible = vk ? vk.value[0] >= 0.5 : !a.hidden;
-    const opacity = st?.opacity?.length ? sampleTrack(st.opacity, t, [a.opacity])[0] : a.opacity;
+    const opacity = slotOverride?.opacity.get(a.id) ?? (st?.opacity?.length ? sampleTrack(st.opacity, t, [a.opacity])[0] : a.opacity);
     if (!visible || opacity <= 0) continue;
     let imageId = stepped(st?.image, t)?.imageId ?? a.imageId;
     // Skin rule (independent restatement): an entry without `from` stands in for the
@@ -141,7 +156,7 @@ export function composite(project: any, anim: any | null, t: number, images: Map
     const base = a.boneId ? worlds.get(a.boneId)! : ([1, 0, 0, 1, 0, 0] as M);
     if (a.mesh) {
       setup ??= boneWorlds(project, null, 0);
-      compositeMesh(acc, w, h, view, a, st, t, project, worlds, setup, meta, img, opacity);
+      compositeMesh(acc, w, h, view, a, st, t, project, worlds, setup, meta, img, opacity, slotOverride?.deform.get(a.id));
       continue;
     }
     quad(acc, w, h, mul(view, mul(base, trs(a.x, a.y, a.rotation, a.scaleX, a.scaleY))), meta, img, opacity);
@@ -206,11 +221,11 @@ export function compositeDraws(draws: { m: M; width: number; height: number; img
 const apply = (m: M, x: number, y: number): [number, number] => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
 
 /** Screen-space (pixel) vertex positions of a mesh attachment at time t. */
-export function meshScreenVertices(a: any, st: any, t: number, project: any, worlds: Map<string, M>, setup: Map<string, M>, view: M): number[] {
+export function meshScreenVertices(a: any, st: any, t: number, project: any, worlds: Map<string, M>, setup: Map<string, M>, view: M, deformOverride?: number[]): number[] {
   const mesh = a.mesh;
   const setupMeta = project.images.find((i: any) => i.id === a.imageId);
   const n = mesh.points.length / 2;
-  const deform = sampleTrack(st?.deform, t, new Array(mesh.points.length).fill(0));
+  const deform = deformOverride ?? sampleTrack(st?.deform, t, new Array(mesh.points.length).fill(0));
   const attLocal = trs(a.x, a.y, a.rotation, a.scaleX, a.scaleY);
   const ident: M = [1, 0, 0, 1, 0, 0];
   const out: number[] = [];
@@ -236,10 +251,10 @@ export function meshScreenVertices(a: any, st: any, t: number, project: any, wor
   return out;
 }
 
-function compositeMesh(acc: Float64Array, w: number, h: number, view: M, a: any, st: any, t: number, project: any, worlds: Map<string, M>, setup: Map<string, M>, meta: any, img: Decoded, opacity: number): void {
+function compositeMesh(acc: Float64Array, w: number, h: number, view: M, a: any, st: any, t: number, project: any, worlds: Map<string, M>, setup: Map<string, M>, meta: any, img: Decoded, opacity: number, deform?: number[]): void {
   const mesh = a.mesh;
   const setupMeta = project.images.find((i: any) => i.id === a.imageId);
-  const v = meshScreenVertices(a, st, t, project, worlds, setup, view);
+  const v = meshScreenVertices(a, st, t, project, worlds, setup, view, deform);
   // Texture coordinates in the shown image's pixels (scaled from the setup image).
   const ku = meta.width / setupMeta.width, kv = meta.height / setupMeta.height;
   const S = 4;

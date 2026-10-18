@@ -14,7 +14,9 @@ import type { BrowserContext, Page } from 'playwright-core';
 import { serializeProject } from '../../src/model/format.ts';
 import { decodePng } from '../support/png-decode.ts';
 import type { Decoded } from '../support/png-decode.ts';
-import { boneWorlds, composite, decodeProjectImages, diffImages } from '../support/reference-composite.ts';
+import type { M, SlotOverride } from '../support/reference-composite.ts';
+import { composite, decodeProjectImages, diffImages, slotOpacities } from '../support/reference-composite.ts';
+import { constrainedWorlds, mixFrame } from '../support/reference-constraints.ts';
 import { richProject } from '../support/runtime-fixture.ts';
 import { readZip } from '../support/zip-read.ts';
 import { EVIDENCE, launchIsolated, pickPort, startPreview } from './harness.ts';
@@ -226,72 +228,206 @@ describe('reference player', () => {
     assert.ok(worst < 2e-3, `max difference ${worst}`);
   });
 
-  // Review DRW-006: the checks above compare the player with the editor, and both use
-  // src/model. Here the pixels come from tests/support/reference-composite.ts, which
-  // imports nothing from src/: it does its own keyframe sampling (bezier included), bone
-  // hierarchy, slot/draw-order rules, mesh skinning + deform and compositing. It does
-  // not solve IK or path constraints, so only the constraint-driven bones (and their
-  // descendants) take their world pose from the runtime file's baked rows — that part
-  // stays the exporter's (shared-model) output. Baked rows hold no shear, so they are
-  // used only for bones whose own world pose has none.
-  it('every frame of wave matches an independent renderer; only IK/path bones come from the runtime’s baked rows (review DRW-006)', async () => {
-    const rt = JSON.parse(readFileSync(files.runtime, 'utf8'));
-    const an = rt.animations.find((a: any) => a.name === 'wave');
-    const anim = fixture.animations.find((a) => a.name === 'wave')!;
-    const nameOf = new Map(fixture.bones.map((b) => [b.id, b.name]));
-    const driven = new Set<string>([...(fixture.ik ?? []).flatMap((k) => k.bones), ...(fixture.pathConstraints ?? []).flatMap((k) => k.bones)]);
-    for (let grew = true; grew; ) {
-      grew = false;
-      for (const b of fixture.bones) if (b.parentId && driven.has(b.parentId) && !driven.has(b.id)) grew = !!driven.add(b.id);
-    }
-    assert.deepEqual([...driven].sort(), ['f1', 'f2', 'lower', 'upper'], 'constraint-driven bones of the fixture');
-    const images = decodeProjectImages(fixture);
+  // Review DRW-006 / post-review FR-003: the checks above compare the player with the
+  // editor, and both use src/model. Here every pixel of the expected image comes from
+  // tests/support (reference-composite.ts + reference-constraints.ts), which import
+  // nothing from src/ (tests/unit/reference-independence.test.ts): keyframe sampling,
+  // the bone chain, two-bone IK (circle intersection), the path constraint (32-chord
+  // arc-length table), mixing, skins, slot/draw-order rules, mesh skinning + deform and
+  // compositing are all re-derived from the project JSON and docs/architecture.md. The
+  // runtime file's baked rows are not an input: the project handed to the reference is
+  // the fixture (no baked data), and the baked rows are only compared afterwards.
+  // Every strict mismatch is listed in the report with its pixel, attachment and values,
+  // and the budget per case is the count classified in docs/runtime.md.
+  it('wave, skin alt and the wave → rest transition match an independent renderer with its own IK, paths and mixing (review DRW-006, FR-003)', async () => {
+    // The reference reads only the project (no runtime file): fps and keys included.
+    const project: any = JSON.parse(serializeProject(fixture));
+    assert.ok(!/"baked/.test(JSON.stringify(project)), 'the reference input carries no baked data');
+    const wave = project.animations.find((a: any) => a.name === 'wave');
+    const rest = project.animations.find((a: any) => a.name === 'rest');
+    const fps = wave.fps;
+    const nameOf = new Map<string, string>(project.bones.map((b: any) => [b.id, b.name]));
+    const noConstraints = { ...project, ik: [], pathConstraints: [] };
+    const flipped = { ...project, ik: project.ik.map((k: any) => ({ ...k, bendPositive: !k.bendPositive })) };
+    const images = decodeProjectImages(project);
+    const mixMeta = sequence(files.mix).meta;
+    const mixRule = project.mixes.find((m: any) => m.from === wave.id && m.to === rest.id);
+    assert.equal(mixRule.duration, 0.3, 'stored wave → rest mix');
     // A strict mismatch is a solid-vs-clear pixel or a colour difference where both are
     // opaque; the rest are anti-aliased edge coverages (the reference subsamples 4×4,
     // the canvas clips analytically), which a deformed mesh outline has many of.
+    const isStrict = (a: Uint8Array, b: Uint8Array, k: number): boolean => {
+      const dc = Math.max(...[0, 1, 2].map((c) => Math.abs((a[k + c] * a[k + 3]) / 255 - (b[k + c] * b[k + 3]) / 255)));
+      return (Math.max(a[k + 3], b[k + 3]) >= 224 && Math.min(a[k + 3], b[k + 3]) <= 31) || (a[k + 3] === 255 && b[k + 3] === 255 && dc > 24);
+    };
     const strictCount = (a: Uint8Array, b: Uint8Array): number => {
       let n = 0;
-      for (let k = 0; k < a.length; k += 4) {
-        const dc = Math.max(...[0, 1, 2].map((c) => Math.abs((a[k + c] * a[k + 3]) / 255 - (b[k + c] * b[k + 3]) / 255)));
-        const solidVsClear = Math.max(a[k + 3], b[k + 3]) >= 224 && Math.min(a[k + 3], b[k + 3]) <= 31;
-        if (solidVsClear || (a[k + 3] === 255 && b[k + 3] === 255 && dc > 24)) n++;
-      }
+      for (let k = 0; k < a.length; k += 4) if (isStrict(a, b, k)) n++;
       return n;
     };
-    let over = 0, strict = 0, worstMean = 0, worstEdge = 0, controlStrict = 0, freeWorst = 0;
-    for (let i = 0; i < 30; i++) {
-      await player.getByTestId('player-time').fill(String(i));
-      const got = await playerCanvas();
-      const t = got.frame / an.fps;
-      const own = boneWorlds(fixture, anim, t);
-      const worlds = new Map(own);
-      for (const id of driven) {
-        const [x, y, deg, sx, sy] = an.baked[nameOf.get(id)!][i];
-        const r = (deg * Math.PI) / 180;
-        worlds.set(id, [Math.cos(r) * sx, Math.sin(r) * sx, -Math.sin(r) * sy, Math.cos(r) * sy, x, y]);
+    type Case = { name: string; frames: number; skin: string | null; budget: number; frame: (i: number, p?: any) => { T: number; worlds: Map<string, M>; anim: any; t: number; slots?: SlotOverride } };
+    const cases: Case[] = [
+      { name: 'wave', frames: 30, skin: null, budget: 9, frame: (i, p = project) => ({ T: i / fps, worlds: constrainedWorlds(p, wave, i / fps), anim: wave, t: i / fps }) },
+      { name: 'wave, skin alt', frames: 30, skin: 'skin_alt', budget: 7, frame: (i, p = project) => ({ T: i / fps, worlds: constrainedWorlds(p, wave, i / fps), anim: wave, t: i / fps }) },
+      {
+        name: 'wave → rest (mix at 0.5 s, stored 0.3 s)', frames: mixMeta.frames.length, skin: null, budget: 11,
+        frame: (i, p = project) => {
+          const T = mixMeta.frames[i].time;
+          const m = mixFrame(p, [{ anim: wave, start: 0, mix: 0 }, { anim: rest, start: 0.5, mix: mixRule.duration }], T, 'setup');
+          return { T, worlds: m.worlds, anim: m.discrete.anim, t: m.discrete.t, slots: { opacity: m.opacity, deform: m.deform } };
+        },
+      },
+    ];
+    const waveWorlds: Map<string, M>[] = [];
+    try {
+      for (const c of cases) {
+        await player.getByTestId('player-skin').selectOption({ label: c.skin ? 'alt' : '(default)' });
+        if (c.name.startsWith('wave → rest')) {
+          await setField(player, 'player-mix-at', 0.5);
+          await player.getByTestId('player-mix-to').selectOption({ label: 'rest' });
+        }
+        let over = 0, strict = 0, worstMean = 0, worstEdge = 0, controlStrict = 0, sideStrict = 0, explained = 0, gap = 0, edgeN = 0, edgeSum = 0, edgeMax = 0;
+        const classes = new Map<string, number>();
+        const upperGap = { clear: [0, 1].map(() => ({ n: 0, sum: 0, min: Infinity, max: -Infinity })), opaque: [0, 1].map(() => ({ n: 0, sum: 0, min: Infinity, max: -Infinity })) };
+        const dump: string[] = [];
+        for (let i = 0; i < c.frames; i++) {
+          await player.getByTestId('player-time').fill(String(i));
+          const got = await playerCanvas();
+          assert.equal(got.frame, i, `${c.name}: frame`);
+          const f = c.frame(i);
+          assert.ok(Math.abs(f.T - got.frame / fps) < 1e-12, `${c.name}: clock`);
+          if (c.name === 'wave') waveWorlds.push(f.worlds);
+          const view = [got.img.width, got.img.height, got.ox, got.oy, got.scale] as const;
+          const ref = composite(project, f.anim, f.t, images, ...view, f.worlds, c.skin, f.slots);
+          const d = diffImages(got.img, ref, 24);
+          const s = strictCount(got.img.data, ref.data);
+          over += d.over;
+          strict += s;
+          worstMean = Math.max(worstMean, d.meanDiff);
+          worstEdge = Math.max(worstEdge, (d.over - s) / d.covered);
+          // Edges over a clear background (reference alpha strictly between 0 and 255): the
+          // player's coverage minus the reference's, in 4×4 subsamples.
+          for (let k = 3; k < ref.data.length; k += 4) if (ref.data[k] > 0 && ref.data[k] < 255) {
+            const g = ((got.img.data[k] - ref.data[k]) / 255) * 16;
+            edgeN++;
+            edgeSum += g;
+            edgeMax = Math.max(edgeMax, Math.abs(g));
+          }
+          // The strict class, measured along the whole edge of `upper`: its coverage gap
+          // (player − reference, 4×4 subsamples) over a clear background vs over an opaque
+          // layer, split by side of the bone axis.
+          {
+            const op0 = f.slots?.opacity ?? slotOpacities(project, f.anim, f.t);
+            const upId = project.attachments.find((a: any) => a.name === 'upper').id;
+            const only = (keep: boolean) => composite(project, f.anim, f.t, images, ...view, f.worlds, c.skin, {
+              opacity: new Map([...op0].map(([k2, v]) => [k2, (k2 === upId) === keep ? v : 0])),
+              deform: f.slots?.deform ?? new Map(),
+            }).data;
+            const X = only(true), U = only(false);
+            const m = f.worlds.get(project.attachments.find((a: any) => a.name === 'upper').boneId)!;
+            const ox = (m[4] - got.ox) * got.scale, oy = (m[5] - got.oy) * got.scale;
+            for (let k = 0; k < X.length; k += 4) {
+              const cov = X[k + 3];
+              if (cov === 0 || cov === 255) continue;
+              const px = (k / 4) % got.img.width + 0.5, py = Math.floor(k / 4 / got.img.width) + 0.5;
+              const side = m[0] * (py - oy) - m[1] * (px - ox) > 0 ? 1 : 0;
+              let g: number | null = null;
+              if (U[k + 3] === 0) g = ((got.img.data[k + 3] - cov) / 255) * 16;
+              else if (U[k + 3] === 255) {
+                const dir = [0, 1, 2].map((c2) => X[k + c2] - (U[k + c2] * U[k + 3]) / 255);
+                const n2 = dir.reduce((q, v) => q + v * v, 0);
+                if (n2 > 40 * 40) {
+                  const al = [0, 1, 2].reduce((q, c2) => q + ((got.img.data[k + c2] * got.img.data[k + 3]) / 255 - U[k + c2]) * dir[c2], 0) / n2;
+                  g = (al - cov / 255) * 16;
+                }
+              }
+              if (g === null) continue;
+              const e = upperGap[U[k + 3] === 0 ? 'clear' : 'opaque'][side];
+              e.n++;
+              e.sum += g;
+              e.min = Math.min(e.min, g);
+              e.max = Math.max(e.max, g);
+            }
+          }
+          if (s) {
+            // Classify each strict pixel. The reference is recomposited with one attachment
+            // X at a time removed (U) and alone (X); if X lies on top with partial coverage,
+            // a composite is U + α·(X − U) per premultiplied channel. A pixel is explained as
+            // "edge coverage of X over an opaque layer" when the player's colour lies on that
+            // line (residual ≤ 6 of 255) and both coverages are partial; the gap in coverage
+            // is reported in 4×4 subsamples.
+            const op = f.slots?.opacity ?? slotOpacities(project, f.anim, f.t);
+            const without = (id: string | null, only: boolean) => composite(project, f.anim, f.t, images, ...view, f.worlds, c.skin, {
+              opacity: new Map([...op].map(([k, v]) => [k, only ? (k === id ? v : 0) : k === id ? 0 : v])),
+              deform: f.slots?.deform ?? new Map(),
+            }).data;
+            const layers = project.attachments.map((a: any) => ({ a, alone: without(a.id, true), rest: without(a.id, false) }));
+            for (let k = 0; k < got.img.data.length; k += 4) if (isStrict(got.img.data, ref.data, k)) {
+              const px = (k / 4) % got.img.width, py = Math.floor(k / 4 / got.img.width);
+              const pre = (d: Uint8Array) => [0, 1, 2].map((c2) => (d[k + c2] * d[k + 3]) / 255);
+              const P = pre(got.img.data), R = pre(ref.data);
+              let why = '';
+              for (const { a, alone, rest: U0 } of layers) {
+                const cov = alone[k + 3];
+                if (cov === 0 || cov === 255 || U0[k + 3] !== 255) continue;
+                const U = pre(U0), X = [0, 1, 2].map((c2) => alone[k + c2]);
+                const dir = X.map((v, c2) => v - U[c2]);
+                const n2 = dir.reduce((q, v) => q + v * v, 0);
+                const fit = (Q: number[]) => {
+                  const al = Q.reduce((q, v, c2) => q + (v - U[c2]) * dir[c2], 0) / n2;
+                  return { al, res: Math.hypot(...Q.map((v, c2) => v - U[c2] - al * dir[c2])) };
+                };
+                const fp = fit(P), fr = fit(R);
+                if (fp.res <= 6 && fr.res <= 6 && fp.al > 0 && fp.al < 1 && fr.al > 0 && fr.al < 1) {
+                  why = `edge coverage of ${a.name} over an opaque layer: player ${(fp.al * 16).toFixed(1)}/16, reference ${(fr.al * 16).toFixed(1)}/16 (residual ${fp.res.toFixed(1)})`;
+                  explained++;
+                  classes.set(a.name, (classes.get(a.name) ?? 0) + 1);
+                  gap = Math.max(gap, Math.abs(fp.al - fr.al) * 16);
+                  break;
+                }
+              }
+              dump.push(`    f${i} (${px},${py}) player ${[...got.img.data.subarray(k, k + 4)]} reference ${[...ref.data.subarray(k, k + 4)]}: ${why || 'UNEXPLAINED'}`);
+            }
+          }
+          // Controls, through the same frame function: no constraints, and the elbow flipped.
+          for (const [variant, add] of [[noConstraints, (n: number) => (controlStrict += n)], [flipped, (n: number) => (sideStrict += n)]] as const) {
+            const g = c.frame(i, variant);
+            add(strictCount(got.img.data, composite(project, g.anim, g.t, images, ...view, g.worlds, c.skin, g.slots).data));
+          }
+        }
+        report.push(`FR-003 ${c.name}: player vs independent reference (own IK, paths${c.name.startsWith('wave → rest') ? ', mixing' : ''}): ${c.frames} frames, ${over} px over tolerance 24 of which ${strict} strict, worst edge-coverage share ${(worstEdge * 100).toFixed(2)}%, worst mean ${worstMean.toFixed(3)}; strict explained ${explained}/${strict} (${[...classes].map(([n, v]) => `${v} × ${n} edge over an opaque layer`).join(', ') || 'none'}, worst coverage gap ${gap.toFixed(1)}/16 subsamples; edges over a clear background: ${edgeN} px, mean gap ${(edgeSum / edgeN).toFixed(2)}/16, worst ${edgeMax.toFixed(1)}/16); control without constraints ${controlStrict} strict px, control with the elbow flipped ${sideStrict} strict px`);
+        const fmt = (e: { n: number; sum: number; min: number; max: number }) => `${e.n} px mean ${(e.sum / e.n).toFixed(2)} range ${e.min.toFixed(1)}…${e.max.toFixed(1)}`;
+        // No systematic offset or thickness: a 0.1 px shift of an edge moves its mean by 1.6/16.
+        for (const e of [...upperGap.clear, ...upperGap.opaque]) assert.ok(e.n > 300 && Math.abs(e.sum / e.n) <= 0.25, `${c.name}: upper edge mean gap ${e.sum / e.n} over ${e.n} px`);
+        report.push(`  upper edge coverage gap (/16): over clear — side A ${fmt(upperGap.clear[0])}, side B ${fmt(upperGap.clear[1])}; over an opaque layer — side A ${fmt(upperGap.opaque[0])}, side B ${fmt(upperGap.opaque[1])}`);
+        report.push(...dump);
+        assert.equal(explained, strict, `${c.name}: every strict mismatch is classified`);
+        assert.ok(gap <= edgeMax, `${c.name}: strict coverage gaps (${gap}) lie within the gaps of edges over a clear background (${edgeMax})`);
+        assert.ok(strict <= c.budget, `${c.name}: ${strict} strict mismatches (budget ${c.budget}, the classified count of docs/runtime.md)`);
+        assert.ok(worstEdge <= 0.04, `${c.name}: edge-coverage share ${worstEdge}`);
+        assert.ok(worstMean <= 0.5, `${c.name}: mean ${worstMean}`);
+        assert.ok(controlStrict > 100 * Math.max(1, strict), `${c.name}: the comparison tells an unconstrained pose apart`);
+        assert.ok(sideStrict > 100 * Math.max(1, strict), `${c.name}: the comparison tells the elbow side apart`);
       }
-      // Unconstrained bones: the reference's own pose agrees with the baked position.
-      for (const [id, m] of own) if (!driven.has(id)) {
-        const row = an.baked[nameOf.get(id)!][i];
-        freeWorst = Math.max(freeWorst, Math.abs(m[4] - row[0]), Math.abs(m[5] - row[1]));
-      }
-      const view = [got.img.width, got.img.height, got.ox, got.oy, got.scale] as const;
-      const ref = composite(fixture, anim, t, images, ...view, worlds);
-      const d = diffImages(got.img, ref, 24);
-      const s = strictCount(got.img.data, ref.data);
-      over += d.over;
-      strict += s;
-      worstMean = Math.max(worstMean, d.meanDiff);
-      worstEdge = Math.max(worstEdge, (d.over - s) / d.covered);
-      // Control: the same renderer without the constrained poses must not match.
-      controlStrict += strictCount(got.img.data, composite(fixture, anim, t, images, ...view, own).data);
+      // Diagnostic only, after every expected image is fixed: the reference's world pose
+      // vs the runtime file's baked rows (the exporter's shared-model output, 3 decimals).
+      const an = JSON.parse(readFileSync(files.runtime, 'utf8')).animations.find((a: any) => a.name === 'wave');
+      let bakedWorst = 0;
+      waveWorlds.forEach((w, i) => {
+        for (const [id, m] of w) {
+          const row = an.baked[nameOf.get(id)!][i];
+          const rot = (Math.atan2(m[1], m[0]) * 180) / Math.PI;
+          bakedWorst = Math.max(bakedWorst, Math.abs(m[4] - row[0]), Math.abs(m[5] - row[1]), Math.abs(((rot - row[2] + 540) % 360) - 180), Math.abs(Math.hypot(m[0], m[1]) - row[3]), Math.abs(Math.hypot(m[2], m[3]) - row[4]));
+        }
+      });
+      report.push(`FR-003 reference worlds vs the runtime's baked rows (diagnostic, rows rounded to 3 decimals): max |Δ| ${bakedWorst.toExponential(2)} px / deg / scale over x, y, rotation, scaleX, scaleY`);
+      assert.equal(waveWorlds.length, 30);
+      assert.ok(bakedWorst < 1e-3, `reference vs baked ${bakedWorst}`);
+    } finally {
+      // Later tests expect the default skin and no transition.
+      await player.getByTestId('player-mix-to').selectOption({ label: '(none)' });
+      await player.getByTestId('player-skin').selectOption({ label: '(default)' });
     }
-    report.push(`DRW-006 player vs independent reference (IK/path bones from baked rows): 30 frames, ${over} px over tolerance 24 of which ${strict} strict (solid vs clear or opaque colour), worst edge-coverage share ${(worstEdge * 100).toFixed(2)}% of covered px, worst mean ${worstMean.toFixed(3)}; unconstrained bones vs baked max |Δ| ${freeWorst.toExponential(2)} px; control without constraints: ${controlStrict} strict px`);
-    assert.ok(freeWorst < 2e-3, `unconstrained bones differ by ${freeWorst}`);
-    assert.ok(strict <= 30, `${strict} strict mismatches`);
-    assert.ok(worstEdge <= 0.04, `edge-coverage share ${worstEdge}`);
-    assert.ok(worstMean <= 0.5, `mean ${worstMean}`);
-    assert.ok(controlStrict > 100 * Math.max(1, strict), 'the comparison can tell an unconstrained pose apart');
   });
 
   it('the skin and the stored transition match the editor', async () => {
