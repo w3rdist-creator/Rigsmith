@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+import { samplePose } from '../../src/model/animation.ts';
 import { evaluate } from '../../src/model/evaluate.ts';
 import { exportRuntime } from '../../src/model/exportRuntime.ts';
 import { parseProject, serializeProject } from '../../src/model/format.ts';
@@ -365,32 +366,47 @@ describe('auto weights far from every bone (review P1-1)', () => {
 
   // The first P1-1 fix scaled weights by the strongest before the cut, which also kept
   // a second influence beyond 100 px for vertices the old code already weighted, and
-  // changed the bend of the phase-3 demo arm. Vertices that had weights keep exactly
-  // the old ones; only the previously unweighted ones fall back to the nearest bone.
-  it('leaves every previously weighted vertex unchanged (absolute 1e-4 cut)', () => {
+  // changed the bend of the phase-3 demo arm. FR-002 replaced the hard cut by a ramp over
+  // 70.7–100 px (1/d² from 2e-4 down to 1e-4): a vertex whose strongest influence is
+  // inside 70.7 px and whose other one is not inside the band keeps exactly the old
+  // weights; every other vertex gets the documented blend, recomputed here independently.
+  it('outside the 70.7–100 px band the old weights are unchanged; inside it and beyond, the documented blend', () => {
     const p = bigPanel();
     const att = p.attachments[0];
     const w = autoWeights(p, att, ['root', 'tip']);
     const n = att.mesh!.points.length / 2;
-    let single = 0, pair = 0;
+    const ramp = (x: number) => { const t = Math.min(1, Math.max(0, x / 1e-4 - 1)); return t * t * (3 - 2 * t); };
+    let single = 0, pair = 0, blended = 0, far = 0;
     for (let i = 0; i < n; i++) {
       const x = att.mesh!.points[2 * i] - 200, y = att.mesh!.points[2 * i + 1] - 200;
       const d = [{ bone: 'root', d: seg(x, y, 0, 0, 30, 0) }, { bone: 'tip', d: seg(x, y, 30, 0, 60, 0) }]
         .map((e) => ({ bone: e.bone, w: 1 / Math.max(1, e.d) ** 2 }))
         .sort((a, b) => b.w - a.w);
       if (Math.abs(d[0].w - d[1].w) < 1e-12) continue;
-      const kept = d.filter((e) => e.w >= 1e-4);
-      const sum = kept.reduce((s, e) => s + e.w, 0);
-      const want = kept.length ? kept.map((e) => ({ bone: e.bone, w: e.w / sum })) : [{ bone: d[0].bone, w: 1 }];
+      let want: { bone: string; w: number }[];
+      if (d[0].w >= 2e-4 && (d[1].w >= 2e-4 || d[1].w <= 1e-4)) {
+        const kept = d.filter((e) => e.w >= 1e-4);
+        const sum = kept.reduce((s, e) => s + e.w, 0);
+        want = kept.map((e) => ({ bone: e.bone, w: e.w / sum }));
+        if (kept.length === 1) single++;
+        else pair++;
+      } else {
+        const g = ramp(d[0].w);
+        const near = d.map((e) => e.w * ramp(e.w));
+        const ns = near[0] + near[1], s = d[0].w + d[1].w;
+        want = d.map((e, j) => ({ bone: e.bone, w: (g > 0 ? (g * near[j]) / ns : 0) + ((1 - g) * e.w) / s }));
+        blended++;
+        if (d[0].w < 1e-4) far++;
+      }
       assert.equal(w[i].length, want.length, `vertex ${i} influence count`);
       want.forEach((e, j) => {
         assert.equal(w[i][j].bone, e.bone);
         assert.ok(Math.abs(w[i][j].w - e.w) < 1e-12, `vertex ${i} weight ${j}: ${w[i][j].w} vs ${e.w}`);
       });
-      if (kept.length === 1) single++;
-      if (kept.length === 2) pair++;
     }
-    assert.ok(single > 5 && pair > 5, `covers one- and two-influence vertices (${single}, ${pair})`);
+    // Single-influence unchanged vertices cannot occur here: the bones are joined, so the
+    // second distance is at most 30 px more than the first (100.7 px > 70.7 px + 30 px only just).
+    assert.ok(pair > 5 && blended > 20 && far > 10, `covers unchanged two-influence and blended vertices (${single} one-, ${pair} two-influence unchanged, ${blended} blended, ${far} beyond 100 px)`);
   });
 
   it('the integrity pass repairs a missing or non-array weight list instead of throwing', () => {
@@ -404,6 +420,58 @@ describe('auto weights far from every bone (review P1-1)', () => {
     assert.deepEqual(att.mesh!.weights![1], [{ bone: 'root', w: 1 }]);
     assert.ok(notes.some((x) => /2 vertex weight list/.test(x)), notes.join('; '));
   });
+});
+
+// FR-002 (post-review): the absolute 1e-4 cut made Auto weights jump where an influence
+// crossed it (100 px), and the far-field nearest-bone fallback flipped across the bisector.
+// Bounds declared before the fix: on dense lines (0.05 px steps) through both places,
+// adjacent weights differ by at most 0.15, every list sums to 1, and with the child bone
+// bent 40° the skinned line has no gap over 1 px.
+describe('auto weights are continuous (FR-002)', () => {
+  const PNG1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+  /** The P1-1 bones (30 px root, 30 px child) under a 1000×1000 image whose mesh points are `pts` (bone space). */
+  function lineRig(pts: [number, number][]): Project {
+    return {
+      format: 'rigsmith.project', version: 2, name: 'line',
+      images: [{ id: 'im', name: 'panel.png', mime: 'image/png', width: 1000, height: 1000, dataUrl: PNG1 }],
+      bones: [
+        { id: 'root', name: 'root', parentId: null, x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, length: 30, color: '#8fd3c8' },
+        { id: 'tip', name: 'tip', parentId: 'root', x: 30, y: 0, rotation: 0, scaleX: 1, scaleY: 1, length: 30, color: '#8fd3c8' },
+      ],
+      attachments: [{ id: 'a', name: 'line', boneId: 'root', imageId: 'im', x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, opacity: 1, mesh: { points: pts.flatMap(([x, y]) => [x + 500, y + 500]), triangles: [], hull: 0 } }],
+      animations: [],
+    };
+  }
+  const line = (from: [number, number], to: [number, number]) => {
+    const n = Math.round(Math.hypot(to[0] - from[0], to[1] - from[1]) / 0.05);
+    return Array.from({ length: n + 1 }, (_, i): [number, number] => [from[0] + ((to[0] - from[0]) * i) / n, from[1] + ((to[1] - from[1]) * i) / n]);
+  };
+  const lines: [string, [number, number][]][] = [
+    ['across the 100 px cut over the root bone (x = 15)', line([15, 60], [15, 140])],
+    ['across the 2× cut contour of the child (x = 45)', line([45, 50], [45, 120])],
+    ['across the bisector far from both bones (y = 150)', line([-50, 150], [110, 150])],
+    ['diagonal from near the tip into the far field', line([60, 10], [260, 210])],
+  ];
+  for (const [name, pts] of lines)
+    it(name, () => {
+      const p = lineRig(pts);
+      const att = p.attachments[0];
+      const w = autoWeights(p, att, ['root', 'tip']);
+      const root = (i: number) => w[i].filter((x) => x.bone === 'root').reduce((s, x) => s + x.w, 0);
+      let maxDw = 0;
+      for (let i = 0; i < pts.length; i++) {
+        assert.equal(w[i].reduce((s, x) => s + x.w, 0), 1, `point ${i} sums to exactly 1`);
+        if (i) maxDw = Math.max(maxDw, Math.abs(root(i) - root(i - 1)));
+      }
+      assert.ok(maxDw <= 0.15, `max adjacent weight change ${maxDw}`);
+      att.mesh!.weights = w;
+      const pose = samplePose(p.bones, null, 0);
+      pose.get('tip')!.rotation += 40;
+      const v = evaluate(p, null, 0, { pose }).attachments[0].vertices!;
+      let gap = 0;
+      for (let i = 1; i < pts.length; i++) gap = Math.max(gap, Math.hypot(v[2 * i] - v[2 * i - 2], v[2 * i + 1] - v[2 * i - 1]));
+      assert.ok(gap <= 1, `skinned line gap ${gap} px`);
+    });
 });
 
 // DRW-001 (drwdmrs3 review, plausible concern): "src/model/integrity.ts:96 deletes an

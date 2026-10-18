@@ -242,11 +242,24 @@ export function setupVertices(project: Project, att: Attachment): V[] {
   return Array.from({ length: n }, (_, i) => apply(m, localVertex(att.mesh!.points, i, im)));
 }
 
+/** 0 for w ≤ MIN_WEIGHT (≥ 100 px), 1 for w ≥ 2·MIN_WEIGHT (≤ 70.7 px), smoothstep between. */
+function cutRamp(w: number): number {
+  const t = Math.min(1, Math.max(0, w / MIN_WEIGHT - 1));
+  return t * t * (3 - 2 * t);
+}
+
 /**
  * Automatic weights: inverse-square distance (setup pose) from each vertex to each
- * chosen bone's segment, keeping the `maxInfluences` strongest, normalized. Influences
- * whose absolute 1/d² is under MIN_WEIGHT (farther than 100 px) are dropped; a vertex
- * that loses them all is bound fully to the nearest bone rather than left unweighted.
+ * chosen bone's segment, keeping the `maxInfluences` strongest, normalized.
+ *
+ * Far influences fade out instead of being cut (post-review FR-002). Each influence is
+ * scaled by a ramp that is 1 within 70.7 px (1/d² ≥ 2·MIN_WEIGHT) and 0 beyond 100 px,
+ * and the result is blended — by the strongest influence's ramp — with the plain
+ * normalized inverse-square weights, which also cover vertices beyond 100 px from every
+ * bone. So the weights are continuous across both the 100 px contour and the bisector
+ * between bones; a vertex with no influence inside the 70.7–100 px band gets exactly the
+ * earlier weights. Choosing the strongest `maxInfluences` among more bones can still
+ * switch an influence where two distances are equal.
  */
 export function autoWeights(project: Project, att: Attachment, boneIds: readonly string[], maxInfluences = 2): VertexWeights[] {
   if (!boneIds.length) throw new Error('Auto weights needs at least one bone.');
@@ -259,7 +272,16 @@ export function autoWeights(project: Project, att: Attachment, boneIds: readonly
   return setupVertices(project, att).map((v) => {
     const ws = segs.map((s) => ({ bone: s.id, w: 1 / Math.max(1, distToSegment(v, s.a, s.b)) ** 2 }));
     ws.sort((x, y) => y.w - x.w);
-    return normalizeWeights(ws.slice(0, maxInfluences)) ?? [{ bone: ws[0].bone, w: 1 }];
+    const top = ws.slice(0, maxInfluences);
+    const near = top.map((x) => ({ bone: x.bone, w: x.w * cutRamp(x.w) }));
+    const g = cutRamp(top[0].w);
+    // No influence inside the band: exactly the earlier (cut) weights.
+    if (g === 1 && near.every((x, i) => x.w === 0 || x.w === top[i].w)) return normalizeWeights(near)!;
+    // Otherwise blend normalized lists, so normalizeWeights' absolute cut sees values near 1.
+    const sum = top.reduce((s, x) => s + x.w, 0);
+    const nearSum = near.reduce((s, x) => s + x.w, 0);
+    const mixed = top.map((x, i) => ({ bone: x.bone, w: (g > 0 ? (g * near[i].w) / nearSum : 0) + ((1 - g) * x.w) / sum }));
+    return normalizeWeights(mixed) ?? [{ bone: top[0].bone, w: 1 }];
   });
 }
 

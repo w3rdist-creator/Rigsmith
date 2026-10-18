@@ -181,6 +181,16 @@ image, skin, draw order) → mesh vertices.
   weights and deform keys. A deform key whose vertex count does not match the mesh (an
   old mesh's key pasted after re-meshing) is removed on its own, with a status note; the
   rest of the deform track stays.
+- **Auto weights** (`autoWeights`): inverse-square distance 1/max(1, d)² from each vertex
+  to each chosen bone's segment (setup pose), the strongest two kept. Influences fade out
+  between 70.7 px and 100 px (a smoothstep ramp on 1/d² from 2·10⁻⁴ down to 10⁻⁴) instead
+  of being cut, and that list is blended, by the strongest influence's ramp, with the
+  plain normalized inverse-square weights, which also weight vertices beyond 100 px from
+  every bone. The weights are therefore continuous; the earlier hard cut tore a skinned
+  mesh by up to 102 px (post-review FR-002, `scripts/post-review/fr002-autoweights-probe.ts`).
+  Vertices with no influence inside the band keep exactly the earlier weights. With more
+  than two candidate bones, picking the strongest two can still switch an influence where
+  two distances are equal.
 - **Mesh rendering** (`src/render/draw.ts`): each mesh is drawn into an integer-aligned
   offscreen layer and composited once with the attachment opacity. Each triangle is
   clipped to its outline and the image drawn through the triangle's affine map
