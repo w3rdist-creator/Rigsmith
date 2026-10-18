@@ -184,6 +184,51 @@ describe('DRW-001: pasting an old-mesh deform key keeps the rest of the deform t
   });
 });
 
+describe('DRW-003: autosave never stores an uncommitted mid-drag state', () => {
+  const stored = () => page.evaluate(() => {
+    const t = localStorage.getItem('rigsmith:autosave:v1');
+    return t ? JSON.parse(JSON.parse(t).project) : null;
+  });
+  const rootX = async () => (await project()).bones.find((b: any) => b.name === 'root').x;
+
+  it('a drag held past the autosave delay keeps the committed copy; Esc and release; a finished drag autosaves', async () => {
+    // Continues from DRW-001: the sheet project is open and has unsaved changes.
+    assert.equal((await state()).dirty, true);
+    await page.getByTestId('mode-setup').click();
+    await page.getByTestId('tree-bone-root').click();
+    await page.getByTestId('tool-move').click();
+    const committed = await rootX();
+    await page.waitForFunction((x) => {
+      const t = localStorage.getItem('rigsmith:autosave:v1');
+      return !!t && JSON.parse(JSON.parse(t).project).bones[0].x === x;
+    }, committed, { timeout: 5000 });
+    const b = (await probe<{ mid: { x: number; y: number } }>(page, 'bone', 'root'));
+    await page.mouse.move(b.mid.x, b.mid.y);
+    await page.mouse.down();
+    await page.mouse.move(b.mid.x + 40, b.mid.y + 25, { steps: 6 });
+    assert.notEqual(await rootX(), committed, 'the drag moves the bone live');
+    await page.waitForTimeout(2300); // > the 1.5 s autosave delay, button still held
+    assert.equal((await stored()).bones[0].x, committed, 'autosave holds the committed state during the drag');
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    assert.equal(await rootX(), committed, 'Esc cancelled the drag');
+    await page.waitForTimeout(2000);
+    assert.equal((await stored()).bones[0].x, committed);
+    // A completed drag is autosaved as usual.
+    await page.mouse.move(b.mid.x, b.mid.y);
+    await page.mouse.down();
+    await page.mouse.move(b.mid.x + 40, b.mid.y + 25, { steps: 6 });
+    await page.mouse.up();
+    const moved = await rootX();
+    assert.notEqual(moved, committed);
+    await page.waitForFunction((x) => {
+      const t = localStorage.getItem('rigsmith:autosave:v1');
+      return !!t && JSON.parse(JSON.parse(t).project).bones[0].x === x;
+    }, moved, { timeout: 5000 });
+    assert.deepEqual(pageErrors, []);
+  });
+});
+
 describe('P2-2 / P3-1: the reference player validates runtime files and never shows a stale frame', () => {
   // Runtime files are generated from the shared fixture with the model exporter (the
   // editor-UI export path is covered by p4-player); malformed variants mutate one field.

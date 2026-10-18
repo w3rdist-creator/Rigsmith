@@ -1,6 +1,7 @@
 // Autosave + crash recovery. Policy:
 // - While the project has unsaved changes, a copy is written to localStorage under its
-//   own key (never the explicit "Save to browser" slot) ~1.5 s after the last edit.
+//   own key (never the explicit "Save to browser" slot) ~1.5 s after the last edit,
+//   never during a drag (only committed states are written).
 // - On startup an existing autosave is never loaded automatically: a non-modal banner
 //   offers Recover or Discard. Until the user chooses, autosaving is paused so the
 //   recoverable copy cannot be overwritten by the new session.
@@ -121,6 +122,9 @@ export class Autosave {
   writeNow(): void {
     if (this.paused) return;
     const ed = this.app.ed;
+    // Mid-drag the project holds an uncommitted pose (Esc may still cancel it): wait for
+    // the gesture to end, then write the committed state.
+    if (ed.inGesture) return this.schedule();
     if (!ed.dirty) return;
     const payload: Stored = { savedAt: new Date().toISOString(), name: ed.project.name, project: serializeProject(ed.project) };
     try {

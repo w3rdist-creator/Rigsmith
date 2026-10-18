@@ -47,7 +47,7 @@ build, e2e 42/42, wiz 16/16, preservation 16/16 — all exit 0).
 | Gesture-level undo + Esc cancel for timeline/curve drags | delivered | `cancelHooks`; p1-motion "Esc during group drag", "handle drag + Esc" |
 | PNG sequence export (ZIP), range/FPS/scale, stable bounds+padding, first/last preview, progress/cancel, capacity/errors | delivered | `src/ui/exportDialog.ts`, `src/render/sequence.ts`, `src/model/sequence.ts`; p1-export (decoded with independent `tests/support/png-decode.ts` + `zip-read.ts`) |
 | Onion/ghost frames (view state, not undo) | delivered | `onion-toggle/before/after/step`; p1-motion onion test asserts undo depth unchanged |
-| Autosave + non-destructive recovery, visible quota failure | delivered | `src/ui/autosave.ts`; p1-export autosave/recover/discard/quota |
+| Autosave + non-destructive recovery, visible quota failure | delivered | `src/ui/autosave.ts`; p1-export autosave/recover/discard/quota; only committed states are written, never mid-drag (DRW-003, review-fixes e2e) |
 | Independent setup + posed render reference checks | delivered | `tests/support/reference-composite.ts` (no `src` imports); p1-export setup + walk f0/f7/f19; wiz-v2 f14/f27 |
 | Typecheck covers tests/scripts | delivered | `tsconfig.node.json` + `types/node-shim.d.ts`; `npm run typecheck` |
 | Wiz greeting v2 via UI (anticipation, overshoot, glove follow-through), contact sheet, alpha output | delivered | `scripts/roadmap/wiz-greeting-v2.ts` (UI-driven), `tests/acceptance/wiz-v2.acceptance.test.ts`, `scripts/roadmap/contact_sheet.py`; outputs in `.hermes/assets/wiz/roadmap-output/` (git-ignored); metrics `.hermes/evidence/wiz/v2/motion-metrics.json` |
