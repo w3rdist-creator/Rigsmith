@@ -4,6 +4,7 @@ import type {
   Attachment,
   Bone,
   BoneTrack,
+  ClipSequence,
   ConstraintTrack,
   Curve,
   DerivedImage,
@@ -21,11 +22,12 @@ import type {
   PathShape,
   Project,
   ProjectFrame,
+  SequenceStep,
   Skin,
   SlotTrack,
   VertexWeights,
 } from './types.ts';
-import { CHANNEL_ARITY, CHANNELS, FORMAT_ID, FORMAT_VERSION, FRAME_MAX_SIDE, INTERPS } from './types.ts';
+import { CHANNEL_ARITY, CHANNELS, FORMAT_ID, FORMAT_VERSION, FRAME_MAX_SIDE, INTERPS, SEQUENCE_MAX_REPEAT } from './types.ts';
 
 export type ParseResult = { ok: true; project: Project; warnings: string[] } | { ok: false; errors: string[] };
 
@@ -47,6 +49,7 @@ export function v2Features(p: Project): string[] {
   if (p.skins?.length) f.add('skins');
   if (p.mixes?.length) f.add('animation mixes');
   if (p.frame) f.add('project frame');
+  if (p.sequences?.length) f.add('clip sequences');
   for (const im of p.images) if (im.derived) f.add('derived images');
   for (const a of p.attachments) {
     if (a.hidden) f.add('hidden attachments');
@@ -126,6 +129,8 @@ export function toFileObject(project: Project): Project {
   if (skins) out.skins = skins;
   const mixes = nonEmpty(project.mixes);
   if (mixes) out.mixes = mixes;
+  const seqs = nonEmpty(project.sequences);
+  if (seqs) out.sequences = seqs.map((q) => ({ id: q.id, name: q.name, steps: q.steps.map((st) => ({ animId: st.animId, repeat: st.repeat })), loop: q.loop }));
   if (project.frame) out.frame = { x: project.frame.x, y: project.frame.y, width: project.frame.width, height: project.frame.height };
   return out;
 }
@@ -637,6 +642,34 @@ export function validateProject(raw: unknown): ParseResult {
     mixes.push({ from, to, duration });
   });
 
+  const sequences: ClipSequence[] = [];
+  const seqRaw = c.optArr(raw, 'sequences', 'project');
+  if (seqRaw) v2only('sequences', 'project');
+  const seqIds = new Set<string>();
+  const seqNames = new Set<string>();
+  seqRaw?.forEach((q, i) => {
+    const w = `sequences[${i}]`;
+    if (!isObj(q)) return c.fail(`${w} must be an object`);
+    const id = c.str(q, 'id', w);
+    if (seqIds.has(id)) c.fail(`${w}.id "${id}" is duplicated`);
+    seqIds.add(id);
+    const sname = c.str(q, 'name', w);
+    if (!sname.trim()) c.fail(`${w}.name must not be empty`);
+    if (seqNames.has(sname)) c.fail(`${w}.name "${sname}" is duplicated`);
+    seqNames.add(sname);
+    const steps: SequenceStep[] = [];
+    c.arr(q, 'steps', w).forEach((st, si) => {
+      const sw = `${w}.steps[${si}]`;
+      if (!isObj(st)) return c.fail(`${sw} must be an object`);
+      const animId = c.str(st, 'animId', sw);
+      if (!animIds.has(animId)) c.fail(`${sw} references missing animation "${animId}"`);
+      const repeat = c.num(st, 'repeat', sw, 1);
+      if (!Number.isInteger(repeat) || repeat < 1 || repeat > SEQUENCE_MAX_REPEAT) c.fail(`${sw}.repeat must be a whole number from 1 to ${SEQUENCE_MAX_REPEAT}`);
+      steps.push({ animId, repeat });
+    });
+    sequences.push({ id, name: sname, steps, loop: c.bool(q, 'loop', w, false) });
+  });
+
   let frame: ProjectFrame | undefined;
   if (raw.frame !== undefined) {
     v2only('frame', 'project');
@@ -662,6 +695,7 @@ export function validateProject(raw: unknown): ParseResult {
   if (pcRaw) project.pathConstraints = pathConstraints;
   if (skinsRaw) project.skins = skins;
   if (mixRaw) project.mixes = mixes;
+  if (seqRaw) project.sequences = sequences;
   if (frame) project.frame = frame;
   return { ok: true, warnings: c.warnings, project };
 }

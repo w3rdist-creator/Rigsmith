@@ -2,6 +2,7 @@
 // constraint and draw-order lanes), multi-key selection, group retime, copy/paste,
 // nudge, loop seam, and the curve editor.
 import { frameCount, keysBeyondEnd, snapToFrame } from '../model/animation.ts';
+import { describePortable } from '../model/clipboard.ts';
 import type { KeyRef } from '../model/keys.ts';
 import { DRAW_LANE, boneLane, constraintLane, laneKeys, refsInRange, sameRef, shiftKeys, slotLane } from '../model/keys.ts';
 import { topoOrder } from '../model/skeleton.ts';
@@ -128,6 +129,7 @@ export class Timeline {
       h('button', { class: 'mini', 'data-testid': 'new-animation', title: 'New animation', onclick: () => app.newAnimation() }, '+'),
       anim ? h('button', { class: 'mini', title: 'Delete this animation', 'aria-label': 'Delete animation', onclick: () => app.deleteAnimation() }, '🗑') : null,
       h('button', { class: 'mini', 'data-testid': 'mix-open', title: 'Preview a transition (mix) between animations', disabled: p.animations.length < 2, onclick: () => app.mixDialog.open() }, '⇄ Mix…'),
+      h('button', { class: 'mini', 'data-testid': 'sequences-open', title: 'Saved clip sequences: ordered clips, repeats and mixes; export as ZIP, APNG or GIF', disabled: !p.animations.length, onclick: () => app.sequenceDialog.open() }, '▤ Sequences…'),
     );
 
     if (!anim) {
@@ -185,7 +187,7 @@ export class Timeline {
       h('button', { class: 'mini', 'data-testid': 'nudge-left', disabled: !nSel, title: 'Nudge selected keys one frame earlier ([)', 'aria-label': 'Nudge keys left', onclick: () => app.nudgeKeys(-1) }, '◂1f'),
       h('button', { class: 'mini', 'data-testid': 'nudge-right', disabled: !nSel, title: 'Nudge selected keys one frame later (])', 'aria-label': 'Nudge keys right', onclick: () => app.nudgeKeys(1) }, '1f▸'),
       h('button', { class: 'mini', 'data-testid': 'copy-keys', disabled: !nSel, title: 'Copy selected keys (Ctrl/⌘+C)', onclick: () => app.copySelectedKeys() }, 'Copy'),
-      h('button', { class: 'mini', 'data-testid': 'paste-keys', disabled: !ed.clipboard, title: 'Paste keys at the playhead (Ctrl/⌘+V); onto the selected bone if the keys came from one other bone', onclick: () => app.pasteKeysAtPlayhead() }, 'Paste'),
+      h('button', { class: 'mini', 'data-testid': 'paste-keys', disabled: !ed.clipboard, title: ed.clipboard ? `Paste ${describePortable(ed.clipboard)} at the playhead (Ctrl/⌘+V); onto the selected bone if the keys came from one other bone` : 'Paste keys at the playhead (Ctrl/⌘+V)', 'data-clip': ed.clipboard ? String(ed.clipboard.items.length) : '0', onclick: () => app.pasteKeysAtPlayhead() }, 'Paste'),
       h('button', { class: 'mini', 'data-testid': 'loop-seam', title: 'Close the loop: copy each lane’s first key to the end (selected lanes, or all)', onclick: () => app.closeLoop() }, '⟲ Close loop'),
       beyond ? h('span', { class: 'warn', title: 'Keys after the end are kept but not played.' }, `${beyond} key(s) past end`) : null,
     );

@@ -22,7 +22,9 @@ import { MediaCancelled, encodeAnimated, mediaErrors } from '../../src/model/med
 import { setMixRule } from '../../src/model/mix.ts';
 import { dataUrlBytes, decodePngExact, encodePngExact } from '../../src/model/png.ts';
 import { addSkin, setSkinEntry } from '../../src/model/skinOps.ts';
-import type { ImageAsset, Project } from '../../src/model/types.ts';
+import type { ClipSequence, ImageAsset, Project } from '../../src/model/types.ts';
+import { newId } from '../../src/model/types.ts';
+import { parseStepList } from '../../src/model/clipSequence.ts';
 import { buildZip } from '../../src/model/zip.ts';
 import type { PrepareRequest } from '../../src/render-main.ts';
 import { safeName } from '../../src/render/sequence.ts';
@@ -142,6 +144,17 @@ export function setMix(p: Project, from: string, to: string, duration: number | 
   const id = (n: string) => p.animations.find((a) => a.name === n)?.id ?? fail(`No animation named “${n}”.`);
   if (duration !== null && !(duration >= 0 && duration <= 10)) fail('Mix duration must be 0–10 seconds.');
   setMixRule(p, id(from), id(to), duration);
+}
+
+/** Creates or replaces the saved clip sequence `name` (steps: "idle*2,greeting,idle"). */
+export function setSequence(p: Project, name: string, stepList: string, loop: boolean): ClipSequence {
+  if (!name.trim()) fail('The sequence needs a name.');
+  const r = parseStepList(p, stepList);
+  if (!r.ok) throw new ApiError(r.errors[0], r.errors);
+  const existing = p.sequences?.find((q) => q.name === name);
+  const seq: ClipSequence = { id: existing?.id ?? newId('seq'), name, steps: r.steps, loop };
+  p.sequences = [...(p.sequences ?? []).filter((q) => q !== existing), seq];
+  return seq;
 }
 
 function fail(msg: string): never {

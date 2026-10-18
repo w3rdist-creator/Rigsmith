@@ -8,6 +8,8 @@ export const DB_STORE = 'kv';
 /** Record keys inside the store. */
 export const BROWSER_SAVE = 'browser-save';
 export const AUTOSAVE = 'autosave';
+/** The durable key clipboard (src/model/clipboard.ts); never touched by save/recovery. */
+export const CLIPBOARD = 'clipboard';
 /** Legacy localStorage keys (read once for migration). */
 export const LEGACY_KEYS: Record<string, string> = { [BROWSER_SAVE]: 'rigsmith:project:v1', [AUTOSAVE]: 'rigsmith:autosave:v1' };
 
@@ -54,6 +56,15 @@ export async function readStored(key: string): Promise<StoredProject | null> {
 }
 
 export function writeStored(key: string, value: StoredProject): Promise<void> {
+  return tx('readwrite', (s) => s.put(value, key)).then(() => undefined);
+}
+
+/** Any structured-clonable record (e.g. the key clipboard). */
+export async function readRecord(key: string): Promise<unknown> {
+  return (await tx<unknown>('readonly', (s) => s.get(key))) ?? null;
+}
+
+export function writeRecord(key: string, value: unknown): Promise<void> {
   return tx('readwrite', (s) => s.put(value, key)).then(() => undefined);
 }
 

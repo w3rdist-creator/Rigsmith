@@ -34,6 +34,13 @@ export interface MixEntry {
   start: number;
   /** Blend duration (s) from the previous pose; 0 = cut. Ignored for entry 0. */
   mix: number;
+  /**
+   * Saved sequences: a one-shot animation restarts every `period` seconds, `count` times
+   * in all, then holds its end pose. Loops already wrap, so this does not affect them.
+   * With `fps`, the time inside a restarted play is snapped to that frame grid, so frame
+   * k of the second play is sampled at exactly the time of frame k of the first.
+   */
+  repeat?: { count: number; period: number; fps?: number };
 }
 
 export interface MixPlan {
@@ -65,7 +72,17 @@ export function entryWeight(e: MixEntry, index: number, T: number): number {
 
 /** Local time of an entry's animation at global time T (loops wrap, one-shots hold the end). */
 export function entryTime(anim: Animation, e: MixEntry, T: number): number {
-  return playbackTime(anim, Math.max(0, T - e.start)).time;
+  let elapsed = Math.max(0, T - e.start);
+  if (e.repeat && !anim.loop && e.repeat.count > 1 && e.repeat.period > 0) {
+    const k = Math.min(e.repeat.count - 1, Math.floor((elapsed + 1e-9) / e.repeat.period));
+    elapsed = Math.max(0, elapsed - k * e.repeat.period);
+    const fps = e.repeat.fps;
+    if (k > 0 && fps) {
+      const f = elapsed * fps;
+      if (Math.abs(f - Math.round(f)) < 1e-6) elapsed = Math.round(f) / fps;
+    }
+  }
+  return playbackTime(anim, elapsed).time;
 }
 
 const shortest = (a: number, b: number) => {

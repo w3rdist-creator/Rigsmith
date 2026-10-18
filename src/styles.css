@@ -259,6 +259,13 @@ dialog.cutout { width: 580px; }
 .skin-diags li.warning { color: #ffcf7a; }
 .mix-stage { display: flex; justify-content: center; padding: 6px; background: repeating-conic-gradient(#2a2d36 0 25%, #22252d 0 50%) 0 0 / 16px 16px; border: 1px solid var(--line); }
 .mix-canvas { max-width: 100%; max-height: 260px; }
+.seq-steps { margin: 4px 0; padding-left: 0; list-style: none; font-size: 12px; }
+.seq-steps li { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.seq-steps li.seq-mix { padding-left: 22px; font-size: 11px; }
+.import-map { border-collapse: collapse; font-size: 12px; margin: 2px 0 6px; }
+.import-map td { padding: 2px 6px 2px 0; }
+.import-map tr.unmatched td:first-child { color: var(--warn, #e0a050); }
+.import-report p { margin: 3px 0; font-size: 12px; }
 .mix-rules { margin: 4px 0; padding-left: 16px; font-size: 12px; }
 .atlas-pages { display: flex; flex-wrap: wrap; gap: 8px; max-height: 320px; overflow: auto; }
 .atlas-pages figure { margin: 0; }

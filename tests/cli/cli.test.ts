@@ -294,6 +294,41 @@ describe('rendering (headless Chrome for Testing via render.html)', () => {
     assert.ok(!existsSync(path.join(OUT, 'e3.zip')));
     await page.getByTestId('frame-clear').click();
   });
+
+  it('sequence (RV-009): set-sequence saves an ordered clip list; sequence renders it byte-identical to the editor Sequences dialog', async () => {
+    const seqRig = path.join(OUT, 'sequenced.rig.json');
+    const set = cli('set-sequence', RIG, '--name', 'intro', '--steps', 'wave*2, rest, wave', '--loop', '--out', seqRig);
+    assert.equal(set.code, 0, JSON.stringify(set.json));
+    assert.deepEqual(set.json.sequence, { name: 'intro', loop: true, steps: [{ animation: 'wave', repeat: 2 }, { animation: 'rest', repeat: 1 }, { animation: 'wave', repeat: 1 }] });
+    const saved = parseProject(readFileSync(seqRig, 'utf8'));
+    assert.ok(saved.ok && saved.project.sequences?.length === 1, 'a valid project with the sequence');
+    assert.equal(cli('validate', seqRig).code, 0);
+    // Bad step lists exit 1 and write nothing.
+    for (const steps of ['wave*0', 'dance', 'wave*101', '']) {
+      const bad = cli('set-sequence', RIG, '--name', 'x', '--steps', steps, '--out', path.join(OUT, 'e-seq.rig.json'));
+      assert.notEqual(bad.code, 0, steps);
+      assert.ok(!existsSync(path.join(OUT, 'e-seq.rig.json')));
+    }
+    const out = path.join(OUT, 'cli-sequence.zip');
+    const r = cli('sequence', seqRig, '--name', 'intro', '--out', out);
+    assert.equal(r.code, 0, JSON.stringify(r.json));
+    // 30 fps: wave 30 frames × 2, rest 15, wave 30.
+    assert.equal(r.json.frames, 105);
+    assert.equal(readZip(readFileSync(out)).filter((f) => f.name.endsWith('.png')).length, 105);
+    assert.deepEqual(r.json.sequence.steps.map((s: any) => [s.animation, s.repeat, s.startFrame, s.frames]), [['wave', 2, 0, 60], ['rest', 1, 60, 15], ['wave', 1, 75, 30]]);
+    assert.equal(cli('sequence', seqRig, '--name', 'outro', '--out', path.join(OUT, 'e-seq.zip')).code, 1);
+    assert.ok(!existsSync(path.join(OUT, 'e-seq.zip')));
+    await page.getByTestId('open-input').setInputFiles(seqRig);
+    await page.waitForFunction(() => (window as any).__rigsmith.project().sequences?.length === 1);
+    await page.getByTestId('sequences-open').click();
+    assert.equal(await page.getByTestId('seqd-summary').getAttribute('data-frames'), '105');
+    const editor = await editorDownload('seqd-export', 'ui-sequence.zip');
+    await page.getByTestId('seqd-close').click();
+    report.push(`sequence intro: cli ${sha(out)} editor ${sha(editor)}`);
+    assert.equal(sha(out), sha(editor), 'byte-identical ZIPs');
+    await page.getByTestId('open-input').setInputFiles(RIG);
+    await page.waitForFunction(() => !(window as any).__rigsmith.project().sequences);
+  });
 });
 
 describe('media: WebM (VP9 alpha) / MP4 (H.264) via the local ffmpeg; decoded by ffmpeg, compared with the PNG sequence', { skip: !hasFfmpeg() && 'ffmpeg is not installed' }, () => {

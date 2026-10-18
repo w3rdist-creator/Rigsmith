@@ -6,11 +6,12 @@
 import { parseProject } from './model/format.ts';
 import type { MissingPolicy } from './model/mix.ts';
 import { mixDuration } from './model/mix.ts';
+import { sequenceFps } from './model/clipSequence.ts';
 import type { SequenceRequest } from './model/sequence.ts';
 import { defaultRequest, lastExportFrame } from './model/sequence.ts';
 import type { Project, ProjectFrame } from './model/types.ts';
 import type { SequenceSetup } from './render/sequence.ts';
-import { prepareMixSequence, prepareSequence, renderSequenceFrame, sequenceFileName, sequenceMeta } from './render/sequence.ts';
+import { prepareClipSequence, prepareMixSequence, prepareSequence, renderSequenceFrame, sequenceFileName, sequenceMeta } from './render/sequence.ts';
 
 let project: Project | null = null;
 const images = new Map<string, HTMLImageElement>();
@@ -30,7 +31,9 @@ function decode(url: string): Promise<HTMLImageElement> {
 /** `frame`: a fixed canvas (world rect, e.g. the project frame); absent/null fits the animation. */
 export type PrepareRequest =
   | { kind: 'sequence'; anim: string; skin?: string | null; fps?: number; start?: number; end?: number; scale?: number; padding?: number; frame?: ProjectFrame | null }
-  | { kind: 'mix'; from: string; to: string; at: number; duration?: number; missing?: MissingPolicy; skin?: string | null; fps?: number; scale?: number; padding?: number; frame?: ProjectFrame | null };
+  | { kind: 'mix'; from: string; to: string; at: number; duration?: number; missing?: MissingPolicy; skin?: string | null; fps?: number; scale?: number; padding?: number; frame?: ProjectFrame | null }
+  /** A saved clip sequence by name; fps defaults to the first step's animation fps. */
+  | { kind: 'clips'; sequence: string; skin?: string | null; fps?: number; scale?: number; padding?: number; frame?: ProjectFrame | null };
 
 const api = {
   /** Parses and validates a project file and decodes its images. */
@@ -63,6 +66,14 @@ const api = {
       const r = prepareSequence(p, id, request, skinId);
       if (!r.ok) return r;
       setup = r.setup;
+    } else if (req.kind === 'clips') {
+      const seq = p.sequences?.find((q) => q.name === req.sequence);
+      if (!seq) return { ok: false, errors: [`No sequence named “${req.sequence}”.`] };
+      const fps = req.fps ?? sequenceFps(p, seq);
+      const r = prepareClipSequence(p, seq, fps, skinId, req.scale ?? 1, req.padding ?? 4, req.frame ?? null);
+      if (!r.ok) return r;
+      setup = r.setup;
+      request = { fps, start: 0, end: r.setup.plan.lastFrame, scale: req.scale ?? 1, padding: req.padding ?? 4, frame: req.frame ?? null };
     } else {
       const from = animId(req.from), to = animId(req.to);
       if (!from || !to) return { ok: false, errors: [`No animation named “${!from ? req.from : req.to}”.`] };

@@ -5,6 +5,7 @@ import { findKeyIndex, keysBeyondEnd, removeKey, setInterp, snapToFrame } from '
 import { CURVE_PRESETS } from '../model/curve.ts';
 import type { KeyRef } from '../model/keys.ts';
 import { allLanes, boneLane, closeLoopSeam, copyKeys, deleteKeys, findKey, laneKeys, pasteKeys, sameRef, shiftKeys } from '../model/keys.ts';
+import { parsePortable, resolvePortable, toPortable } from '../model/clipboard.ts';
 import { buildDemoProject } from '../model/demo.ts';
 import { exportRuntime, runtimeProblems } from '../model/exportRuntime.ts';
 import { parseProject, serializeProject } from '../model/format.ts';
@@ -19,13 +20,15 @@ import type { Autosave } from './autosave.ts';
 import { buildDemoImages } from './demoArt.ts';
 import { ExportDialog } from './exportDialog.ts';
 import { MixDialog } from './mixDialog.ts';
+import { SequenceDialog } from './sequenceDialog.ts';
+import { ImportAnimDialog } from './importAnimDialog.ts';
 import { AtlasDialog } from './atlasDialog.ts';
 import { LottieDialog } from './lottieDialog.ts';
 import { CutoutDialog } from './cutoutDialog.ts';
 import { MeshDialog } from './meshDialog.ts';
 import { deleteConstraint, deletePath } from '../model/rigOps.ts';
 import { h } from './dom.ts';
-import { BROWSER_SAVE, LEGACY_KEYS, isQuotaError, migrateLegacy, readStored, writeStored } from './storage.ts';
+import { BROWSER_SAVE, CLIPBOARD, LEGACY_KEYS, isQuotaError, migrateLegacy, readRecord, readStored, writeRecord, writeStored } from './storage.ts';
 import { ImageCache, importImageFile } from './images.ts';
 import { Viewport, isTyping } from './viewport.ts';
 
@@ -42,6 +45,8 @@ export class App {
   private browserSaved = false;
   exportDialog!: ExportDialog;
   mixDialog!: MixDialog;
+  sequenceDialog!: SequenceDialog;
+  importDialog!: ImportAnimDialog;
   atlasDialog!: AtlasDialog;
   lottieDialog!: LottieDialog;
   cutout!: CutoutDialog;
@@ -59,6 +64,8 @@ export class App {
     this.viewport.onStatus = (m) => this.status(m);
     this.exportDialog = new ExportDialog(this);
     this.mixDialog = new MixDialog(this);
+    this.sequenceDialog = new SequenceDialog(this);
+    this.importDialog = new ImportAnimDialog(this);
     this.atlasDialog = new AtlasDialog(this);
     this.lottieDialog = new LottieDialog(this);
     this.cutout = new CutoutDialog(this);
@@ -66,6 +73,7 @@ export class App {
     this.storageReady = migrateLegacy()
       .then(async (moved) => {
         this.browserSaved = !!(await readStored(BROWSER_SAVE));
+        await this.restoreClipboard();
         if (moved.length) this.status('Moved the browser copies of your project from local storage to IndexedDB.');
         this.ed.emit('view');
       })
@@ -444,7 +452,10 @@ export class App {
     this.ed.mutate(`Delete animation ${anim.name}`, (p) => {
       p.animations = p.animations.filter((a) => a.id !== anim.id);
     });
+    // Mix rules and saved sequences that used it are repaired in the same step; say so.
+    const repairs = this.ed.lastRepairs;
     this.ed.setAnimation(this.ed.project.animations[0]?.id ?? null);
+    this.status(`Deleted animation “${anim.name}”.${repairs.length ? ` ${repairs.join(' ')}` : ''}`);
   }
 
   updateAnimation(label: string, fn: (a: Animation) => void): void {
@@ -574,16 +585,33 @@ export class App {
     if (!anim) return;
     const clip = copyKeys(anim, this.ed.keySels);
     if (!clip) return this.status('Select keys to copy.');
-    this.ed.clipboard = clip;
+    const portable = toPortable(this.ed.project, clip);
+    this.ed.clipboard = portable;
     this.ed.emit('selection');
-    this.status(`Copied ${clip.items.length} key(s). Move the playhead (and select another bone to retarget) and Paste.`);
+    const done = `Copied ${clip.items.length} key(s). Move the playhead (and select another bone to retarget) and Paste — also after a reload or in another project.`;
+    this.status(done);
+    // Durable copy: survives reloads and project switches (RV-009). Memory-only if storage fails.
+    void this.storageReady
+      .then(() => writeRecord(CLIPBOARD, portable))
+      .catch((e) => this.status(`Copied ${clip.items.length} key(s) for this session only — browser storage refused the clipboard (${(e as Error).message}).`));
+  }
+
+  /** Restores the durable clipboard after startup (called once storage is ready). */
+  private async restoreClipboard(): Promise<void> {
+    const pc = parsePortable(await readRecord(CLIPBOARD));
+    if (pc && !this.ed.clipboard) {
+      this.ed.clipboard = pc;
+      this.ed.emit('selection');
+    }
   }
 
   pasteKeysAtPlayhead(): void {
     const ed = this.ed;
     const anim = ed.anim();
-    const clip = ed.clipboard;
-    if (!anim || !clip) return this.status('Nothing to paste. Copy keys first.');
+    const portable = ed.clipboard;
+    if (!anim || !portable) return this.status('Nothing to paste. Copy keys first.');
+    const { clip, unresolved, dropped } = resolvePortable(ed.project, portable);
+    if (!clip.items.length) return this.status(`None of the ${portable.items.length} copied key(s) fit this project: no ${unresolved.join(', ')} here.`);
     const t = snapToFrame(ed.time, anim.fps);
     let result = { refs: [] as KeyRef[], skipped: 0 };
     ed.mutate(`Paste ${clip.items.length} key(s)`, (p) => {
@@ -594,7 +622,8 @@ export class App {
     const pasted = result.refs.filter((r) => findKey(ed.anim()!, r));
     ed.setKeySelection(pasted);
     const repairs = ed.lastRepairs.length ? ` ${ed.lastRepairs.join(' ')}` : '';
-    this.status(`Pasted ${pasted.length} key(s) at frame ${Math.round(t * anim.fps)}${result.skipped ? `; ${result.skipped} would land past the end and were skipped` : ''}.${repairs}`);
+    const missing = dropped ? ` ${dropped} key(s) not pasted: no ${unresolved.join(', ')} in this project.` : '';
+    this.status(`Pasted ${pasted.length} key(s) at frame ${Math.round(t * anim.fps)}${result.skipped ? `; ${result.skipped} would land past the end and were skipped` : ''}.${missing}${repairs}`);
   }
 
   closeLoop(): void {

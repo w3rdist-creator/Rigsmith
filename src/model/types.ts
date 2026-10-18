@@ -231,6 +231,27 @@ export interface MixRule {
   duration: number;
 }
 
+/** v2: one clip of a saved sequence, played `repeat` times back to back. */
+export interface SequenceStep {
+  animId: string;
+  /** Whole number of plays, 1..SEQUENCE_MAX_REPEAT. */
+  repeat: number;
+}
+
+/**
+ * v2: a saved clip sequence (ordered steps). Transitions between consecutive steps use
+ * the stored mix rules (`Project.mixes`), the same durations the Mix dialog edits.
+ */
+export interface ClipSequence {
+  id: string;
+  name: string;
+  steps: SequenceStep[];
+  /** Exported animated files loop forever (else they play once). */
+  loop: boolean;
+}
+
+export const SEQUENCE_MAX_REPEAT = 100;
+
 export interface Project {
   format: typeof FORMAT_ID;
   version: FormatVersion;
@@ -245,6 +266,8 @@ export interface Project {
   pathConstraints?: PathConstraint[];
   skins?: Skin[];
   mixes?: MixRule[];
+  /** v2: saved clip sequences. */
+  sequences?: ClipSequence[];
   /** Fixed delivery frame for exports (v2; absent = each export fits its animation). */
   frame?: ProjectFrame;
 }

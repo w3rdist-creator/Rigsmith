@@ -10,7 +10,7 @@ import type { Project, ProjectFrame } from '../src/model/types.ts';
 import { safeName } from '../src/render/sequence.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
-import { ApiError, EXIT, addImage, atlas, encodeMedia, ffmpegEncoder, readProject, replaceImage, runtime, sequenceZip, setMix, setSkin, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
+import { ApiError, EXIT, addImage, atlas, encodeMedia, ffmpegEncoder, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
 
 const USAGE = `rigsmith <command> [options]
   validate <project.rig.json>
@@ -21,6 +21,8 @@ const USAGE = `rigsmith <command> [options]
   mix <project> --from <anim> --to <anim> --at <seconds> --out <file.zip> [--duration S] [--missing setup|hold] [--skin <name>] [--fps N] [frame]
   lottie <project> --anim <name> --out <file.json> [--skin <name>] [frame]
   media <project> --format apng|gif|webm|mp4 (--anim <name> | --from <a> --to <b> --at <s>) --out <file> [render options] [--background #rrggbb] [frame]
+  sequence <project> --name <sequence> --out <file> [--format zip|apng|gif|webm|mp4] [--skin <name>] [--fps N] [--scale S] [--padding P] [--background #rrggbb] [frame]
+  set-sequence <project> --name <sequence> --steps "idle*2,greeting,idle" [--loop] --out <project>
   frame: --frame project|fit|<x,y,width,height>  (default fit: each export fits its animation)
          --frame-from <other.rig.json>           (use that project's frame, e.g. to align two versions)
   add-image <project> --file <image.png> [--name <name>] --out <project>
@@ -129,9 +131,10 @@ async function main(): Promise<Record<string, unknown>> {
     }
     case 'render':
     case 'mix':
-    case 'media': {
+    case 'media':
+    case 'sequence': {
       const out = need('out');
-      const format = (cmd === 'media' ? need('format') : 'zip') as CliMediaFormat | 'zip';
+      const format = (cmd === 'media' ? need('format') : cmd === 'sequence' ? (flag('format') ?? 'zip') : 'zip') as CliMediaFormat | 'zip';
       if (!['zip', 'apng', 'gif', 'webm', 'mp4'].includes(format)) usage(`--format must be apng, gif, webm or mp4 (got “${format}”).`);
       // Fail before rendering when ffmpeg / the encoder is missing.
       if (format === 'webm' || format === 'mp4') ffmpegEncoder(format);
@@ -140,7 +143,9 @@ async function main(): Promise<Record<string, unknown>> {
       const asSequence = cmd === 'render' || (cmd === 'media' && !flag('from'));
       const frame = frameOption(p);
       const req =
-        asSequence
+        cmd === 'sequence'
+          ? { kind: 'clips' as const, sequence: need('name'), skin: flag('skin') ?? null, fps: num('fps'), scale: num('scale'), padding: num('padding'), frame }
+          : asSequence
           ? { kind: 'sequence' as const, anim: need('anim'), skin: flag('skin') ?? null, fps: num('fps'), start: num('start'), end: num('end'), scale: num('scale'), padding: num('padding'), frame }
           : { kind: 'mix' as const, from: need('from'), to: need('to'), at: num('at') ?? usage('--at is required.'), duration: num('duration'), missing: (flag('missing') ?? 'setup') as MissingPolicy, skin: flag('skin') ?? null, fps: num('fps'), scale: num('scale'), padding: num('padding'), frame };
       const r = await withRenderer((rd) => rd.render(p, req, { onProgress: progress, isCancelled: () => cancelled }));
@@ -149,10 +154,10 @@ async function main(): Promise<Record<string, unknown>> {
       if (format !== 'zip') {
         const m = await encodeMedia(r, format, out, { background: flag('background'), isCancelled: () => cancelled, onProgress: (d, t) => process.stderr.write(`\rencode ${d}/${t}`) });
         process.stderr.write('\n');
-        return { outputs: [out], animation: r.meta.animation, fps: r.meta.fps, ...m.stats, frame: r.meta.frame, warnings: r.warnings };
+        return { outputs: [out], animation: r.meta.animation, fps: r.meta.fps, ...m.stats, frame: r.meta.frame, ...(cmd === 'sequence' ? { frames: r.files.length, sequence: r.meta.sequence } : {}), warnings: r.warnings };
       }
       writeOutput(out, sequenceZip(r));
-      return { outputs: [out], frames: r.files.length, width: r.meta.width, height: r.meta.height, animation: r.meta.animation, frame: r.meta.frame, warnings: r.warnings };
+      return { outputs: [out], frames: r.files.length, width: r.meta.width, height: r.meta.height, animation: r.meta.animation, frame: r.meta.frame, ...(cmd === 'sequence' ? { sequence: r.meta.sequence } : {}), warnings: r.warnings };
     }
     case 'lottie': {
       const out = need('out');
@@ -178,6 +183,12 @@ async function main(): Promise<Record<string, unknown>> {
       setSkin(p, need('name'), pairs('set', '='), pairs('keyed', '='));
       writeProject(out, p);
       return { outputs: [out], skins: (p.skins ?? []).map((s) => ({ name: s.name, entries: s.entries.length })) };
+    }
+    case 'set-sequence': {
+      const out = need('out');
+      const seq = setSequence(p, need('name'), need('steps'), !!flag('loop'));
+      writeProject(out, p);
+      return { outputs: [out], sequence: { name: seq.name, loop: seq.loop, steps: seq.steps.map((st) => ({ animation: p.animations.find((a) => a.id === st.animId)!.name, repeat: st.repeat })) } };
     }
     case 'set-mix': {
       const out = need('out');

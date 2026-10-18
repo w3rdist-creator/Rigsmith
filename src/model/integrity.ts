@@ -5,6 +5,7 @@
 import { normalizeWeights } from './meshOps.ts';
 import { isAncestorOrSelf } from './skeleton.ts';
 import type { Project } from './types.ts';
+import { SEQUENCE_MAX_REPEAT } from './types.ts';
 
 export function repairReferences(p: Project): string[] {
   const notes: string[] = [];
@@ -82,6 +83,15 @@ export function repairReferences(p: Project): string[] {
       seen.add(key);
       return true;
     });
+  }
+  if (p.sequences) {
+    const animIds = new Set(p.animations.map((a) => a.id));
+    for (const q of p.sequences) {
+      const before = q.steps.length;
+      q.steps = q.steps.filter((st) => animIds.has(st.animId));
+      for (const st of q.steps) st.repeat = Math.min(SEQUENCE_MAX_REPEAT, Math.max(1, Math.round(st.repeat) || 1));
+      if (q.steps.length !== before) notes.push(`Sequence “${q.name}”: ${before - q.steps.length} step(s) removed (their animation was deleted).`);
+    }
   }
 
   for (const an of p.animations) {

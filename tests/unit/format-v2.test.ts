@@ -21,7 +21,7 @@ test('a v1 file written by the original serializer loads and re-saves byte-ident
   assert.equal(p.version, 1);
   assert.equal(requiredVersion(p), 1);
   assert.equal(serializeProject(p), legacyText);
-  for (const k of ['ik', 'paths', 'pathConstraints', 'skins', 'mixes']) assert.ok(!(k in p), `no default "${k}" added on load`);
+  for (const k of ['ik', 'paths', 'pathConstraints', 'skins', 'mixes', 'sequences', 'frame']) assert.ok(!(k in p), `no default "${k}" added on load`);
   for (const a of p.animations) assert.ok(!('slots' in a) && !('drawOrder' in a) && !('constraints' in a), 'no default animation fields');
 });
 

@@ -4,7 +4,8 @@ import { playbackTime, snapToFrame } from '../model/animation.ts';
 import type { Frame } from '../model/evaluate.ts';
 import { evaluate } from '../model/evaluate.ts';
 import { deepEqualJson, History, shareUnchanged } from '../model/history.ts';
-import type { KeyClipboard, KeyRef } from '../model/keys.ts';
+import type { PortableClipboard } from '../model/clipboard.ts';
+import type { KeyRef } from '../model/keys.ts';
 import { parseLane, sameRef, validRefs } from '../model/keys.ts';
 import type { Mat } from '../model/math.ts';
 import type { PaintMode } from '../model/meshOps.ts';
@@ -41,7 +42,8 @@ export class Editor {
   keySel: KeySelection | null = null;
   /** All selected keys (includes keySel). */
   keySels: KeySelection[] = [];
-  clipboard: KeyClipboard | null = null;
+  /** Copied keys with the names they reference (durable: mirrored in IndexedDB). */
+  clipboard: PortableClipboard | null = null;
   onion: OnionSettings = { enabled: false, before: 2, after: 2, step: 2 };
   /** Active skin for display/export (view state). */
   skinId: string | null = null;
