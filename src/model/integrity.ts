@@ -95,7 +95,14 @@ export function repairReferences(p: Project): string[] {
         if (st.image) st.image = st.image.filter((k) => imageIds.has(k.imageId));
         const att = p.attachments.find((a) => a.id === id)!;
         const n = att.mesh ? att.mesh.points.length : -1;
-        if (st.deform && (n < 0 || st.deform.some((k) => k.value.length !== n))) delete st.deform;
+        // Deform keys must match the mesh's vertex count (e.g. an old-mesh key pasted
+        // after re-meshing): only the mismatched keys go, the rest of the track stays.
+        if (st.deform) {
+          const kept = st.deform.filter((k) => n >= 0 && k.value.length === n);
+          if (kept.length !== st.deform.length) notes.push(`${st.deform.length - kept.length} deform key(s) of ${att.name} removed (vertex count does not match ${n < 0 ? 'a non-mesh attachment' : 'its mesh'}).`);
+          if (kept.length) st.deform = kept;
+          else delete st.deform;
+        }
       }
     }
     if (an.constraints) for (const id of Object.keys(an.constraints)) if (!constraintIds.has(id)) delete an.constraints[id];

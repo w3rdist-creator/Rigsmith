@@ -405,3 +405,60 @@ describe('auto weights far from every bone (review P1-1)', () => {
     assert.ok(notes.some((x) => /2 vertex weight list/.test(x)), notes.join('; '));
   });
 });
+
+// DRW-001 (drwdmrs3 review, plausible concern): "src/model/integrity.ts:96 deletes an
+// attachment's *entire* deform track if any one key has the wrong vertex count. That can
+// happen after pasting an old deform key into a re-meshed attachment."
+describe('deform keys of the wrong vertex count (review DRW-001)', () => {
+  const PNG1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+  function rig(): Project {
+    const g = gridPoints(100, 100, 2, 2);
+    return {
+      format: 'rigsmith.project', version: 2, name: 'remesh',
+      images: [{ id: 'im', name: 'im.png', mime: 'image/png', width: 100, height: 100, dataUrl: PNG1 }],
+      bones: [{ id: 'root', name: 'root', parentId: null, x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, length: 30, color: '#8fd3c8' }],
+      attachments: [{ id: 'a', name: 'a', boneId: 'root', imageId: 'im', x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, opacity: 1, mesh: triangulate(g.hull, g.interior) }],
+      animations: [{ id: 'an', name: 'idle', duration: 1, fps: 30, loop: true, tracks: {} }],
+    };
+  }
+
+  it('pasting an old-mesh deform key drops only that key, keeps the others and says so', async () => {
+    const { Editor } = await import('../../src/editor/store.ts');
+    const { copyKeys, pasteKeys, slotLane } = await import('../../src/model/keys.ts');
+    const ed = new Editor();
+    ed.load(rig());
+    const lane = slotLane('a', 'deform');
+    const n0 = ed.project.attachments[0].mesh!.points.length;
+    ed.mutate('key old', (p) => keyDeform(p.animations[0], 'a', 0, Array.from({ length: n0 }, () => 1)));
+    const clip = copyKeys(ed.project.animations[0], [{ lane, time: 0 }])!;
+    assert.ok(clip);
+    // Re-mesh (drops the old deform keys by design), then key the new mesh twice.
+    const g = gridPoints(100, 100, 4, 4);
+    ed.mutate('remesh', (p) => setMesh(p, 'a', triangulate(g.hull, g.interior)));
+    const n1 = ed.project.attachments[0].mesh!.points.length;
+    assert.notEqual(n0, n1);
+    ed.mutate('key 1', (p) => keyDeform(p.animations[0], 'a', 10 / 30, Array.from({ length: n1 }, () => 2)));
+    ed.mutate('key 2', (p) => keyDeform(p.animations[0], 'a', 20 / 30, Array.from({ length: n1 }, () => 3)));
+    ed.mutate('paste', (p) => pasteKeys(p.animations[0], clip, 15 / 30));
+    const keys = ed.project.animations[0].slots?.a?.deform ?? [];
+    assert.deepEqual(keys.map((k) => Math.round(k.time * 30)), [10, 20], 'the new mesh keys survive');
+    assert.ok(keys.every((k) => k.value.length === n1));
+    assert.ok(ed.lastRepairs.some((x) => /1 deform key\(s\).*vertex count/.test(x)), `note: ${ed.lastRepairs.join(' | ')}`);
+    // The project still validates and re-opens.
+    assert.ok(parseProject(serializeProject(ed.project)).ok);
+  });
+
+  it('a track whose every key mismatches is removed, and a non-mesh attachment loses its deform track', () => {
+    const p = rig();
+    const n = p.attachments[0].mesh!.points.length;
+    keyDeform(p.animations[0], 'a', 0, Array.from({ length: n + 2 }, () => 0));
+    let notes = repairReferences(p);
+    assert.equal(p.animations[0].slots?.a?.deform, undefined);
+    assert.ok(notes.some((x) => /1 deform key\(s\)/.test(x)), notes.join(' | '));
+    keyDeform(p.animations[0], 'a', 0, Array.from({ length: n }, () => 0));
+    delete p.attachments[0].mesh;
+    notes = repairReferences(p);
+    assert.equal(p.animations[0].slots?.a?.deform, undefined);
+    assert.ok(notes.some((x) => /1 deform key\(s\)/.test(x)), notes.join(' | '));
+  });
+});

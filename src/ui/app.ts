@@ -550,8 +550,11 @@ export class App {
       const a = p.animations.find((x) => x.id === anim.id)!;
       result = pasteKeys(a, clip, t, ed.selectedBoneId());
     });
-    ed.setKeySelection(result.refs);
-    this.status(`Pasted ${result.refs.length} key(s) at frame ${Math.round(t * anim.fps)}${result.skipped ? `; ${result.skipped} would land past the end and were skipped` : ''}.`);
+    // The integrity pass may drop pasted keys that do not fit (e.g. an old mesh's deform key).
+    const pasted = result.refs.filter((r) => findKey(ed.anim()!, r));
+    ed.setKeySelection(pasted);
+    const repairs = ed.lastRepairs.length ? ` ${ed.lastRepairs.join(' ')}` : '';
+    this.status(`Pasted ${pasted.length} key(s) at frame ${Math.round(t * anim.fps)}${result.skipped ? `; ${result.skipped} would land past the end and were skipped` : ''}.${repairs}`);
   }
 
   closeLoop(): void {

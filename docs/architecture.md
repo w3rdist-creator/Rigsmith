@@ -178,7 +178,9 @@ image, skin, draw order) → mesh vertices.
   edit; subtracting a vertex's only influence hands it to the attachment's bone (no-op
   when that is the painted bone). Deleting a bone passes its weights to its parent; a
   missing bone is dropped and the rest renormalized (integrity pass). Re-meshing resets
-  weights and deform keys.
+  weights and deform keys. A deform key whose vertex count does not match the mesh (an
+  old mesh's key pasted after re-meshing) is removed on its own, with a status note; the
+  rest of the deform track stays.
 - **Mesh rendering** (`src/render/draw.ts`): each mesh is drawn into an integer-aligned
   offscreen layer and composited once with the attachment opacity. Each triangle is
   clipped to its outline and the image drawn through the triangle's affine map

@@ -117,6 +117,73 @@ describe('P1-1: Auto weights on a large part bound to short bones', () => {
   });
 });
 
+describe('DRW-001: pasting an old-mesh deform key keeps the rest of the deform track', () => {
+  /** A 100×100 sheet meshed 2×2 with one deform key at frame 0 (old mesh). */
+  function sheetRig(): Project {
+    const W = 100, H = 100;
+    const px = new Uint8Array(W * H * 4);
+    for (let i = 0; i < W * H; i++) px.set([60, 140, 200, 255], i * 4);
+    const dataUrl = `data:image/png;base64,${Buffer.from(encodePng(W, H, px)).toString('base64')}`;
+    const g = gridPoints(W, H, 2, 2);
+    const mesh = triangulate(g.hull, g.interior);
+    return {
+      format: 'rigsmith.project', version: 2, name: 'sheet',
+      images: [{ id: 'im', name: 'sheet.png', mime: 'image/png', width: W, height: H, dataUrl }],
+      bones: [{ id: 'root', name: 'root', parentId: null, x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, length: 40, color: '#8fd3c8' }],
+      attachments: [{ id: 's', name: 'sheet', boneId: 'root', imageId: 'im', x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, opacity: 1, mesh }],
+      animations: [{
+        id: 'an', name: 'idle', duration: 1, fps: 30, loop: true, tracks: {},
+        slots: { s: { deform: [{ time: 0, value: mesh.points.map((_, i) => (i % 2 ? 3 : 0)), interp: 'linear' }] } },
+      }],
+    };
+  }
+  const setField = async (id: string, v: number) => {
+    await page.getByTestId(id).fill(String(v));
+    await page.getByTestId(id).press('Enter');
+  };
+  const gotoFrame = async (frame: number) => {
+    const ruler = page.getByTestId('timeline-ruler');
+    const box = (await ruler.boundingBox())!;
+    await ruler.click({ position: { x: Math.min(box.width - 0.5, (box.width * frame) / 30), y: box.height / 2 } });
+  };
+  const deformFrames = async () => ((await project()).animations[0].slots?.s?.deform ?? []).map((k: any) => Math.round(k.time * 30));
+
+  it('copy an old key, re-mesh, key twice, paste: only the old key is dropped, and the status says so', async () => {
+    const file = path.join(OUT, 'sheet.rig.json');
+    writeFileSync(file, serializeProject(sheetRig()));
+    await page.getByTestId('open-input').setInputFiles(file);
+    await page.waitForFunction(() => (window as any).__rigsmith.project().name === 'sheet');
+    await page.getByTestId('tree-att-sheet').click();
+    await page.getByTestId('mode-animate').click();
+    await page.getByTestId('key-sheet-deform-0').click();
+    await page.getByTestId('copy-keys').click();
+    await page.getByTestId('mode-setup').click();
+    await page.getByTestId('mesh-edit').click();
+    await setField('mesh-grid-cols', 4);
+    await setField('mesh-grid-rows', 4);
+    await page.getByTestId('mesh-grid').click();
+    await page.getByTestId('mesh-apply').click();
+    await page.getByTestId('mesh-dialog').waitFor({ state: 'hidden' });
+    assert.deepEqual(await deformFrames(), [], 're-meshing drops the old deform keys');
+    const n1 = (await project()).attachments[0].mesh.points.length;
+    await page.getByTestId('mode-animate').click();
+    for (const f of [10, 20]) {
+      await gotoFrame(f);
+      await page.getByTestId('slot-key-deform').click();
+    }
+    assert.deepEqual(await deformFrames(), [10, 20]);
+    const undo0 = (await state()).undo;
+    await gotoFrame(15);
+    await page.getByTestId('paste-keys').click();
+    assert.deepEqual(await deformFrames(), [10, 20], 'the new mesh keys survive the paste');
+    assert.ok((await project()).animations[0].slots.s.deform.every((k: any) => k.value.length === n1));
+    assert.match(await page.getByTestId('status').innerText(), /^Pasted 0 key\(s\) at frame 15\. 1 deform key\(s\) of sheet removed \(vertex count does not match its mesh\)\.$/);
+    assert.equal((await state()).undo, undo0, 'nothing changed, so no undo step');
+    assert.equal(await page.getByTestId('error-toast').count(), 0);
+    assert.deepEqual(pageErrors, []);
+  });
+});
+
 describe('P2-2 / P3-1: the reference player validates runtime files and never shows a stale frame', () => {
   // Runtime files are generated from the shared fixture with the model exporter (the
   // editor-UI export path is covered by p4-player); malformed variants mutate one field.
