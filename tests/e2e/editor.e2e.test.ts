@@ -21,7 +21,7 @@ let page: Page;
 let base: string;
 const pageErrors: string[] = [];
 
-type State = { mode: string; time: number; playing: boolean; selection: { kind: string; id: string } | null; undo: number; redo: number };
+type State = { mode: string; time: number; playing: boolean; animName: string | null; selection: { kind: string; id: string } | null; undo: number; redo: number };
 type BoneScreen = { origin: { x: number; y: number }; tip: { x: number; y: number }; mid: { x: number; y: number }; world: { x: number; y: number; angle: number } };
 
 const state = () => probe<State>(page, 'state');
@@ -147,6 +147,23 @@ describe('rigging from scratch: bones, images, attachments', () => {
     const options = await page.getByTestId('bone-parent').locator('option').allTextContents();
     assert.ok(!options.includes('forearm'), `descendant excluded from parent options: ${options.join(', ')}`);
     assert.ok(!options.includes('upperarm'), 'self excluded from parent options');
+
+    // Re-parent "forearm" to the root through the dropdown: it keeps its world placement;
+    // Undo restores the hierarchy.
+    await page.getByTestId('tree-bone-forearm').click();
+    const fw0 = await bone('forearm');
+    await page.getByTestId('bone-parent').selectOption({ label: '(none — root)' });
+    p = await project();
+    assert.equal(p.bones.find((b: any) => b.name === 'forearm').parentId, null, 'forearm is now a root bone');
+    const fw1 = await bone('forearm');
+    near(fw1.origin.x, fw0.origin.x, 1, 're-parent keeps the screen origin x');
+    near(fw1.origin.y, fw0.origin.y, 1, 're-parent keeps the screen origin y');
+    near(fw1.tip.x, fw0.tip.x, 1, 're-parent keeps the screen tip x');
+    near(fw1.tip.y, fw0.tip.y, 1, 're-parent keeps the screen tip y');
+    await page.getByTestId('undo').click();
+    p = await project();
+    assert.equal(p.bones.find((b: any) => b.name === 'forearm').parentId, p.bones.find((b: any) => b.name === 'upperarm').id, 'undo restores the parent');
+    await page.getByTestId('tree-bone-upperarm').click();
     await shot('10-two-bones');
   });
 
@@ -528,6 +545,16 @@ describe('view navigation and remaining tools', () => {
     assert.equal((await project()).animations[0].name, 'swing');
     await page.getByTestId('new-animation').click();
     assert.equal((await project()).animations.length, 2);
+    const created = (await state()).animName;
+    assert.notEqual(created, 'swing', 'the new animation is current');
+    // Switch with the timeline's animation dropdown: the name field and keys follow.
+    await page.getByTestId('anim-select').selectOption({ label: 'swing' });
+    assert.equal((await state()).animName, 'swing');
+    assert.equal(await page.getByTestId('anim-name').inputValue(), 'swing');
+    await page.getByTestId('key-forearm-rotate-0').waitFor();
+    await page.getByTestId('anim-select').selectOption({ label: created! });
+    assert.equal((await state()).animName, created);
+    assert.equal(await page.getByTestId('key-forearm-rotate-0').count(), 0, 'the empty animation shows no keys');
     await page.getByRole('button', { name: 'Delete animation' }).click();
     const p = await project();
     assert.deepEqual(p.animations.map((a: any) => a.name), ['swing']);

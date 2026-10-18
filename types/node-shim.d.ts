@@ -29,6 +29,8 @@ interface ImportMeta {
   /** Directory of the current module (Node ≥ 20.11). */
   dirname: string;
   filename: string;
+  /** True when this module is the process entry point (Node ≥ 24.2). */
+  main: boolean;
 }
 
 declare const process: {
@@ -42,6 +44,7 @@ declare const process: {
   stderr: { write(s: string | Uint8Array): boolean };
   on(event: 'SIGINT' | 'SIGTERM', fn: () => void): void;
   execPath: string;
+  pid: number;
 };
 
 declare module 'node:assert/strict' {

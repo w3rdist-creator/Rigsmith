@@ -122,6 +122,10 @@ describe('panels, toolbar and transport controls', () => {
     let arm = byName((await project()).bones, 'arm-front');
     assert.deepEqual([arm.length, arm.y], [55, 3]);
     await page.getByTestId('tree-att-head').click();
+    await setField('att-name', 'head-renamed');
+    await page.getByTestId('tree-att-head-renamed').waitFor();
+    await setField('att-name', 'head');
+    await page.getByTestId('tree-att-head').waitFor();
     const order = async () => (await project()).attachments.map((a: any) => a.name);
     const i0 = (await order()).indexOf('head');
     await page.getByTestId('att-backward').click();

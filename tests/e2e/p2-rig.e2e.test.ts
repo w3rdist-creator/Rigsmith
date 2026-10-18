@@ -234,6 +234,12 @@ describe('two-bone IK', () => {
     g = await armGeometry();
     const upId = p.ik[0].bones[0];
     for (let k = 0; k < 6; k++) near(g.up[k], ref.get(upId)![k], 1e-6, 'mix 0 = keyed pose (independent sampler)');
+    // The mix key toggle removes the frame-8 key and adds it back.
+    await page.getByTestId('ik-key-mix').click();
+    await page.getByTestId('key-forearm-front-ik-mix-8').waitFor({ state: 'detached' });
+    assert.ok(!((await project()).animations.find((a: any) => a.name === 'walk').constraints?.[p.ik[0].id]?.mix ?? []).some((k: any) => Math.round(k.time * 30) === 8), 'mix key at f8 removed');
+    await page.getByTestId('ik-key-mix').click();
+    await page.getByTestId('key-forearm-front-ik-mix-8').waitFor();
     await setField('ik-mix', 1);
     const t = await boneScreen('forearm-front-target');
     const before = (await worlds())[p.ik[0].target];
@@ -363,6 +369,11 @@ describe('path constraint', () => {
     near(m[5], want.p.y, 0.6, 'y on the path at half its length');
     const ang = (Math.atan2(m[1], m[0]) * 180) / Math.PI;
     near(((ang - want.tangent - 15 + 540) % 360) - 180, 0, 0.5, 'rotated to tangent + 15°');
+    // The mix key toggle keys the current mix at this frame, and a second press removes it.
+    await page.getByTestId('pc-key-mix').click();
+    await page.getByTestId('key-path-follow-mix-15').waitFor();
+    await page.getByTestId('pc-key-mix').click();
+    await page.getByTestId('key-path-follow-mix-15').waitFor({ state: 'detached' });
     await page.getByTestId('tree-path-path').click();
     await page.getByTestId('path-closed').check();
     assert.equal((await project()).paths[0].closed, true);
@@ -451,9 +462,17 @@ describe('cutout tools and pivot mode', () => {
     await page.getByTestId('cut-bone').uncheck();
     await page.getByTestId('cut-patch').check();
     await page.getByTestId('cut-patch-color').fill('#ff00ff');
+    assert.equal(await page.getByTestId('cut-behind').isChecked(), false, 'a plain cut defaults to in front');
+    await page.getByTestId('cut-behind').check();
+    const atts0 = (await project()).attachments.map((a: any) => a.id);
     await page.getByTestId('cut-apply').click();
     await page.getByTestId('cutout-dialog').waitFor({ state: 'hidden' });
     const p = await project();
+    const ids = p.attachments.map((a: any) => a.id);
+    const added = ids.filter((id: string) => !atts0.includes(id));
+    assert.equal(added.length, 1, 'one piece attachment added');
+    const src = p.attachments.find((a: any) => a.name === 'limb');
+    assert.equal(ids.indexOf(added[0]), ids.indexOf(src.id) - 1, '"behind" inserts the piece directly below the source in draw order');
     const patched = p.images.find((i: any) => i.derived?.kind === 'patch');
     assert.ok(patched && patched.derived.synthesized > 500, `patch records synthesized pixels (${patched?.derived.synthesized})`);
     assert.match(patched.derived.note, /#ff00ff/);

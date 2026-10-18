@@ -179,6 +179,14 @@ describe('pixel selection and clean-up tools (cutout dialog)', () => {
     await setField('cut-speck-faint', 101);
     assert.equal(await page.getByTestId('cut-speck-count').innerText(), `${specks(rest, 101, 200, 6).length} speck px in glove-art-rest.png`, 'α 100 now counts as faint');
     await setField('cut-speck-faint', 100);
+    // The art is fully opaque, so only a "solid" threshold below some faint pixels' own alpha
+    // (20–99) changes the count: at 50 those pixels count as solid and stop being specks.
+    const solid = specks(rest, 100, 50, 6).length;
+    assert.ok(solid < want.length, `solid 50 changes the reference count (${solid} vs ${want.length})`);
+    await setField('cut-speck-solid', 50);
+    assert.equal(await page.getByTestId('cut-speck-count').innerText(), `${solid} speck px in glove-art-rest.png`, 'solid threshold 50');
+    await setField('cut-speck-solid', 200);
+    assert.equal(await page.getByTestId('cut-speck-count').innerText(), `${want.length} speck px in glove-art-rest.png`);
     assert.ok(want.length >= 3 && want.length < FAINT.length, `some faint pixels are near art (${want.length} of ${FAINT.length})`);
     const u0 = (await state()).undo;
     await page.getByTestId('cut-despeckle').click();

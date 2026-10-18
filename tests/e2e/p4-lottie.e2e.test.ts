@@ -219,6 +219,13 @@ describe('Lottie subset export', () => {
     for (const re of [/IK constraint — lower-ik/, /path constraint — path-follow/, /mesh — band/, /draw-order keys — wave/, /deform keys — band/]) assert.match(diags, re);
     assert.ok(await page.getByTestId('lottie-export').isDisabled());
     assert.equal(await page.getByTestId('lottie-summary').count(), 0);
+    // Switching the animation re-evaluates: "rest" has no draw-order keys, but the rig-wide
+    // refusals remain.
+    await page.getByTestId('lottie-anim').selectOption('rest');
+    const rest = await page.getByTestId('lottie-diagnostics').innerText();
+    assert.ok(!/draw-order keys — wave/.test(rest), `rest has no draw-order refusal: ${rest}`);
+    assert.match(rest, /IK constraint — lower-ik/);
+    assert.ok(await page.getByTestId('lottie-export').isDisabled());
     await page.getByTestId('lottie-cancel').click();
     const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts/rigsmith.ts'), 'lottie', RICH, '--anim', 'wave', '--out', path.join(OUT, 'nope.json')], { cwd: ROOT, encoding: 'utf8' });
     assert.equal(r.status, 1);
