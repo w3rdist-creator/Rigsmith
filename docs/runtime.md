@@ -137,9 +137,13 @@ What the agreement tests show (`tests/unit/runtime.test.ts`, `tests/e2e/p4-playe
   not solve IK or path constraints: the four constraint-driven bones take their world
   pose from the runtime file's `baked` rows, i.e. from the shared-code exporter. Result:
   9 strict mismatches (solid vs clear, or opaque colour) in 30 frames, against 32 376
-  for a control without the constrained poses; the rest are anti-aliased edge
-  coverages along the deformed mesh outline (≤ 3.2 % of covered pixels per frame; the
-  reference subsamples 4×4). Not covered: constraint solving by a non-shared
+  for a control without the constrained poses. The rest are alpha-only differences on
+  the outline of the deformed mesh `band` (≤ 3.2 % of covered pixels per frame; the
+  budget was set from the first observed run). Observed: the mesh never folds, the skinned
+  vertices equal the exporter's `bakedMeshes` within 1e-3 px, and the player's outline
+  carries ~45–50 px less alpha per frame than the reference with the interior equal.
+  Inferred, not proven: edge sampling/coverage differences (canvas texture filtering at
+  the image border vs the reference's 4×4 subsampled coverage). Not covered: constraint solving by a non-shared
   implementation, the skin and the transition (still player vs editor only), and any
   third-party runtime — none exists for this format.
 
