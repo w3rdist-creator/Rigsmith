@@ -7,9 +7,12 @@
 //
 // Per channel (translate / rotate / scale of a bone, opacity / deform of a slot):
 //   P_k = P_{k−1} + w_k · (value_k − P_{k−1}),  w_k = clamp((T − start_k) / mix_k, 0, 1)
-// rotation takes the shortest way round. Constraints (IK, paths) are solved after
-// blending, on the blended local pose. Discrete state (visibility, image, draw order,
-// constraint keys) comes from the newest entry whose weight has reached 0.5.
+// rotation takes the shortest way round. Constraint mix and path position blend along
+// the chain the same way (an entry that does not key them supplies the constraint's
+// setup value under 'setup' and leaves them alone under 'hold'), so an animation that
+// keys an IK off fades it out over the mix instead of switching at half weight.
+// Constraints (IK, paths) are then solved on the blended local pose. Discrete state
+// (visibility, image, draw order) comes from the newest entry whose weight has reached 0.5.
 //
 // Missing channels — a channel entry k does not key:
 //   'setup': its value_k is the setup pose (the bone/slot blends back to setup);
@@ -19,6 +22,7 @@
 // whatever the outgoing pose shows for it (the setup value if nothing before keyed it),
 // under either policy.
 import { playbackTime, sampleKeys } from './animation.ts';
+import type { ConstraintValues } from './constraints.ts';
 import { applyConstraints } from './constraints.ts';
 import type { Frame } from './evaluate.ts';
 import { evaluate } from './evaluate.ts';
@@ -103,7 +107,7 @@ export function planLength(project: Project, plan: MixPlan): number {
 export interface MixState {
   /** Weight of each entry at T (entry 0 = 1). */
   weights: number[];
-  /** Entry providing discrete state (visibility, image, draw order, constraint keys). */
+  /** Entry providing discrete state (visibility, image, draw order). */
   discrete: number;
 }
 
@@ -151,6 +155,25 @@ export function mixPose(project: Project, plan: MixPlan, T: number): Map<string,
   return pose;
 }
 
+/** Constraint mix / path position blended along the plan's chain at global time T. */
+export function mixConstraintValues(project: Project, plan: MixPlan, T: number): ConstraintValues {
+  const blend = (id: string, channel: 'mix' | 'position', base: number) => {
+    let v = base;
+    plan.entries.forEach((e, i) => {
+      const anim = project.animations.find((a) => a.id === e.animId);
+      const w = entryWeight(e, i, T);
+      if (!anim || w <= 0) return;
+      const keys = anim.constraints?.[id]?.[channel];
+      const raw = keys?.length ? sampleKeys(keys, entryTime(anim, e, T), [base])[0] : plan.missing === 'setup' ? base : null;
+      if (raw === null) return;
+      const x = channel === 'mix' ? Math.min(1, Math.max(0, raw)) : raw;
+      v = w >= 1 ? x : v + w * (x - v);
+    });
+    return v;
+  };
+  return { mix: (id, base) => blend(id, 'mix', base), position: (id, base) => blend(id, 'position', base) };
+}
+
 /**
  * Full evaluated frame of a mix plan at global time T: blended pose → constraints →
  * world → attachments (discrete state from the dominant entry; opacity and mesh deform
@@ -162,7 +185,7 @@ export function evaluateMix(project: Project, plan: MixPlan, T: number, opts: { 
   const dAnim = project.animations.find((a) => a.id === dEntry?.animId) ?? null;
   const dTime = dAnim ? entryTime(dAnim, dEntry, T) : 0;
   const pose = mixPose(project, plan, T);
-  applyConstraints(project, pose, dAnim, dTime);
+  applyConstraints(project, pose, dAnim, dTime, mixConstraintValues(project, plan, T));
   const frame = evaluate(project, dAnim, dTime, { skinId: opts.skinId, pose, constraints: false });
   // Continuous slot channels blend along the chain like bone channels.
   const setupWorld = project.attachments.some((a) => a.mesh?.weights) ? computeWorld(project.bones) : frame.world;

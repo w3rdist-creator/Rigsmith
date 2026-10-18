@@ -23,8 +23,24 @@ export interface GuideStep {
 const PIECE_KINDS = new Set(['cutout', 'extension']);
 const isPiece = (im: ImageAsset | undefined) => !!im?.derived && PIECE_KINDS.has(im.derived.kind);
 
-/** The attachment that holds the flat art (the original image or what is left of it after cuts). */
+/**
+ * The guide acts on a project that starts from exactly one flat image. null when it can
+ * act; otherwise the reason it does not (no image yet, or several original images — an
+ * existing layered rig, where "the art" would be an arbitrary attachment).
+ */
+export function guideBlocked(p: Project): string | null {
+  const originals = p.images.filter((i) => !i.derived);
+  if (!originals.length) return 'Import the art first.';
+  if (originals.length > 1) return `This guide is for one flat PNG of the whole character; this project has ${originals.length} original images, so the guide does not act on it.`;
+  return null;
+}
+
+/**
+ * The attachment that holds the flat art (the one original image, a cleaned copy of it, or
+ * what is left of it after cuts). null unless the project has exactly one original image.
+ */
 export function guideArt(p: Project): { att: Attachment; im: ImageAsset } | null {
+  if (p.images.filter((i) => !i.derived).length !== 1) return null;
   for (const att of p.attachments) {
     const im = p.images.find((i) => i.id === att.imageId);
     if (im && !isPiece(im)) return { att, im };
@@ -69,14 +85,15 @@ export function guideSteps(p: Project): GuideStep[] {
   const mesh = art?.att.mesh;
   const idle = p.animations.find((a) => keyCount(a) > 0);
   const names = (as: Attachment[]) => as.map((a) => a.name).join(', ');
+  const several = originals.length > 1 ? guideBlocked(p)! : null;
   return [
     { id: 'import', title: 'Import the flat art (one PNG of the whole character)', optional: false, done: originals.length > 0, detail: originals.length ? `${originals.map((i) => `${i.name} ${i.width}×${i.height}`).join(', ')}` : 'No image yet.' },
-    { id: 'rig', title: 'Root bone with the art attached', optional: false, done: !!art && !!bone, detail: art && bone ? `“${art.att.name}” on bone “${bone.name}”.` : art ? `“${art.att.name}” is not on a bone.` : 'Nothing attached yet.' },
+    { id: 'rig', title: 'Root bone with the art attached', optional: false, done: !!art && !!bone, detail: several ?? (art && bone ? `“${art.att.name}” on bone “${bone.name}”.` : art ? `“${art.att.name}” is not on a bone.` : 'Nothing attached yet.') },
     { id: 'clean', title: 'Remove faint specks', optional: true, done: cleaned, detail: cleaned ? `${art!.att.name} uses a cleaned copy (the original is kept).` : 'Optional. Strays far from the art would otherwise ride along with whatever piece you cut around them.' },
     { id: 'limbs', title: 'Cut the limbs: outline, pivot at the joint, joint extension', optional: false, done: limbs.length > 0, detail: limbs.length ? `${limbs.length} outline cut(s): ${names(limbs)}.` : 'No limb cut yet.' },
     { id: 'colour', title: 'Cut hands or feet by colour', optional: true, done: colour.length > 0, detail: colour.length ? `${colour.length} colour cut(s): ${names(colour)}.` : 'Optional.' },
-    { id: 'mesh', title: 'Bend the body: grid mesh + auto weights', optional: false, done: !!mesh?.weights, detail: mesh ? `${mesh.points.length / 2} vertices${mesh.weights ? ', weighted' : ', not weighted yet'}.` : 'The body is a flat image.' },
-    { id: 'idle', title: 'First idle', optional: false, done: !!idle, detail: idle ? `“${idle.name}” (${idle.duration} s, ${keyCount(idle)} keys). Press Play, then edit its keys.` : 'No animation with keys yet.' },
+    { id: 'mesh', title: 'Bend the body: grid mesh + auto weights', optional: false, done: !!mesh?.weights, detail: several ?? (mesh ? `${mesh.points.length / 2} vertices${mesh.weights ? ', weighted' : ', not weighted yet'}.` : 'The body is a flat image.') },
+    { id: 'idle', title: 'First idle', optional: false, done: !!idle, detail: several ?? (idle ? `“${idle.name}” (${idle.duration} s, ${keyCount(idle)} keys). Press Play, then edit its keys.` : 'No animation with keys yet.') },
   ];
 }
 
@@ -84,6 +101,8 @@ export function guideSteps(p: Project): GuideStep[] {
 export function startRig(p: Project, imageId: string, ids: { bone: string; att: string }, at: { x: number; y: number }): void {
   const im = p.images.find((i) => i.id === imageId);
   if (!im) throw new Error('The image no longer exists.');
+  const blocked = guideBlocked(p);
+  if (blocked) throw new Error(blocked);
   const art = guideArt(p);
   let boneId = p.bones.find((b) => b.parentId === null)?.id;
   if (!boneId) {
@@ -107,6 +126,8 @@ export function meshArt(p: Project, attId: string, cols: number, rows: number): 
   const im = att && p.images.find((i) => i.id === att.imageId);
   if (!att || !im) throw new Error('The art attachment no longer exists.');
   if (!att.boneId) throw new Error('Attach the art to a bone first.');
+  const blocked = guideBlocked(p);
+  if (blocked) throw new Error(blocked);
   const g = gridPoints(im.width, im.height, cols, rows);
   const problem = meshProblem(g.hull, g.interior, im);
   if (problem) throw new Error(problem);
@@ -122,6 +143,8 @@ export function meshArt(p: Project, attId: string, cols: number, rows: number): 
  * alternating directions. Lower bones (legs) stay planted. Smooth (eased) keys.
  */
 export function firstIdle(p: Project, id: string): { name: string; swaying: string[] } {
+  const blocked = guideBlocked(p);
+  if (blocked && p.images.length) throw new Error(blocked);
   const art = guideArt(p);
   const root = p.bones.find((b) => b.id === art?.att.boneId) ?? p.bones.find((b) => b.parentId === null);
   if (!root) throw new Error('Create the root bone first.');

@@ -191,6 +191,18 @@ describe('rendering (headless Chrome for Testing via render.html)', () => {
           await page.getByTestId(id).press('Enter');
         }
       }],
+      // LP-004: on the accelerated raster, half-scale exports depended on what had been
+      // drawn before (the dialog and the CLI disagreed on early frames of long exports).
+      // Exports now draw on the software path (exportContext); this case was red without it.
+      ['wave at 120 fps, scale 0.5 (LP-004)', ['--fps', '120', '--start', '0', '--end', '119', '--scale', '0.5'], async () => {
+        await page.getByTestId('export-sequence').click();
+        await page.getByTestId('seq-anim').selectOption({ label: 'wave' });
+        await page.getByTestId('seq-skin').selectOption({ label: '(no skin)' });
+        for (const [id, v] of [['seq-fps', '120'], ['seq-start', '0'], ['seq-end', '119'], ['seq-scale', '0.5']]) {
+          await page.getByTestId(id).fill(v);
+          await page.getByTestId(id).press('Enter');
+        }
+      }],
     ] as const) {
       const out = path.join(OUT, `cli-${label.split(' ')[0]}-${args.length}.zip`);
       const r = cli('render', RIG, '--anim', 'wave', ...args, '--out', out);

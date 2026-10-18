@@ -126,10 +126,15 @@ export function fitFrameToAnimations(project: Project, sample: (anim: Animation,
   return { x, y, width: Math.ceil(u.maxX + padding) - x, height: Math.ceil(u.maxY + padding) - y };
 }
 
-export function checkCapacity(geo: SequenceGeometry, frames: number): string[] {
+/** `range`: the export has a start/end range to shorten (single animations; mixes and sequences do not). */
+export function checkCapacity(geo: SequenceGeometry, frames: number, range = true): string[] {
   const e: string[] = [];
   if (geo.width > SEQUENCE_LIMITS.maxSide || geo.height > SEQUENCE_LIMITS.maxSide) e.push(`Frames would be ${geo.width}×${geo.height} px; the limit is ${SEQUENCE_LIMITS.maxSide} px per side. Lower the scale.`);
   else if (geo.width * geo.height > SEQUENCE_LIMITS.maxFramePixels) e.push(`Frames would be ${geo.width}×${geo.height} px (over ${SEQUENCE_LIMITS.maxFramePixels / 1e6} megapixels). Lower the scale.`);
-  else if (geo.width * geo.height * frames > SEQUENCE_LIMITS.maxTotalPixels) e.push(`${frames} frames of ${geo.width}×${geo.height} px is too large to export in the browser (over ${SEQUENCE_LIMITS.maxTotalPixels / 1e6} megapixels in total). Lower the scale, FPS or range.`);
+  else if (geo.width * geo.height * frames > SEQUENCE_LIMITS.maxTotalPixels) {
+    // The command-line renderer runs this same check, so it is not a way around the limit.
+    const fit = Math.floor(SEQUENCE_LIMITS.maxTotalPixels / (geo.width * geo.height));
+    e.push(`${frames} frames of ${geo.width}×${geo.height} px is too large to export (over ${SEQUENCE_LIMITS.maxTotalPixels / 1e6} megapixels in total; the command-line renderer has the same limit). At this size at most ${fit} frames fit. Lower the scale${range ? ', FPS or range' : ' or FPS'}.`);
+  }
   return e;
 }

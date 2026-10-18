@@ -4,7 +4,8 @@ import type { Tool } from '../editor/store.ts';
 import { findKeyIndex, keysBeyondEnd, removeKey, setInterp, snapToFrame } from '../model/animation.ts';
 import { CURVE_PRESETS } from '../model/curve.ts';
 import type { KeyRef } from '../model/keys.ts';
-import { allLanes, boneLane, closeLoopSeam, copyKeys, deleteKeys, findKey, laneKeys, pasteKeys, sameRef, shiftKeys } from '../model/keys.ts';
+import { allLanes, boneLane, closeLoopSeam, copyKeys, deleteKeys, findKey, laneKeys, parseLane, pasteKeys, sameRef, shiftKeys } from '../model/keys.ts';
+import { drivenByConstraints } from '../model/animImport.ts';
 import { parsePortable, resolvePortable, toPortable } from '../model/clipboard.ts';
 import { buildDemoProject } from '../model/demo.ts';
 import { exportRuntime, runtimeProblems } from '../model/exportRuntime.ts';
@@ -13,9 +14,9 @@ import { apply, invert } from '../model/math.ts';
 import { keyChannels, makeBone, uniqueName } from '../model/ops.ts';
 import { CycleError, attachmentWorld, boneTip, deleteBone, reparentBone } from '../model/skeleton.ts';
 import type { Animation, Channel, Curve, Key, Project } from '../model/types.ts';
-import { CHANNELS, emptyProject, newId } from '../model/types.ts';
+import { CHANNELS, emptyProject, emptyTrack, newId } from '../model/types.ts';
 import { frameBounds } from '../model/evaluate.ts';
-import { drawFrame } from '../render/draw.ts';
+import { drawFrame, exportContext } from '../render/draw.ts';
 import type { Autosave } from './autosave.ts';
 import { buildDemoImages } from './demoArt.ts';
 import { ExportDialog } from './exportDialog.ts';
@@ -301,7 +302,7 @@ export class App {
     const c = document.createElement('canvas');
     c.width = w;
     c.height = hh;
-    const g = c.getContext('2d')!;
+    const g = exportContext(c)!;
     drawFrame(g, frame, (im) => this.images.get(im), { a: 1, b: 0, c: 0, d: 1, tx: -minX + pad, ty: -minY + pad });
     c.toBlob((blob) => {
       if (!blob) return this.error('PNG export failed');
@@ -617,7 +618,7 @@ export class App {
     const { clip, unresolved, dropped } = resolvePortable(ed.project, portable);
     if (!clip.items.length) return this.status(`None of the ${portable.items.length} copied key(s) fit this project: no ${unresolved.join(', ')} here.`);
     const t = snapToFrame(ed.time, anim.fps);
-    let result = { refs: [] as KeyRef[], skipped: 0 };
+    let result: ReturnType<typeof pasteKeys> = { refs: [], skipped: 0, retarget: null };
     ed.mutate(`Paste ${clip.items.length} key(s)`, (p) => {
       const a = p.animations.find((x) => x.id === anim.id)!;
       result = pasteKeys(a, clip, t, ed.selectedBoneId());
@@ -627,7 +628,18 @@ export class App {
     ed.setKeySelection(pasted);
     const repairs = ed.lastRepairs.length ? ` ${ed.lastRepairs.join(' ')}` : '';
     const missing = dropped ? ` ${dropped} key(s) not pasted: no ${unresolved.join(', ')} in this project.` : '';
-    this.status(`Pasted ${pasted.length} key(s) at frame ${Math.round(t * anim.fps)}${result.skipped ? `; ${result.skipped} would land past the end and were skipped` : ''}.${missing}${repairs}`);
+    const boneName = (id: string) => ed.project.bones.find((b) => b.id === id)?.name ?? id;
+    const onto = result.retarget ? ` onto the selected bone “${boneName(result.retarget.to)}” (copied from “${boneName(result.retarget.from)}”)` : '';
+    // Pasted keys a constraint of this project overrides (as in the import report).
+    const only: Animation = { ...ed.anim()!, tracks: {} };
+    for (const r of pasted) {
+      const info = parseLane(r.lane);
+      if (info?.kind !== 'bone') continue;
+      ((only.tracks[info.id] ??= emptyTrack())[info.channel] as Key[]).push(findKey(ed.anim()!, r) as Key);
+    }
+    const driven = drivenByConstraints(ed.project, only);
+    const over = driven.length ? ` ${driven.reduce((n, d) => n + d.keys, 0)} pasted key(s) are overridden by ${driven.map((d) => `“${d.constraint}”`).join(', ')} (constraint mix > 0) and have no visible effect.` : '';
+    this.status(`Pasted ${pasted.length} key(s) at frame ${Math.round(t * anim.fps)}${onto}${result.skipped ? `; ${result.skipped} would land past the end and were skipped` : ''}.${over}${missing}${repairs}`);
   }
 
   closeLoop(): void {

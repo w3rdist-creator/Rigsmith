@@ -11,7 +11,7 @@ import type { SequenceRequest } from './model/sequence.ts';
 import { defaultRequest, lastExportFrame } from './model/sequence.ts';
 import type { Project, ProjectFrame } from './model/types.ts';
 import type { SequenceSetup } from './render/sequence.ts';
-import { prepareClipSequence, prepareMixSequence, prepareSequence, renderSequenceFrame, sequenceFileName, sequenceMeta } from './render/sequence.ts';
+import { exportContext, prepareClipSequence, prepareMixSequence, prepareSequence, renderSequenceFrame, sequenceFileName, sequenceMeta } from './render/sequence.ts';
 
 let project: Project | null = null;
 const images = new Map<string, HTMLImageElement>();
@@ -92,7 +92,7 @@ const api = {
     if (!setup) throw new Error('Nothing prepared.');
     canvas.width = setup.geometry.width;
     canvas.height = setup.geometry.height;
-    renderSequenceFrame(canvas.getContext('2d')!, setup, i, (im) => images.get(im.id) ?? null);
+    renderSequenceFrame(exportContext(canvas)!, setup, i, (im) => images.get(im.id) ?? null);
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
     if (!blob) throw new Error('PNG encoding failed.');
     const bytes = new Uint8Array(await blob.arrayBuffer());

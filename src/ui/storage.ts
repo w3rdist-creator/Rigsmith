@@ -2,7 +2,8 @@
 // IndexedDB (database "rigsmith", store "kv") replaces localStorage, whose ~5 MB string
 // quota a real character project with embedded images exceeds. The old localStorage
 // keys are migrated once: copied into IndexedDB, then removed only after the write
-// has committed.
+// has committed — or when IndexedDB already holds the same or a newer copy (see
+// migrateLegacy; a copy that cannot be ordered is kept).
 export const DB_NAME = 'rigsmith';
 export const DB_STORE = 'kv';
 /** Record keys inside the store. */
@@ -76,7 +77,13 @@ export function isQuotaError(e: unknown): boolean {
   return e instanceof DOMException && (e.name === 'QuotaExceededError' || e.code === 22);
 }
 
-/** Moves the legacy localStorage copies into IndexedDB (once; never overwrites newer data). */
+/**
+ * Moves the legacy localStorage copies into IndexedDB. A legacy copy is removed only when
+ * nothing is lost: it was written into IndexedDB (no record there yet, or — autosave, which
+ * carries `savedAt` — the legacy copy is newer), or the IndexedDB record is the same
+ * project text, or it is an autosave older than the IndexedDB one. Otherwise (a differing
+ * "Save to browser" copy, which has no timestamp) it stays in localStorage untouched.
+ */
 export async function migrateLegacy(): Promise<string[]> {
   const moved: string[] = [];
   for (const [key, legacy] of Object.entries(LEGACY_KEYS)) {
@@ -87,18 +94,26 @@ export async function migrateLegacy(): Promise<string[]> {
       text = null;
     }
     if (text === null) continue;
-    if (!(await readStored(key))) {
-      let value: StoredProject;
-      if (key === AUTOSAVE) {
-        try {
-          value = JSON.parse(text) as StoredProject;
-        } catch {
-          continue;
-        }
-        if (typeof value?.project !== 'string') continue;
-      } else value = { savedAt: new Date().toISOString(), name: projectName(text), project: text };
-      await writeStored(key, value);
+    let value: StoredProject;
+    if (key === AUTOSAVE) {
+      try {
+        value = JSON.parse(text) as StoredProject;
+      } catch {
+        continue;
+      }
+      if (typeof value?.project !== 'string') continue;
+    } else value = { savedAt: new Date().toISOString(), name: projectName(text), project: text };
+    const existing = await readStored(key);
+    const time = (v: StoredProject) => Date.parse(v.savedAt);
+    let write = !existing;
+    let remove = write;
+    if (existing && existing.project === value.project) remove = true;
+    else if (existing && key === AUTOSAVE && Number.isFinite(time(value)) && Number.isFinite(time(existing))) {
+      write = time(value) > time(existing);
+      remove = true;
     }
+    if (write) await writeStored(key, value);
+    if (!remove) continue;
     try {
       localStorage.removeItem(legacy);
     } catch {

@@ -175,10 +175,11 @@ export function clipboardBones(clip: KeyClipboard): string[] {
 
 /**
  * Pastes clipboard keys starting at `time`. With `retargetBone`, keys copied from a
- * single bone go onto that bone instead (same channels). Keys landing past the end are
- * dropped (reported in `skipped`). Incoming keys replace keys at the same frame.
+ * single bone go onto that bone instead (same channels; reported in `retarget` so the
+ * caller can say so). Keys landing past the end are dropped (reported in `skipped`).
+ * Incoming keys replace keys at the same frame.
  */
-export function pasteKeys(anim: Animation, clip: KeyClipboard, time: number, retargetBone?: string | null): { refs: KeyRef[]; skipped: number } {
+export function pasteKeys(anim: Animation, clip: KeyClipboard, time: number, retargetBone?: string | null): { refs: KeyRef[]; skipped: number; retarget: { from: string; to: string } | null } {
   const bones = clipboardBones(clip);
   const retarget = retargetBone && bones.length === 1 && bones[0] !== retargetBone ? { from: bones[0], to: retargetBone } : null;
   const refs: KeyRef[] = [];
@@ -204,7 +205,7 @@ export function pasteKeys(anim: Animation, clip: KeyClipboard, time: number, ret
     insertSorted(keys, k);
     refs.push({ lane, time: t });
   }
-  return { refs, skipped };
+  return { refs, skipped, retarget };
 }
 
 /** Stepped lanes show the setup value before their first key (visibility, image, draw order). */

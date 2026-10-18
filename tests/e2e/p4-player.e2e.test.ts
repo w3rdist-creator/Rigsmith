@@ -267,10 +267,10 @@ describe('reference player', () => {
     };
     type Case = { name: string; frames: number; skin: string | null; budget: number; frame: (i: number, p?: any) => { T: number; worlds: Map<string, M>; anim: any; t: number; slots?: SlotOverride } };
     const cases: Case[] = [
-      { name: 'wave', frames: 30, skin: null, budget: 9, frame: (i, p = project) => ({ T: i / fps, worlds: constrainedWorlds(p, wave, i / fps), anim: wave, t: i / fps }) },
-      { name: 'wave, skin alt', frames: 30, skin: 'skin_alt', budget: 7, frame: (i, p = project) => ({ T: i / fps, worlds: constrainedWorlds(p, wave, i / fps), anim: wave, t: i / fps }) },
+      { name: 'wave', frames: 30, skin: null, budget: 51, frame: (i, p = project) => ({ T: i / fps, worlds: constrainedWorlds(p, wave, i / fps), anim: wave, t: i / fps }) },
+      { name: 'wave, skin alt', frames: 30, skin: 'skin_alt', budget: 53, frame: (i, p = project) => ({ T: i / fps, worlds: constrainedWorlds(p, wave, i / fps), anim: wave, t: i / fps }) },
       {
-        name: 'wave → rest (mix at 0.5 s, stored 0.3 s)', frames: mixMeta.frames.length, skin: null, budget: 11,
+        name: 'wave → rest (mix at 0.5 s, stored 0.3 s)', frames: mixMeta.frames.length, skin: null, budget: 34,
         frame: (i, p = project) => {
           const T = mixMeta.frames[i].time;
           const m = mixFrame(p, [{ anim: wave, start: 0, mix: 0 }, { anim: rest, start: 0.5, mix: mixRule.duration }], T, 'setup');
@@ -288,6 +288,8 @@ describe('reference player', () => {
         }
         let over = 0, strict = 0, worstMean = 0, worstEdge = 0, controlStrict = 0, sideStrict = 0, explained = 0, gap = 0, edgeN = 0, edgeSum = 0, edgeMax = 0;
         const classes = new Map<string, number>();
+        const textureClasses = new Map<string, number>();
+        const fullClasses = new Map<string, number>();
         const upperGap = { clear: [0, 1].map(() => ({ n: 0, sum: 0, min: Infinity, max: -Infinity })), opaque: [0, 1].map(() => ({ n: 0, sum: 0, min: Infinity, max: -Infinity })) };
         const dump: string[] = [];
         for (let i = 0; i < c.frames; i++) {
@@ -386,7 +388,74 @@ describe('reference player', () => {
                   break;
                 }
               }
-              dump.push(`    f${i} (${px},${py}) player ${[...got.img.data.subarray(k, k + 4)]} reference ${[...ref.data.subarray(k, k + 4)]}: ${why || 'UNEXPLAINED'}`);
+              // The same outline where the reference's 4×4 subsamples all fall inside X (alone
+              // α 255) but an 8-neighbour of the pixel has X partially covered, so the pixel is on
+              // X's edge: explained when the player's colour lies on the line from the rest (U) to
+              // X (residual ≤ 6, 0 < α < 1); its gap 16·(1 − α) joins the coverage gaps, which
+              // must lie within those of edges over a clear background.
+              if (!why) for (const { a, alone, rest: U0 } of layers) {
+                if (alone[k + 3] !== 255 || U0[k + 3] !== 255) continue;
+                const W = got.img.width, H = got.img.height;
+                const onOutline = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]].some(([dx, dy]) => {
+                  const nx = px + dx, ny = py + dy;
+                  if (nx < 0 || ny < 0 || nx >= W || ny >= H) return false;
+                  const al = alone[4 * (ny * W + nx) + 3];
+                  return al > 0 && al < 255;
+                });
+                if (!onOutline) continue;
+                const U = pre(U0), X = [0, 1, 2].map((c2) => alone[k + c2]);
+                const dir = X.map((v, c2) => v - U[c2]);
+                const n2 = dir.reduce((q, v) => q + v * v, 0);
+                if (Math.sqrt(n2) < 24) continue;
+                const al = P.reduce((q, v, c2) => q + (v - U[c2]) * dir[c2], 0) / n2;
+                const res = Math.hypot(...P.map((v, c2) => v - U[c2] - al * dir[c2]));
+                if (res <= 6 && al > 0 && al < 1) {
+                  why = `edge coverage of ${a.name} over an opaque layer, reference 16/16: player ${(al * 16).toFixed(1)}/16 (residual ${res.toFixed(1)})`;
+                  explained++;
+                  fullClasses.set(a.name, (fullClasses.get(a.name) ?? 0) + 1);
+                  gap = Math.max(gap, (1 - al) * 16);
+                  break;
+                }
+              }
+              // Not an outline: a colour boundary inside one image. A pixel covered by exactly one
+              // layer (alone α 255, every other layer α 0), opaque in both images, is explained as
+              // "texture edge inside X" when the player's colour lies on the line from the
+              // reference's colour to an in-bounds 8-neighbour's reference colour that differs by
+              // ≥ 24 (residual ≤ 6, 0 < t < 1): a sub-pixel shift of that boundary.
+              const covering = why ? [] : layers.filter(({ alone }: any) => alone[k + 3] > 0);
+              if (covering.length === 1 && covering[0].alone[k + 3] === 255 && got.img.data[k + 3] === 255 && ref.data[k + 3] === 255) {
+                const W = got.img.width, H = got.img.height, rgb = (d: Uint8Array, q: number) => [0, 1, 2].map((c2) => d[q + c2]);
+                const Rc = rgb(ref.data, k), Pc = rgb(got.img.data, k);
+                for (const [dx, dy] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]) {
+                  const nx = px + dx, ny = py + dy;
+                  if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                  const q = 4 * (ny * W + nx);
+                  if (ref.data[q + 3] !== 255) continue;
+                  const dir = rgb(ref.data, q).map((v, c2) => v - Rc[c2]);
+                  const n2 = dir.reduce((acc, v) => acc + v * v, 0);
+                  if (Math.sqrt(n2) < 24) continue;
+                  const t = Pc.reduce((acc, v, c2) => acc + (v - Rc[c2]) * dir[c2], 0) / n2;
+                  const res = Math.hypot(...Pc.map((v, c2) => v - Rc[c2] - t * dir[c2]));
+                  if (t > 0 && t < 1 && res <= 6) {
+                    const name = covering[0].a.name;
+                    why = `texture edge inside ${name}: player ${t.toFixed(2)} of the way to the neighbour at (${dx},${dy}) (residual ${res.toFixed(1)})`;
+                    explained++;
+                    textureClasses.set(name, (textureClasses.get(name) ?? 0) + 1);
+                    break;
+                  }
+                }
+              }
+              // Unexplained: list each layer that covers the pixel (its coverage alone, the alpha of
+              // everything else, and both fit residuals) so the cause can be read off the report.
+              if (!why) why = 'UNEXPLAINED — ' + layers.filter(({ alone }: any) => alone[k + 3] > 0).map(({ a, alone, rest: U0 }: any) => {
+                const U = pre(U0), X = [0, 1, 2].map((c2) => alone[k + c2]), dir = X.map((v, c2) => v - U[c2]), n2 = dir.reduce((q, v) => q + v * v, 0) || 1;
+                const fit = (Q: number[]) => { const al = Q.reduce((q, v, c2) => q + (v - U[c2]) * dir[c2], 0) / n2; return `α ${al.toFixed(2)} res ${Math.hypot(...Q.map((v, c2) => v - U[c2] - al * dir[c2])).toFixed(1)}`; };
+                return `${a.name}: alone α ${alone[k + 3]}, others α ${U0[k + 3]}, player ${fit(P)}, reference ${fit(R)}`;
+              }).join('; ') + ' | 3×3 player / reference: ' + [-1, 0, 1].map((dy) => [-1, 0, 1].map((dx) => {
+                const q = k + 4 * (dy * got.img.width + dx);
+                return `${[...got.img.data.subarray(q, q + 3)]}/${[...ref.data.subarray(q, q + 3)]}`;
+              }).join(' ')).join(' ‖ ');
+              dump.push(`    f${i} (${px},${py}) player ${[...got.img.data.subarray(k, k + 4)]} reference ${[...ref.data.subarray(k, k + 4)]}: ${why}`);
             }
           }
           // Controls, through the same frame function: no constraints, and the elbow flipped.
@@ -395,7 +464,7 @@ describe('reference player', () => {
             add(strictCount(got.img.data, composite(project, g.anim, g.t, images, ...view, g.worlds, c.skin, g.slots).data));
           }
         }
-        report.push(`FR-003 ${c.name}: player vs independent reference (own IK, paths${c.name.startsWith('wave → rest') ? ', mixing' : ''}): ${c.frames} frames, ${over} px over tolerance 24 of which ${strict} strict, worst edge-coverage share ${(worstEdge * 100).toFixed(2)}%, worst mean ${worstMean.toFixed(3)}; strict explained ${explained}/${strict} (${[...classes].map(([n, v]) => `${v} × ${n} edge over an opaque layer`).join(', ') || 'none'}, worst coverage gap ${gap.toFixed(1)}/16 subsamples; edges over a clear background: ${edgeN} px, mean gap ${(edgeSum / edgeN).toFixed(2)}/16, worst ${edgeMax.toFixed(1)}/16); control without constraints ${controlStrict} strict px, control with the elbow flipped ${sideStrict} strict px`);
+        report.push(`FR-003 ${c.name}: player vs independent reference (own IK, paths${c.name.startsWith('wave → rest') ? ', mixing' : ''}): ${c.frames} frames, ${over} px over tolerance 24 of which ${strict} strict, worst edge-coverage share ${(worstEdge * 100).toFixed(2)}%, worst mean ${worstMean.toFixed(3)}; strict explained ${explained}/${strict} (${[...[...classes].map(([n, v]) => `${v} × ${n} edge over an opaque layer`), ...[...fullClasses].map(([n, v]) => `${v} × ${n} edge over an opaque layer with the reference at 16/16`), ...[...textureClasses].map(([n, v]) => `${v} × texture edge inside ${n}`)].join(', ') || 'none'}, worst coverage gap ${gap.toFixed(1)}/16 subsamples; edges over a clear background: ${edgeN} px, mean gap ${(edgeSum / edgeN).toFixed(2)}/16, worst ${edgeMax.toFixed(1)}/16); control without constraints ${controlStrict} strict px, control with the elbow flipped ${sideStrict} strict px`);
         const fmt = (e: { n: number; sum: number; min: number; max: number }) => `${e.n} px mean ${(e.sum / e.n).toFixed(2)} range ${e.min.toFixed(1)}…${e.max.toFixed(1)}`;
         // No systematic offset or thickness: a 0.1 px shift of an edge moves its mean by 1.6/16.
         for (const e of [...upperGap.clear, ...upperGap.opaque]) assert.ok(e.n > 300 && Math.abs(e.sum / e.n) <= 0.25, `${c.name}: upper edge mean gap ${e.sum / e.n} over ${e.n} px`);

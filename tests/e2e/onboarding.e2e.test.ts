@@ -91,7 +91,8 @@ describe('RV-012: flat-art guide', () => {
     assert.match(await page.getByTestId('guide-progress').innerText(), /^0 of 5 required steps done\./);
     for (const id of ['import', 'rig', 'clean', 'limbs', 'colour', 'mesh', 'idle']) assert.equal(await stepDone(id), 'false', id);
     for (const id of ['guide-rig', 'guide-clean', 'guide-limb', 'guide-colour', 'guide-mesh', 'guide-idle']) assert.equal(await page.getByTestId(id).isDisabled(), true, id);
-    assert.match(await page.getByTestId('guide-dialog').innerText(), /3 of 9 pieces met the tolerance/, 'the RV-010 limits are stated');
+    assert.match(await page.getByTestId('guide-dialog').innerText(), /hidden joint extension they synthesise differs from a hand-prepared one/, 'the RV-010 limits are stated');
+    assert.ok(!/Wiz/.test(await page.getByTestId('guide-dialog').innerText()), 'no private test vocabulary (LP-012)');
   });
 
   it('import and rig: Choose PNG… uses the image picker; Create root bone + attach is one undo step', async () => {

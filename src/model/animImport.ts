@@ -9,11 +9,20 @@
 //                        pass then appends the target's other attachments on top)
 //   constraint tracks  → source IK/path constraint → target constraint of the same kind
 // Defaults match by exact name; the caller (the import dialog) can change any mapping.
-// Values are copied unchanged: bone keys are local to the bone, so a target bone with a
-// different setup pose or parent plays the same local motion on its own rig.
+// Key values are absolute local values and are copied unchanged by default: a target
+// bone whose setup pose differs from the source bone jumps to the source values at its
+// first key. Option `offsetSetup` instead shifts each copied bone key by the setup
+// difference (translate and rotate: + target setup − source setup; scale: × target
+// setup / source setup), so the bone moves by the same amounts around its own setup.
+// The report also lists what the copy cannot carry over by itself:
+//   driven — imported keys on bones an IK or path constraint of this project overrides
+//            (constraint mix > 0 during the imported animation); option
+//            `muteConstraints` keys those constraints' mix to 0 in the imported copy;
+//   rig    — mapped bones whose parent differs by name here, and scale-keyed bones that
+//            scale a different set of descendant bones here than in the source.
 // Mix rules between two imported animations are copied too.
 import { uniqueName } from './ops.ts';
-import type { Animation, Project } from './types.ts';
+import type { Animation, BoneTrack, Channel, IkConstraint, PathConstraint, Project } from './types.ts';
 import { newId } from './types.ts';
 
 export type RefKind = 'bone' | 'attachment' | 'constraint' | 'image';
@@ -45,6 +54,76 @@ export interface ImportReport {
   mixes: number;
   /** Keys imported in total. */
   keys: number;
+  /** Constraints of this project that override imported bone keys (see `drivenByConstraints`). */
+  driven: DrivenReport[];
+  /** Hierarchy differences that change what imported keys do here. */
+  rig: string[];
+}
+
+export interface ImportOptions {
+  /** Shift bone keys by the target − source setup difference (scale: ratio). */
+  offsetSetup?: boolean;
+  /** Target constraint ids to key to mix 0 (one key at time 0) in every imported animation. */
+  muteConstraints?: readonly string[];
+}
+
+/** One constraint that overrides imported keys, summed over the imported animations. */
+export interface DrivenReport {
+  constraintId: string;
+  constraint: string;
+  kind: 'ik' | 'path';
+  /** Setup mix of the constraint. */
+  mix: number;
+  /** Overridden keys per target bone name (rotate keys for IK; translate, and rotate if the path rotates). */
+  bones: { name: string; keys: number }[];
+  keys: number;
+  /** true when `muteConstraints` keyed it to 0 in the imported copy (the keys then play). */
+  muted: boolean;
+}
+
+/** Channels a constraint writes on its bones: IK sets rotation, a path sets position (and rotation). */
+function drivenChannels(c: { kind: 'ik' } | { kind: 'path'; pc: PathConstraint }): Channel[] {
+  return c.kind === 'ik' ? ['rotate'] : c.pc.rotate ? ['translate', 'rotate'] : ['translate'];
+}
+
+/**
+ * Constraints of `project` that override keys of `anim` on their bones: the effective
+ * mix (keyed in `anim`, else the setup mix) is above 0 at some key. Per constraint, the
+ * keys of `anim` on the overridden channels of its bones.
+ */
+export function drivenByConstraints(project: Project, anim: Animation): Omit<DrivenReport, 'muted'>[] {
+  const out: Omit<DrivenReport, 'muted'>[] = [];
+  const all: ({ kind: 'ik'; c: IkConstraint } | { kind: 'path'; c: PathConstraint })[] = [
+    ...(project.ik ?? []).map((c) => ({ kind: 'ik' as const, c })),
+    ...(project.pathConstraints ?? []).map((c) => ({ kind: 'path' as const, c })),
+  ];
+  for (const it of all) {
+    const keyed = anim.constraints?.[it.c.id]?.mix;
+    const active = keyed?.length ? keyed.some((k) => k.value[0] > 0) : it.c.mix > 0;
+    if (!active) continue;
+    const chans = drivenChannels(it.kind === 'ik' ? { kind: 'ik' } : { kind: 'path', pc: it.c });
+    const bones: { name: string; keys: number }[] = [];
+    for (const id of it.c.bones) {
+      const tr: BoneTrack | undefined = anim.tracks[id];
+      const n = tr ? chans.reduce((s, ch) => s + tr[ch].length, 0) : 0;
+      if (n) bones.push({ name: project.bones.find((b) => b.id === id)?.name ?? id, keys: n });
+    }
+    if (bones.length) out.push({ constraintId: it.c.id, constraint: it.c.name, kind: it.kind, mix: it.c.mix, bones, keys: bones.reduce((s, b) => s + b.keys, 0) });
+  }
+  return out;
+}
+
+/** Bone ids below `id` (children, grandchildren, …). */
+function descendants(p: Project, id: string): string[] {
+  const out: string[] = [];
+  const walk = (pid: string) => {
+    for (const b of p.bones) if (b.parentId === pid && !out.includes(b.id)) {
+      out.push(b.id);
+      walk(b.id);
+    }
+  };
+  walk(id);
+  return out;
 }
 
 /** Adds n keys for id; with n = 0 the id is only listed when `always` (draw-order slots). */
@@ -99,8 +178,8 @@ export function defaultMapping(src: Project, dst: Project, animIds: readonly str
  * Copies the chosen source animations into `dst` (mutates it; run inside one undoable
  * edit). Returns the report of what was imported, skipped and dropped.
  */
-export function importAnimations(dst: Project, src: Project, animIds: readonly string[], mapping: ImportMapping): ImportReport {
-  const report: ImportReport = { imported: [], unmatched: [], dropped: [], conflicts: [], mixes: 0, keys: 0 };
+export function importAnimations(dst: Project, src: Project, animIds: readonly string[], mapping: ImportMapping, options: ImportOptions = {}): ImportReport {
+  const report: ImportReport = { imported: [], unmatched: [], dropped: [], conflicts: [], mixes: 0, keys: 0, driven: [], rig: [] };
   const u = usedRefs(src, animIds);
   const nameOf = (list: readonly Named[], id: string) => list.find((x) => x.id === id)?.name ?? id;
   const dstOf = (kind: RefKind, id: string): string | null => {
@@ -131,6 +210,39 @@ export function importAnimations(dst: Project, src: Project, animIds: readonly s
     return null;
   };
 
+  // Bone keys: setup offsets (option) and hierarchy notes.
+  const mappedBones = [...u.bones.keys()].map((sid) => ({ sid, tid: winner('bone', sid) })).filter((x): x is { sid: string; tid: string } => !!x.tid);
+  const boneName = (p: Project, id: string | null) => (id ? (p.bones.find((b) => b.id === id)?.name ?? id) : '(world)');
+  const scaled = new Set<string>();
+  for (const an of src.animations.filter((a) => animIds.includes(a.id))) for (const [id, tr] of Object.entries(an.tracks)) if (tr.scale.length) scaled.add(id);
+  for (const { sid, tid } of mappedBones) {
+    const sb = src.bones.find((b) => b.id === sid)!, tb = dst.bones.find((b) => b.id === tid)!;
+    const sp = boneName(src, sb.parentId), tp = boneName(dst, tb.parentId);
+    if (sp !== tp) report.rig.push(`“${tb.name}”: its parent here is “${tp}”, in the source “${sp}”.`);
+    if (scaled.has(sid)) {
+      const sd = descendants(src, sid).map((id) => boneName(src, id)), td = descendants(dst, tid).map((id) => boneName(dst, id));
+      const extra = td.filter((n) => !sd.includes(n));
+      if (extra.length) report.rig.push(`“${tb.name}” has scale keys; here they also scale ${extra.length} bone(s) that are not below it in the source: ${extra.join(', ')}.`);
+    }
+  }
+  const offsetTrack = (tr: BoneTrack, sid: string, tid: string): BoneTrack => {
+    const s = src.bones.find((b) => b.id === sid)!, t = dst.bones.find((b) => b.id === tid)!;
+    const copy = structuredClone(tr);
+    // Differences first: (v + t) − s is not v when t = s in floating point, so equal setups
+    // would otherwise write rounding noise into every key.
+    const dx = t.x - s.x, dy = t.y - s.y, dr = t.rotation - s.rotation;
+    for (const k of copy.translate) k.value = [k.value[0] + dx, k.value[1] + dy];
+    for (const k of copy.rotate) k.value = [k.value[0] + dr];
+    const ratio = (a: number, b: number) => (b !== 0 ? a / b : 1);
+    for (const k of copy.scale) k.value = [k.value[0] * ratio(t.scaleX, s.scaleX), k.value[1] * ratio(t.scaleY, s.scaleY)];
+    return copy;
+  };
+  if (options.offsetSetup) for (const { sid } of mappedBones) {
+    const s = src.bones.find((b) => b.id === sid)!;
+    if ((s.scaleX === 0 || s.scaleY === 0) && scaled.has(sid)) report.dropped.push(`“${s.name}”: its source setup scale is 0, so its scale keys are copied without the setup ratio.`);
+  }
+  const muted = new Set((options.muteConstraints ?? []).filter((id) => constraintsOf(dst).some((c) => c.id === id)));
+
   const newIds = new Map<string, string>();
   const names = dst.animations.map((a) => a.name);
   for (const an of src.animations.filter((a) => animIds.includes(a.id))) {
@@ -141,7 +253,7 @@ export function importAnimations(dst: Project, src: Project, animIds: readonly s
     for (const [id, tr] of Object.entries(an.tracks)) {
       const t = winner('bone', id);
       if (!t) continue;
-      out.tracks[t] = structuredClone(tr);
+      out.tracks[t] = options.offsetSetup ? offsetTrack(tr, id, t) : structuredClone(tr);
       report.keys += tr.translate.length + tr.rotate.length + tr.scale.length;
     }
     for (const [id, st] of Object.entries(an.slots ?? {})) {
@@ -198,6 +310,24 @@ export function importAnimations(dst: Project, src: Project, animIds: readonly s
       (out.constraints ??= {})[t] = copy;
       report.keys += n;
     }
+    // Constraints that would override the imported bone keys here.
+    for (const d of drivenByConstraints(dst, out)) {
+      const isMuted = muted.has(d.constraintId);
+      const prev = report.driven.find((x) => x.constraintId === d.constraintId);
+      if (prev) {
+        for (const b of d.bones) {
+          const pb = prev.bones.find((x) => x.name === b.name);
+          if (pb) pb.keys += b.keys;
+          else prev.bones.push({ ...b });
+        }
+        prev.keys += d.keys;
+      } else report.driven.push({ ...d, bones: d.bones.map((b) => ({ ...b })), muted: isMuted });
+      if (isMuted) {
+        const ct = ((out.constraints ??= {})[d.constraintId] ??= {});
+        if (ct.mix?.length) report.dropped.push(`“${an.name}”: ${ct.mix.length} mix key(s) of ${d.constraint} replaced by mix 0.`);
+        ct.mix = [{ time: 0, value: [0], interp: 'step' }];
+      }
+    }
     dst.animations.push(out);
     report.imported.push({ source: an.name, name });
   }
@@ -215,6 +345,10 @@ export function reportSummary(r: ImportReport): string {
   const parts = [`${r.imported.length} animation(s), ${r.keys} key(s)`];
   if (r.mixes) parts.push(`${r.mixes} mix rule(s)`);
   if (r.unmatched.length) parts.push(`${r.unmatched.length} unmatched (${r.unmatched.map((x) => x.name).join(', ')}) skipped`);
+  const live = r.driven.filter((d) => !d.muted);
+  if (live.length) parts.push(`${live.reduce((n, d) => n + d.keys, 0)} key(s) overridden by ${live.map((d) => d.constraint).join(', ')}`);
+  const off = r.driven.filter((d) => d.muted);
+  if (off.length) parts.push(`mix keyed to 0: ${off.map((d) => d.constraint).join(', ')}`);
   if (r.dropped.length) parts.push(`${r.dropped.length} note(s) on dropped keys`);
   return parts.join(' · ');
 }

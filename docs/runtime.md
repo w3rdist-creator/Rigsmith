@@ -82,9 +82,10 @@ by Rigsmith's own encoder; the same input gives byte-identical files (sha256 che
 **Bleed** copies each region's edge pixels `bleed` px outward into its padding: Chrome's
 `drawImage` of a sub-rectangle filters across the rectangle's edge, so without bleed the
 edges of art that is opaque up to its border pick up transparent padding or neighbours.
-Measured on the p4-player rig (30 frames): padding 2 / bleed 0 → 14 234 px over
-tolerance; padding 0 / bleed 0 → 9 165; padding 2 / bleed 1 → 0 (max channel diff 3);
-padding 4 / bleed 2 → 0 (max 1). Trimmed regions keep a 1 px transparent margin, so
+Measured on the p4-player rig (30 frames, software raster since LP-004, see below):
+padding 2 / bleed 0 → 14 898 px over tolerance; padding 0 / bleed 0 → 10 788; padding 2 /
+bleed 1 → 0 (max channel diff 1.1); padding 4 / bleed 2 → 0 (max 1.3). (Accelerated
+raster before LP-004: 14 234, 9 165, 0 with max 3, 0 with max 1.) Trimmed regions keep a 1 px transparent margin, so
 bleed only matters where art touches its image border.
 
 ## Reference player (`player.html`, `src/runtime/`)
@@ -124,9 +125,22 @@ What the agreement tests show (`tests/unit/runtime.test.ts`, `tests/e2e/p4-playe
   a transition — so the file carries the whole rig.
 - In the browser, the player's frames (loaded through its own file control) match the
   editor's exported PNG sequence on every frame: loose images identical (max 0); atlas
-  with bleed 1 → 0 px over tolerance (max 3); the skin and the wave → rest transition
+  with bleed 1 → 0 px over tolerance (max 1.1); the skin and the wave → rest transition
   likewise; the player's pose matches the editor-baked runtime data within 5e-4 (the
   bake's rounding).
+- **Raster path (LP-004, review-corrections pass).** Every exported frame (ZIP, APNG/GIF,
+  WebM/MP4, the CLI) and the player's canvas draw into `exportContext` — a 2D context
+  created with `willReadFrequently: true`, i.e. Chrome's software raster — and meshes go
+  through a separate software layer canvas (`src/render/draw.ts`). On the accelerated path
+  the same data gave history-dependent pixels: the Wiz `wiz-intro` sequence at scale 0.5
+  exported identically three times in one dialog session, but the dialog and the CLI
+  differed on frames 0–90 (139 180 px at frame 0, ≈ 15 500 px on each later one) and
+  agreed on frames 91–170; earlier sessions also differed between two exports. With the
+  software path the dialog (three exports) and the CLI are byte-identical on all 171
+  frames, and equal to a `--disable-gpu` run. A software export target alone, with the
+  mesh layer left accelerated, reproduced the old bytes exactly, so the dependence lives
+  in the accelerated mesh layer; why it depends on history is **not established**. The
+  editor viewport stays accelerated, so it is not pixel-identical to exports.
 - Because evaluation and drawing are shared code, these tests do not independently
   re-derive the maths; the independent checks are the reference rasterizer tests of the
   editor renderer (`tests/support/reference-composite.ts`, phases 1–4).
@@ -149,38 +163,70 @@ What the agreement tests show (`tests/unit/runtime.test.ts`, `tests/e2e/p4-playe
   - **Path constraints** with the documented approximation (32 chords per cubic, curve
     parameter interpolated between table rows, analytic tangent). Diagnostic: the table
     is 2.6e-2 px shorter than the exact arc length of this fixture's path.
-  - **Mixing** per docs/architecture.md (chain blend, shortest rotation, discrete state
-    and constraint keys from the newest entry with w ≥ 0.5, opacity/deform blended).
+  - **Mixing** per docs/architecture.md (chain blend, shortest rotation, constraint mix
+    and path position blended along the chain like any channel — each entry's mix clamped
+    to 0..1, an entry that does not key them supplying the setup value under `setup` —
+    discrete state from the newest entry with w ≥ 0.5, opacity/deform blended). Until the
+    review-corrections pass the constraint keys also came from that newest entry, so an
+    IK keyed off switched at half weight instead of fading.
   Unit checks of the reference itself (forward-kinematics reach, bend side under
   non-uniform and mirrored parents, straighten/fold, mix 0.5, path clamp/wrap, shortest
-  rotation, `setup`/`hold`): `tests/unit/reference-constraints.test.ts`.
+  rotation, `setup`/`hold`, blended constraint mix with per-entry clamp):
+  `tests/unit/reference-constraints.test.ts`.
 
-  Result (`report.txt` of p4-player): strict mismatches (solid vs clear, or opaque colour
-  differing by > 24) — wave **9**, skin alt **7**, transition **11**. Each strict pixel is
+  Result (`report.txt` of p4-player, software raster since LP-004): strict mismatches
+  (solid vs clear, or opaque colour differing by > 24) — wave **51**, skin alt **53**,
+  transition **34** (accelerated raster before LP-004: 9 / 7 / 12). Each strict pixel is
   classified in the test (`explained === strict` is asserted, and each case's budget is
-  that classified count): all 27 are **the anti-aliased edge of `upper` over the opaque
-  `torso`**. Over an opaque layer a coverage difference becomes a colour difference, which
+  that classified count): 118 are **the anti-aliased edge of `upper` over the opaque
+  `torso`** (41 / 47 / 30), 8 the same edge where the reference's 4×4 subsamples all fall
+  inside `upper` (3 / 5 / 0, below), and 12 a **texture edge inside `torso`** (7 / 1 / 4,
+  below). Over an opaque layer a coverage difference becomes a colour difference, which
   the strict rule cannot tell from a wrong colour; the test recomposites the reference
   without `upper` (U) and with `upper` alone (X) and accepts a pixel only if both the
   player's and the reference's colour lie on the line U → X (residual ≤ 6/255, observed
-  ≤ 0.7) with partial coverage on both sides. The coverage gap of these pixels is 2.0–4.2
-  of 16 subsamples (player covers more). Root cause: the reference's 4×4 subsampled
+  ≤ 2.3) with partial coverage on both sides. The coverage gap of these pixels is 1.9–3.3
+  of 16 subsamples. On the software raster 8 pixels on that edge have the reference at
+  16/16 (every subsample inside `upper`) and the player at 13.2–14.0/16; they are
+  accepted only if an 8-neighbour has `upper` partially covered (the pixel is on its
+  outline) and the player's colour lies on U → X (residual ≤ 6, 0 < α < 1), and their gap
+  (2.0–2.8/16, residual ≤ 1.6) joins the asserted gaps. Root cause: the reference's 4×4 subsampled
   coverage of a quad edge vs the canvas's analytic coverage — the art is opaque up to its
   image border, so the edge is the quad's geometric boundary. Checks that rule out a pose
   or size error: measured along the whole edge of `upper` (≈ 700 px per side per case),
-  the mean coverage gap is −0.04…+0.09/16 on both sides of the bone, over a clear
+  the mean coverage gap is −0.16…+0.24/16 on both sides of the bone, over a clear
   background and over the torso alike (asserted |mean| ≤ 0.25/16; a 0.1 px edge offset
-  would move it by 1.6/16), with the same positive tail over a clear background (up to
-  3.6/16, where it is an alpha-only difference); world scaleY and determinants agree with
+  would move it by 1.6/16; accelerated raster: −0.04…+0.09), with tails of −3.3…+3.3/16
+  over a clear background (where it is an alpha-only difference); world scaleY and determinants agree with
   the bake (≤ 4.6e-5, none mirrored); region and image sizes agree (56 × 14). The strict
-  gaps also lie within the gaps on all edges over a clear background (worst 7.4/16,
-  asserted). The remaining over-tolerance pixels are alpha-only edge differences (worst
-  3.20 % of covered pixels, mean ≤ 0.26); their thresholds (4 %, 0.5) are fixed limits,
-  not derived counts. Controls through the same reference: no constraints 32 376 / 32 070
-  / 33 458 strict pixels, the elbow flipped 8 245 / 8 184 / 7 031 (each asserted > 100 ×
-  the case's strict count). A mutation of src's path spacing (× 1.1) passes every
-  player-vs-editor comparison and the old baked-row check, and fails this one (1 181
-  strict, 9 explained). Not covered: any third-party runtime — none exists for this
+  gaps also lie within the gaps on all edges over a clear background (worst 12.0 / 12.0 /
+  9.0 of 16, asserted). The remaining over-tolerance pixels (4 896 / 4 896 / 5 175) are
+  alpha-only edge differences (worst 2.75 % of covered pixels, mean ≤ 0.32); their
+  thresholds (4 %, 0.5) are fixed limits, not derived counts. Controls through the same
+  reference: no constraints 32 386 / 32 084 / 33 764 strict pixels, the elbow flipped
+  8 263 / 8 186 / 7 051 (each asserted > 100 × the case's strict count). A mutation of
+  src's path spacing (× 1.1) passes every player-vs-editor comparison and the old
+  baked-row check, and fails this one: accelerated raster 1 181 strict, 9 explained (none
+  by the texture-edge rule); software raster with both added rules 1 236 strict, 51
+  explained — the 16/16 rule explains the same 3 pixels as without the mutation.
+
+  The transition counts changed in the review-corrections pass because the transition
+  pose changed: `wave` keys `ik_arm`'s mix (1 → 0.5), which now fades to the setup mix
+  over the transition instead of switching at half weight. Over all 31 frames the
+  reference and src agree on every bone's world transform to ≤ 8.1e-10 (≤ 7.5e-12 over the
+  transition frames 15–25), and the player still equals the editor export at 0 px; the
+  over-tolerance count was unchanged (7 035, accelerated raster). Two pixels at f18 crossed the strict line:
+  one is the edge of `lower` over the torso (classified by the rule above); the other
+  (163,43) is covered by `torso` alone (α 255, every other layer α 0) next to a sharp
+  blue → yellow boundary inside the torso art, and the player's colour is the reference
+  colour moved 0.22 of the way toward the neighbouring pixel above it (residual 0.6/255,
+  largest channel difference 25, threshold > 24). The test accepts such a pixel only if
+  exactly one layer covers it at α 255, both images are opaque there, and the player's
+  colour lies on the line from the reference colour to an in-bounds 8-neighbour's
+  reference colour that differs by ≥ 24 (0 < t < 1, residual ≤ 6): a sub-pixel shift of an
+  internal colour boundary of a deformed mesh — the same coverage mechanism as the outline
+  edges, but on a boundary the strict rule cannot see as an edge. On the software raster
+  (LP-004) 12 pixels take this rule (t 0.13–0.89, residual ≤ 3.0). Not covered: any third-party runtime — none exists for this
   format; IK chains whose first bone has non-uniform own scale (the reference refuses
   them; this fixture has none).
 

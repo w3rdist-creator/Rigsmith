@@ -261,6 +261,9 @@ function sortedTimes(c: Checker, list: { time: number }[], where: string): void 
   });
 }
 
+/** Every top-level field this version reads and writes. */
+const TOP_LEVEL_KEYS: readonly string[] = ['format', 'version', 'name', 'bones', 'images', 'attachments', 'animations', 'ik', 'paths', 'pathConstraints', 'skins', 'mixes', 'sequences', 'frame'];
+
 export function validateProject(raw: unknown): ParseResult {
   const c = new Checker();
   if (!isObj(raw)) return { ok: false, errors: ['Project file must be a JSON object.'] };
@@ -687,6 +690,10 @@ export function validateProject(raw: unknown): ParseResult {
   for (const im of images) if (im.derived) used.add(im.derived.sourceId);
   const unused = images.filter((im) => !used.has(im.id)).length;
   if (unused) c.warnings.push(`${unused} image(s) are not attached to anything.`);
+  // A field this version does not know (e.g. written by a newer editor) is not kept on the
+  // next save; say so instead of dropping it silently.
+  const unknown = Object.keys(raw).filter((k) => !TOP_LEVEL_KEYS.includes(k));
+  if (unknown.length) c.warnings.push(`Unknown top-level field(s) ignored — they will not be saved again: ${unknown.map((k) => `"${k}"`).join(', ')}.`);
 
   if (c.errors.length) return { ok: false, errors: c.errors };
   const project: Project = { format: FORMAT_ID, version, name, bones, images, attachments, animations };

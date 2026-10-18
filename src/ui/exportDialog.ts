@@ -8,7 +8,7 @@ import type { SequenceRequest } from '../model/sequence.ts';
 import { defaultRequest, lastExportFrame } from '../model/sequence.ts';
 import { cloneProject } from '../model/types.ts';
 import type { Project } from '../model/types.ts';
-import { Cancelled, encodeSequenceZip, prepareSequence, renderSequenceFrame, safeName } from '../render/sequence.ts';
+import { Cancelled, encodeSequenceZip, exportContext, prepareSequence, renderSequenceFrame, safeName } from '../render/sequence.ts';
 import type { SequenceSetup } from '../render/sequence.ts';
 import type { App } from './app.ts';
 import { download } from './app.ts';
@@ -213,7 +213,7 @@ export class ExportDialog {
     const p = this.snapshot!;
     canvas.width = setup.geometry.width;
     canvas.height = setup.geometry.height;
-    const g = canvas.getContext('2d');
+    const g = exportContext(canvas);
     if (!g) throw new Error('Could not create a 2D canvas for export.');
     const total = setup.frames.length;
     const pngs: Uint8Array[] = [];

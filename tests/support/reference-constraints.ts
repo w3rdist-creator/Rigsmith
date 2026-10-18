@@ -16,8 +16,9 @@
 //   tangent from the analytic derivative. `exactArcGap` reports how far that table is
 //   from the true arc length (a diagnostic, not part of the rule).
 // - Mixing: P_k = P_{k−1} + w_k (v_k − P_{k−1}) per channel, rotation the shortest way,
-//   exact incoming value at w = 1; missing channels per `missing`; constraints solved
-//   on the blended local pose with constraint keys, visibility, image and draw order from
+//   exact incoming value at w = 1; missing channels per `missing`; constraint mix and
+//   path position blended along the chain the same way (clamped mix per entry); then
+//   constraints solved on the blended local pose; visibility, image and draw order from
 //   the newest entry with w ≥ 0.5; opacity and deform blended along the chain.
 import type { M } from './reference-composite.ts';
 import { sampleTrack, worldsFromLocal } from './reference-composite.ts';
@@ -203,15 +204,18 @@ export function solvePathRef(project: any, pose: Map<string, Local>, pc: any, po
   });
 }
 
-/** IK (array order) then paths (array order) on `pose`, constraint keys from (anim, t). */
-export function applyConstraintsRef(project: any, pose: Map<string, Local>, anim: any | null, t: number): void {
+type ValueOf = (id: string, channel: 'mix' | 'position', base: number) => number;
+
+/** IK (array order) then paths (array order) on `pose`; constraint values from (anim, t) or `valueOf`. */
+export function applyConstraintsRef(project: any, pose: Map<string, Local>, anim: any | null, t: number, valueOf?: ValueOf): void {
+  const get: ValueOf = valueOf ? (id, ch, base) => (ch === 'mix' ? Math.min(1, Math.max(0, valueOf(id, ch, base))) : valueOf(id, ch, base)) : (id, ch, base) => constraintValue(anim, id, ch, t, base);
   for (const ik of project.ik ?? []) {
-    const mix = constraintValue(anim, ik.id, 'mix', t, ik.mix);
+    const mix = get(ik.id, 'mix', ik.mix);
     if (mix > 0) solveIkRef(project, pose, ik, mix);
   }
   for (const pc of project.pathConstraints ?? []) {
-    const mix = constraintValue(anim, pc.id, 'mix', t, pc.mix);
-    if (mix > 0 && project.paths?.some((p: any) => p.id === pc.pathId)) solvePathRef(project, pose, pc, constraintValue(anim, pc.id, 'position', t, pc.position), mix);
+    const mix = get(pc.id, 'mix', pc.mix);
+    if (mix > 0 && project.paths?.some((p: any) => p.id === pc.pathId)) solvePathRef(project, pose, pc, get(pc.id, 'position', pc.position), mix);
   }
 }
 
@@ -270,7 +274,19 @@ export function mixFrame(project: any, plan: PlanEntry[], T: number, missing: 's
     }
   });
   const discrete = { anim: plan[dk].anim, t: entryClock(plan[dk], T) };
-  applyConstraintsRef(project, pose, discrete.anim, discrete.t);
+  const blended: ValueOf = (id, ch, base) => {
+    let v = base;
+    plan.forEach((e, k) => {
+      const w = entryW(e, k, T);
+      if (w <= 0) return;
+      const keys = e.anim.constraints?.[id]?.[ch];
+      // constraintValue clamps a sampled mix to 0..1, so each entry's mix is clamped.
+      const x = keys?.length ? constraintValue(e.anim, id, ch, entryClock(e, T), base) : missing === 'setup' ? base : null;
+      if (x !== null) v = w >= 1 ? x : v + w * (x - v);
+    });
+    return v;
+  };
+  applyConstraintsRef(project, pose, discrete.anim, discrete.t, blended);
   const opacity = new Map<string, number>(), deform = new Map<string, number[]>();
   for (const a of project.attachments) {
     let o = a.opacity;

@@ -10,7 +10,7 @@ import { DEFAULT_MIX, mixDuration, setMixRule } from '../model/mix.ts';
 import { uniqueName } from '../model/ops.ts';
 import type { ClipSequence, Project } from '../model/types.ts';
 import { SEQUENCE_MAX_REPEAT, newId } from '../model/types.ts';
-import { Cancelled, encodeSequenceZip, prepareClipSequence, renderSequenceFrame, safeName } from '../render/sequence.ts';
+import { Cancelled, encodeSequenceZip, exportContext, prepareClipSequence, renderSequenceFrame, safeName } from '../render/sequence.ts';
 import type { SequenceSetup } from '../render/sequence.ts';
 import type { App } from './app.ts';
 import { download } from './app.ts';
@@ -31,6 +31,7 @@ export class SequenceDialog {
   private index = 0;
   private running = false;
   private cancelled = false;
+  private staleAfterRun = false;
 
   constructor(app: App) {
     this.app = app;
@@ -43,6 +44,14 @@ export class SequenceDialog {
       }
     });
     document.body.append(this.dlg);
+    // Undo/redo (Ctrl/⌘+Z with focus on a dialog button) and loads change the project under
+    // the open dialog: re-render from the project, never during an export (its frames are
+    // already prepared and a rebuilt Close button would lose its cancel click).
+    app.ed.subscribe((r) => {
+      if (!this.dlg.open || (r !== 'project' && r !== 'load')) return;
+      if (this.running) this.staleAfterRun = true;
+      else this.render();
+    });
   }
 
   open(): void {
@@ -88,6 +97,8 @@ export class SequenceDialog {
     const ed = this.app.ed;
     const p = ed.project;
     clear(this.body);
+    // The shown sequence may have been removed by undo/redo or a load.
+    if (!p.sequences?.some((q) => q.id === this.seqId)) this.seqId = p.sequences?.[0]?.id ?? null;
     const seqs = p.sequences ?? [];
     const seq = this.current();
     const anims = p.animations;
@@ -151,7 +162,9 @@ export class SequenceDialog {
       }
       const animSel = h('select', { 'data-testid': `seqd-step-anim-${i}`, 'aria-label': `Clip ${i + 1}` }, ...anims.map((a) => h('option', { value: a.id }, a.name)));
       animSel.value = st.animId;
-      animSel.addEventListener('change', () => this.edit('Change sequence clip', (q) => void (q.steps[i].animId = animSel.value)));
+      animSel.addEventListener('change', () => this.edit('Change sequence clip', (q) => {
+        if (q.steps[i]) q.steps[i].animId = animSel.value;
+      }));
       const repIn = h('input', { type: 'number', min: 1, max: SEQUENCE_MAX_REPEAT, step: 1, value: String(st.repeat), class: 'w-num', 'data-testid': `seqd-step-repeat-${i}`, 'aria-label': `Repeat clip ${i + 1}` });
       repIn.addEventListener('change', () => {
         const v = Number(repIn.value);
@@ -159,9 +172,12 @@ export class SequenceDialog {
           this.app.status(`Repeat must be a whole number from 1 to ${SEQUENCE_MAX_REPEAT}.`);
           return this.render();
         }
-        this.edit('Set clip repeat', (q) => void (q.steps[i].repeat = v));
+        this.edit('Set clip repeat', (q) => {
+          if (q.steps[i]) q.steps[i].repeat = v;
+        });
       });
       const move = (d: -1 | 1) => this.edit('Reorder sequence', (q) => {
+        if (!q.steps[i] || !q.steps[i + d]) return;
         const [x] = q.steps.splice(i, 1);
         q.steps.splice(i + d, 0, x);
       });
@@ -169,7 +185,7 @@ export class SequenceDialog {
         h('span', { class: 'dim' }, `${i + 1}.`), animSel, h('span', { class: 'dim' }, '×'), repIn,
         h('button', { class: 'mini', 'data-testid': `seqd-step-up-${i}`, disabled: i === 0, title: 'Move earlier', onclick: () => move(-1) }, '↑'),
         h('button', { class: 'mini', 'data-testid': `seqd-step-down-${i}`, disabled: i === seq.steps.length - 1, title: 'Move later', onclick: () => move(1) }, '↓'),
-        h('button', { class: 'mini', 'data-testid': `seqd-step-remove-${i}`, title: 'Remove this clip', onclick: () => this.edit('Remove sequence clip', (q) => void q.steps.splice(i, 1)) }, '×')));
+        h('button', { class: 'mini', 'data-testid': `seqd-step-remove-${i}`, title: 'Remove this clip', onclick: () => this.edit('Remove sequence clip', (q) => void (q.steps[i] && q.steps.splice(i, 1))) }, '×')));
     });
     const addBtn = h('button', { class: 'mini', 'data-testid': 'seqd-add-step', title: 'Append a clip (the current animation)' }, '+ Clip');
     addBtn.addEventListener('click', () => {
@@ -219,7 +235,7 @@ export class SequenceDialog {
         ? h('ul', { class: 'errors', role: 'alert', 'data-testid': 'seqd-errors' }, ...errors.map((e) => h('li', {}, e)))
         : h('p', { class: 'hint', 'data-testid': 'seqd-summary', 'data-frames': String(setup!.frames.length) }, `${setup!.frames.length} frames (${breakdown}) · ${setup!.geometry.width}×${setup!.geometry.height} px · transparent${frame ? ' · project frame' : ''} · ${seq.loop ? 'loops' : 'plays once'}`),
       frameWarning('seqd-frame-warning', setup?.warnings ?? []),
-      h('p', { class: 'hint' }, `Each play of a clip contributes round(duration × FPS) frames; a clip blends in from the live pose over the stored mix (default ${DEFAULT_MIX} s). Repeats are back to back: loops keep looping, one-shots restart.`),
+      h('p', { class: 'hint' }, `Each play of a clip contributes round(duration × FPS) frames; a clip blends in from the live pose over the stored mix (default ${DEFAULT_MIX} s). Repeats are back to back: loops keep looping, one-shots restart. A channel a clip does not key returns to the setup pose during its transition (the Mix dialog’s “setup” policy; sequences do not offer “hold”). Constraint mix blends across a transition like any channel.`),
     );
 
     const canvas = h('canvas', { class: 'mix-canvas', 'data-testid': 'seqd-canvas', 'aria-label': 'Sequence frame' });
@@ -286,7 +302,7 @@ export class SequenceDialog {
       }
       canvas.width = setup.geometry.width;
       canvas.height = setup.geometry.height;
-      const g = canvas.getContext('2d');
+      const g = exportContext(canvas);
       if (!g) throw new Error('Could not create a 2D canvas for export.');
       const total = setup.frames.length;
       const pngs: Uint8Array[] = [];
@@ -318,6 +334,10 @@ export class SequenceDialog {
     } finally {
       this.running = false;
       btn.disabled = false;
+      if (this.staleAfterRun && this.dlg.open) {
+        this.staleAfterRun = false;
+        this.render();
+      }
     }
   }
 }

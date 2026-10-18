@@ -63,25 +63,44 @@ export function drawAttachment(g: CanvasRenderingContext2D, f: AttachmentFrame, 
   g.globalAlpha = 1;
 }
 
+/**
+ * The 2D context every exported frame is drawn into (PNG frame, ZIP, APNG/GIF, WebM/MP4,
+ * CLI) and the reference player draws into. `willReadFrequently` selects Chrome's software
+ * raster, and drawMeshLayer then uses a software layer too. On the accelerated path the same data
+ * gave history-dependent pixels (LP-004: half-scale Wiz frames 0–90 differed between the
+ * dialog and the CLI, 91–170 agreed; the cause lies in the accelerated mesh layer and is
+ * not established). On the software path both are byte-identical.
+ */
+export function exportContext(canvas: { getContext(id: '2d', options?: CanvasRenderingContext2DSettings): CanvasRenderingContext2D | null }): CanvasRenderingContext2D | null {
+  return canvas.getContext('2d', { willReadFrequently: true });
+}
+
 /** Below this area (device px²) a triangle is degenerate and skipped. */
 const MIN_AREA = 1e-6;
 
 type Layer = { canvas: OffscreenCanvas | HTMLCanvasElement; g: CanvasRenderingContext2D };
-let layerCache: Layer | null = null;
-function layerOf(w: number, h: number): Layer {
-  if (!layerCache) {
+const layerCache: { gpu: Layer | null; software: Layer | null } = { gpu: null, software: null };
+/**
+ * The offscreen layer for a mesh. A target created with `willReadFrequently` (every
+ * exported frame, see exportContext) gets its own software layer, so an export never
+ * mixes raster paths, and the viewport's layer is never forced out of the GPU.
+ */
+function layerOf(w: number, h: number, software: boolean): Layer {
+  const key = software ? 'software' : 'gpu';
+  let layer = layerCache[key];
+  if (!layer) {
     const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
-    layerCache = { canvas, g: canvas.getContext('2d') as CanvasRenderingContext2D };
+    layer = layerCache[key] = { canvas, g: canvas.getContext('2d', { willReadFrequently: software }) as CanvasRenderingContext2D };
   }
   // Exactly the mesh's size every time: Chrome's anti-aliased clipping measurably
   // depends on the layer's size, so a grow-only cache made a frame's pixels depend on
   // which frames were drawn before it (found by the runtime-player agreement test).
-  const c = layerCache.canvas;
+  const c = layer.canvas;
   if (c.width !== w || c.height !== h) {
     c.width = w;
     c.height = h;
   }
-  return layerCache;
+  return layer;
 }
 
 /**
@@ -140,7 +159,7 @@ export function drawMeshLayer(
   const w = x1 - x0, h = y1 - y0;
   if (w <= 0 || h <= 0) return;
   const exact = meshUnfolded(uvs, triangles, dev);
-  const L = layerOf(w, h);
+  const L = layerOf(w, h, g.getContextAttributes?.().willReadFrequently === true);
   const lg = L.g;
   lg.setTransform(1, 0, 0, 1, 0, 0);
   lg.globalAlpha = 1;

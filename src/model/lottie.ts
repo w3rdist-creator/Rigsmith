@@ -38,7 +38,7 @@ const SMOOTH: Curve = [1 / 3, 0, 2 / 3, 1];
 export function lottieDiagnostics(project: Project, anim: Animation): LottieDiagnostic[] {
   const out: LottieDiagnostic[] = [];
   const err = (feature: string, item: string, message: string) => out.push({ level: 'error', feature, item, message });
-  for (const k of project.ik ?? []) err('IK constraint', k.name, `IK “${k.name}” is solved at runtime; Lottie has no IK. Not exported (bake it into keys first).`);
+  for (const k of project.ik ?? []) err('IK constraint', k.name, `IK “${k.name}” is solved at runtime; Lottie has no IK. Not exported. Rigsmith has no command that bakes IK into keys: to export this rig, delete the IK constraint and key the chain’s rotations by hand.`);
   for (const k of project.pathConstraints ?? []) err('path constraint', k.name, `Path constraint “${k.name}” has no Lottie equivalent. Not exported.`);
   for (const a of project.attachments) if (a.mesh) err('mesh', a.name, `“${a.name}” is a mesh; Lottie image layers cannot deform. Not exported.`);
   if (anim.drawOrder?.length) err('draw-order keys', anim.name, `“${anim.name}” keys the draw order; Lottie layer order is fixed. Not exported.`);

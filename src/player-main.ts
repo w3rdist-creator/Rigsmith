@@ -3,7 +3,7 @@
 // window.__rigsmithPlayer.
 import type { AtlasMeta } from './model/atlas.ts';
 import type { RuntimeExport } from './model/exportRuntime.ts';
-import { renderSequenceFrame } from './render/sequence.ts';
+import { exportContext, renderSequenceFrame } from './render/sequence.ts';
 import type { SequenceSetup } from './render/sequence.ts';
 import { RuntimeError } from './runtime/load.ts';
 import { RigPlayer } from './runtime/player.ts';
@@ -148,7 +148,8 @@ function show(): void {
   canvas.width = geo.width;
   canvas.height = geo.height;
   Object.assign(canvas.dataset, { ox: String(geo.originX), oy: String(geo.originY), scale: String(geo.scale), time: String(setup.plan.times[index]), frame: String(setup.plan.frames[index]) });
-  renderSequenceFrame(canvas.getContext('2d')!, setup, index, player.lookup);
+  // The export's context (software raster), so a frame here is the exported frame's pixels.
+  renderSequenceFrame(exportContext(canvas)!, setup, index, player.lookup);
   slider.value = String(index);
   label.textContent = `frame ${setup.plan.frames[index]} / ${setup.plan.lastFrame} · ${setup.plan.times[index].toFixed(3)} s`;
 }

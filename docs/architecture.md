@@ -123,6 +123,14 @@ files that declare version 1 but contain v2 fields, and versions newer than 2.
 | `mixes: [{from, to, duration}]` | stored crossfade durations per ordered animation pair (seconds, 0–10; default 0.2 s when absent) |
 | `sequences: [{id, name, steps: [{animId, repeat}], loop}]` | saved clip sequences (RV-009): ordered animations, each played `repeat` (1–100) times; transitions use the stored `mixes` durations; `loop` = exported animated files loop. Deleting an animation removes its steps, with a repair note (the sequence itself stays, possibly empty) |
 
+**Fields a reader does not know are lost on re-save.** A build that predates a field
+neither rejects nor keeps it: builds before RV-009 (`58e43fa`) drop `sequences`, builds
+before RV-003 (`c9c45dc`) drop `frame`, and every build up to `40ad69c` does so silently.
+Since the review-corrections pass, Open warns
+`Unknown top-level field(s) ignored — they will not be saved again: "…"` for any top-level
+key outside the list above (`TOP_LEVEL_KEYS` in `format.ts`); unknown keys inside objects
+are still dropped without a warning.
+
 Evaluation order (`src/model/evaluate.ts`, shared by the viewport, onion skin, sequence
 export and runtime export): sample local pose → IK constraints (array order) → path
 constraints (array order) → world matrices → per-attachment state (visibility, opacity,
@@ -217,11 +225,18 @@ image, skin, draw order) → mesh vertices.
   `w_k = clamp((T − start_k)/mix_k, 0, 1)`, rotation the shortest way, exact incoming
   value at `w = 1`. Interrupting a running blend therefore starts from the live blended
   pose (continuous). Channels the incoming animation does not key either blend to the
-  setup pose (`missing: 'setup'`) or keep the previous pose (`'hold'`). Constraints are
-  solved on the blended local pose; visibility, image, draw order and constraint keys come
-  from the newest entry with weight ≥ 0.5; opacity and mesh deform blend along the chain.
+  setup pose (`missing: 'setup'`) or keep the previous pose (`'hold'`). Constraint mix
+  and path position blend along the chain the same way (an entry that does not key them
+  supplies the constraint's setup value under `'setup'`, nothing under `'hold'`; each
+  entry's mix is clamped to 0..1), so an animation that keys an IK to mix 0 fades the IK
+  out over the transition (until the review-corrections pass the dominant entry's
+  constraint keys switched at weight 0.5). Constraints are then solved on the blended
+  local pose; visibility, image and draw order come from the newest entry with weight
+  ≥ 0.5; opacity and mesh deform blend along the chain.
   The Mix dialog (`src/ui/mixDialog.ts`) previews, plays and exports a transition as a
-  PNG sequence named `<from>-to-<to>`.
+  PNG sequence named `<from>-to-<to>`. Saved clip sequences (`src/model/clipSequence.ts`)
+  always use `missing: 'setup'` (the Mix dialog's default); the Sequences dialog says so,
+  and its frames equal the Mix dialog's only with that setting.
 
 ## Runtime export (`rigsmith.runtime`, version 2 — full schema in docs/runtime.md)
 
@@ -265,7 +280,20 @@ coverage depend on previously drawn frames.
   are copied with an explicit source → target map for bones, attachments, constraints
   and images (exact-name defaults, every entry changeable or skippable). The dialog shows
   a dry-run report (unmatched objects, keys that would be dropped) before Import, which
-  is one undo step. Key values are copied unchanged (they are local to the bone).
+  is one undo step. Key values are **absolute local values** and are copied unchanged, so
+  a target bone whose setup differs from the source bone's jumps to the source values at
+  its first key; the opt-in "Offset by the setup difference" adds (target − source setup)
+  to translate and rotate keys and multiplies scale keys by the setup-scale ratio (a zero
+  source setup scale is copied unchanged, with a note). The report lists, per IK / path
+  constraint with mix > 0 that the imported animation does not key, how many imported
+  keys it overrides and on which bones (`drivenByConstraints`): those keys have no visible
+  effect. A per-constraint opt-in writes a stepped mix key 0 at t = 0 on that constraint
+  in the imported copy only (the setup constraint is untouched), so the keys play and the
+  constraint stops solving in that animation. It is off by default: on the Wiz v3 rig
+  muting the leg IK lets the feet drift (shin-to-foot gap 14.8 → 38.0 px). Rig
+  differences (a mapped bone whose parent name differs; scale keys that now also scale
+  bones not below it in the source) are listed as notes. Pasting keys reports the same
+  override and, when a one-bone clip lands on another selected bone, where it went.
 - **Key clipboard** (`src/model/clipboard.ts`): copied keys are stored with the *names* of
   what they reference; pasting resolves same id + name, else the unique same name, and
   reports what does not resolve instead of guessing.

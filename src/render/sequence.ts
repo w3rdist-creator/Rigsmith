@@ -13,7 +13,8 @@ import { buildZip } from '../model/zip.ts';
 import type { ZipEntry } from '../model/zip.ts';
 import type { Animation, ClipSequence, Project, ProjectFrame } from '../model/types.ts';
 import type { ImageLookup } from './draw.ts';
-import { drawFrame } from './draw.ts';
+import { drawFrame, exportContext } from './draw.ts';
+export { exportContext } from './draw.ts';
 
 export interface SequenceSetup {
   anim: Animation;
@@ -64,7 +65,7 @@ function prepareMixFrames(project: Project, mix: MixPlan, fps: number, count: nu
   for (const f of evaluated) b = frameBounds(f, b);
   if (!b) return { ok: false, errors: ['Nothing visible to export: attach at least one visible image.'] };
   const geometry = requestGeometry(b, scale, padding, frame);
-  const cap = checkCapacity(geometry, evaluated.length);
+  const cap = checkCapacity(geometry, evaluated.length, false);
   if (cap.length) return { ok: false, errors: cap };
   const anim: Animation = { id: id.id, name: id.name, duration: id.duration, fps, loop: id.loop, tracks: {} };
   return { ok: true, setup: { anim, plan: { times, frames, lastFrame: count - 1 }, geometry, frames: evaluated, warnings: frameWarnings(b, frame, `“${anim.name}”`) } };
@@ -88,6 +89,7 @@ export function prepareSequence(project: Project, animId: string | null, req: Se
 export function sequenceViewMatrix(geo: SequenceGeometry): Mat {
   return { a: geo.scale, b: 0, c: 0, d: geo.scale, tx: -geo.originX * geo.scale, ty: -geo.originY * geo.scale };
 }
+
 
 /** Draws one frame of a prepared sequence onto a transparent canvas of the sequence size. */
 export function renderSequenceFrame(g: CanvasRenderingContext2D, setup: SequenceSetup, index: number, images: ImageLookup): void {
@@ -168,14 +170,14 @@ export async function encodeSequenceZip(
   setup: SequenceSetup,
   req: SequenceRequest,
   images: ImageLookup,
-  canvas: { width: number; height: number; getContext(id: '2d'): CanvasRenderingContext2D | null },
+  canvas: { width: number; height: number; getContext(id: '2d', options?: CanvasRenderingContext2DSettings): CanvasRenderingContext2D | null },
   encode: () => Promise<Uint8Array>,
   onProgress: (done: number, total: number) => void,
   isCancelled: () => boolean,
 ): Promise<Uint8Array> {
   canvas.width = setup.geometry.width;
   canvas.height = setup.geometry.height;
-  const g = canvas.getContext('2d');
+  const g = exportContext(canvas);
   if (!g) throw new Error('Could not create a 2D canvas for export.');
   const entries: ZipEntry[] = [];
   const total = setup.frames.length;

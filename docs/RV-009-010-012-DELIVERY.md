@@ -9,6 +9,13 @@ RV-013/014/015, renderer changes, collaboration and publishing are out of scope 
 not touched. Status: **delivered, pending external verification.** This is a worker
 handoff, not a certification. Product review belongs to the next Fable stage.
 
+> **2026-10-18 update.** The Fable review findings LP-001 … LP-014 were addressed afterwards; see
+> docs/REVIEW-CORRECTIONS.md. Superseded below: the import hint (now "absolute local values",
+> with an opt-in setup offset and a constraint-override warning), the guide acting on the first
+> attachment (now blocked when there is more than one original image), the scale-0.5
+> nondeterminism (exports now byte-identical, LP-004), the clipped Wiz frame (rerun after Fit,
+> LP-008) and the "browser" cap wording (the CLI has the same limit, LP-003).
+
 ## 1. What a user can do now
 
 | Item | Visible control(s) | Exercised by |
@@ -88,18 +95,20 @@ handoff, not a certification. Product review belongs to the next Fable stage.
 - The grid mesh covers the whole image rectangle, so vertices also fall in transparent
   space.
 - The art is the **first** attachment whose image is not a cut piece. Projects with
-  several flat images get the guide's mesh and idle on that one only.
+  several flat images get the guide's mesh and idle on that one only. *(2026-10-18: the guide
+  now refuses projects with more than one original image: LP-011.)*
 - The panel sits over the left part of the stage, about 360 px wide. Close it to see the
   whole stage.
 
 **RV-009:**
 - Two exports of the same sequence at scale 0.5 in one session can differ (Chrome raster
-  nondeterminism).
+  nondeterminism). *(2026-10-18: fixed by LP-004; exports draw on the software raster and
+  dialog ×3 = CLI at scale 0.5. See docs/REVIEW-CORRECTIONS.md.)*
   - Raw output: `.hermes/evidence/usecase/rv009-scale05-nondeterminism.txt`.
   - Byte identity is claimed only at scale 1, where it was checked.
 - The Sequences dialog has no skin select (the CLI has `--skin`).
 - Wiz: the v3 project frame clips greeting-v2 by 21 world units at the top (warned in the
-  dialog, frame kept).
+  dialog, frame kept). *(2026-10-18: rerun after Fit to all animations, no warning: LP-008.)*
 - At 30 fps and scale 1, the 342-frame Wiz sequence is over the browser export cap. The
   evidence run used 15 fps.
 - The evidence contact sheet lost the "×" and "→" glyphs (font). The data is unaffected.

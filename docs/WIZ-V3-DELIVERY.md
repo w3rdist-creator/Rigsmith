@@ -206,7 +206,7 @@ to meshes — deliberately skip").
 |---|---|
 | greeting-demo passes the lottie-web budget | **Met** |
 | A baked copy of an IK rig exports and matches | **Not implemented.** Per the brief, there is a decision record only, below |
-| Live-IK refusal names the bake command | **Partial.** The diagnostic says "bake it into keys first", but no such command exists |
+| Live-IK refusal names the bake command | **Partial.** The diagnostic says "bake it into keys first", but no such command exists (2026-10-18: the diagnostic now says there is no bake command and what to do instead; docs/REVIEW-CORRECTIONS.md) |
 
 The lottie-web helper was moved to `tests/e2e/lottie-web.ts` and is shared with the p4 test.
 
@@ -229,6 +229,7 @@ The lottie-web helper was moved to `tests/e2e/lottie-web.ts` and is shared with 
   - The IK diagnostic would then name the command. Today it says "bake it into keys first",
     and no such command exists; this is recorded as a partial answer to the review's
     "names the bake command" criterion.
+    *(2026-10-18: the diagnostic no longer names a command; see docs/REVIEW-CORRECTIONS.md, RV-008.)*
 - *Decision.* Deferred, and owned by the operator. It depends on the RV-008 operator
   question (is Lottie a delivery target?) and on whether a flat-art IK rig is wanted. It is
   not implemented here.

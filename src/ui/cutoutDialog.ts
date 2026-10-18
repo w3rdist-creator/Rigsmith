@@ -3,7 +3,7 @@
 // + attachment exactly where it was (optionally with a joint bone at the pivot and the
 // source replaced by its remainder, optionally patched with a flat colour). The source
 // image is never modified and stays in the project.
-// Pixel tools (the remaining Wiz-prep steps): "Select colour" picks pixels by colour —
+// Pixel tools (the remaining hand-preparation steps): "Select colour" picks pixels by colour —
 // the 4-connected region from the clicked pixel (flood fill) or, unticked, every pixel in
 // the colour box (threshold); Shift+click adds. A selection replaces the outline for the
 // cut. "Remove specks" makes a cleaned copy (faint pixels far from solid art removed) and
@@ -154,7 +154,7 @@ export class CutoutDialog {
   private render(): void {
     // The dialog can be taller than the window and scroll. Rebuilding the body would move
     // the scroll offset — and the canvas under the pointer — after each click (RV-012 on
-    // the Wiz art: every outline point after the first landed ~124 CSS px off). Keep it.
+    // real art: every outline point after the first landed ~124 CSS px off). Keep it.
     const scroll = this.dlg.scrollTop;
     try {
       this.renderBody();

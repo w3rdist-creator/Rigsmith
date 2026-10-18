@@ -110,4 +110,20 @@ describe('reference mixing', () => {
     assert.equal(mixFrame(p, plan, 0.69, 'setup').discrete.anim, A);
     assert.ok(Math.abs(mixFrame(p, plan, 0.7, 'hold').worlds.get('b')![4] - 10) < 1e-9, "'hold' keeps the outgoing translate");
   });
+
+  test('constraint mix blends along the chain (clamped per entry): setup, hold, out of range', () => {
+    // IK setup mix 0.5; A keys it to 1 (or 1.5, clamped to 1); B keys nothing. At w = 0.5
+    // exactly ((0.75 − 0.5) / 0.5): 'setup' → 1 + 0.5 · (0.5 − 1) = 0.75; 'hold' → 1. The
+    // pre-correction rule (constraint keys from the entry with w ≥ 0.5, here B) gave 0.5.
+    const withMix = (m: number) => { const q = arm([1, 1], [60, 70], true); q.ik[0].mix = m; return q; };
+    const q: any = { ...withMix(0.5), animations: [] };
+    const plan2 = (v: number) => [{ anim: { duration: 1, loop: true, tracks: {}, constraints: { ik: { mix: [key(0, [v])] } } }, start: 0, mix: 0 }, { anim: { duration: 1, loop: true, tracks: {} }, start: 0.5, mix: 0.5 }];
+    const upper = (w: Map<string, M>) => Math.atan2(w.get('upper')![1], w.get('upper')![0]);
+    const at = (m: number) => upper(constrainedWorlds(withMix(m), null, 0));
+    assert.ok(new Set([at(0.5), at(0.75), at(1)].map((x) => x.toFixed(6))).size === 3, 'the three mixes pose the arm differently');
+    for (const v of [1, 1.5]) {
+      assert.ok(Math.abs(upper(mixFrame(q, plan2(v), 0.75, 'setup').worlds) - at(0.75)) < 1e-12, `setup, A keys ${v}: mix 0.75`);
+      assert.ok(Math.abs(upper(mixFrame(q, plan2(v), 0.75, 'hold').worlds) - at(1)) < 1e-12, `hold, A keys ${v}: mix 1`);
+    }
+  });
 });

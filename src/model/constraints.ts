@@ -48,16 +48,23 @@ export function pathPosition(anim: Animation | null, pc: PathConstraint, time: n
   return keys?.length ? sampleKeys(keys, time, [pc.position])[0] : pc.position;
 }
 
-export function applyConstraints(project: Project, pose: Map<string, LocalPose>, anim: Animation | null, time: number): void {
+/** Constraint values supplied by the caller (a blended mix) instead of one animation's keys. */
+export interface ConstraintValues {
+  mix(id: string, base: number): number;
+  position(id: string, base: number): number;
+}
+
+export function applyConstraints(project: Project, pose: Map<string, LocalPose>, anim: Animation | null, time: number, values?: ConstraintValues): void {
   if (!project.ik?.length && !project.pathConstraints?.length) return;
+  const clamp = (v: number) => Math.min(1, Math.max(0, v));
   for (const ik of project.ik ?? []) {
-    const mix = constraintMix(anim, ik.id, time, ik.mix);
+    const mix = values ? clamp(values.mix(ik.id, ik.mix)) : constraintMix(anim, ik.id, time, ik.mix);
     if (mix > 0) solveIk(project.bones, pose, ik, mix);
   }
   for (const pc of project.pathConstraints ?? []) {
     const path = project.paths?.find((p) => p.id === pc.pathId);
-    const mix = constraintMix(anim, pc.id, time, pc.mix);
-    if (path && mix > 0) solvePath(project.bones, pose, path, pc, pathPosition(anim, pc, time), mix);
+    const mix = values ? clamp(values.mix(pc.id, pc.mix)) : constraintMix(anim, pc.id, time, pc.mix);
+    if (path && mix > 0) solvePath(project.bones, pose, path, pc, values ? values.position(pc.id, pc.position) : pathPosition(anim, pc, time), mix);
   }
 }
 
