@@ -83,6 +83,15 @@ export class App {
       if (json) void this.openFile(json);
       else void this.importImages(files);
     });
+    // Safety net: an exception escaping a control's handler (a failed mutate() has
+    // already rolled the project back) is reported instead of failing silently.
+    window.addEventListener('error', (e) => {
+      if (/ResizeObserver loop/.test(e.message ?? '')) return;
+      this.error('Action failed', [e.error instanceof Error ? e.error.message : e.message || 'Unknown error']);
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      this.error('Action failed', [e.reason instanceof Error ? e.reason.message : String(e.reason)]);
+    });
     window.addEventListener('keydown', (e) => this.onKey(e));
     window.addEventListener('beforeunload', (e) => {
       if (this.ed.dirty) e.preventDefault();

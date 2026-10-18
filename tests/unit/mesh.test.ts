@@ -316,3 +316,62 @@ describe('fold detection for the renderer', () => {
     assert.equal(meshUnfolded(uvs, tris, [0, 0, 10, 0, 10, 10, 10, 10]), true, 'degenerate triangles are ignored');
   });
 });
+
+// Review P1-1 (drwdmrs3): Auto weights returned null lists (then threw in the integrity
+// pass) for any vertex more than 100 px from every candidate bone, because the absolute
+// weight 1/d² fell under MIN_WEIGHT before normalization.
+describe('auto weights far from every bone (review P1-1)', () => {
+  const PNG1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+  function bigPanel(): Project {
+    const W = 400, H = 400;
+    const g = gridPoints(W, H, 8, 8);
+    return {
+      format: 'rigsmith.project', version: 2, name: 'panel',
+      images: [{ id: 'im', name: 'panel.png', mime: 'image/png', width: W, height: H, dataUrl: PNG1 }],
+      bones: [
+        { id: 'root', name: 'root', parentId: null, x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, length: 30, color: '#8fd3c8' },
+        { id: 'tip', name: 'tip', parentId: 'root', x: 30, y: 0, rotation: 0, scaleX: 1, scaleY: 1, length: 30, color: '#8fd3c8' },
+      ],
+      attachments: [{ id: 'a', name: 'panel', boneId: 'root', imageId: 'im', x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, opacity: 1, mesh: triangulate(g.hull, g.interior) }],
+      animations: [{ id: 'an', name: 'idle', duration: 1, fps: 30, loop: true, tracks: {} }],
+    };
+  }
+  // Independent distance from a point to a segment (no src helpers).
+  const seg = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
+    const dx = bx - ax, dy = by - ay;
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(px - ax - t * dx, py - ay - t * dy);
+  };
+
+  it('weights every vertex (sum exactly 1) with the nearest bone dominant, at any distance', () => {
+    const p = bigPanel();
+    const att = p.attachments[0];
+    const w = autoWeights(p, att, ['root', 'tip']);
+    const n = att.mesh!.points.length / 2;
+    assert.equal(w.length, n);
+    let far = 0;
+    for (let i = 0; i < n; i++) {
+      const l = w[i];
+      assert.ok(Array.isArray(l) && l.length >= 1 && l.length <= 2, `vertex ${i} has a weight list`);
+      assert.ok(l.every((x) => Number.isFinite(x.w) && x.w > 0));
+      assert.ok(Math.abs(l.reduce((s, x) => s + x.w, 0) - 1) < 1e-12, `vertex ${i} sums to 1`);
+      const x = att.mesh!.points[2 * i] - 200, y = att.mesh!.points[2 * i + 1] - 200;
+      const d0 = seg(x, y, 0, 0, 30, 0), d1 = seg(x, y, 30, 0, 60, 0);
+      if (Math.min(d0, d1) > 100) far++;
+      if (Math.abs(d0 - d1) > 1e-6) assert.equal(l[0].bone, d0 < d1 ? 'root' : 'tip', `vertex ${i}: nearest bone wins`);
+    }
+    assert.ok(far > 20, `the case has many vertices > 100 px from every bone (${far})`);
+  });
+
+  it('the integrity pass repairs a missing or non-array weight list instead of throwing', () => {
+    const p = bigPanel();
+    const att = p.attachments[0];
+    att.mesh!.weights = bindAll(att.mesh!, 'root');
+    (att.mesh!.weights as unknown[])[0] = null;
+    (att.mesh!.weights as unknown[])[1] = 7;
+    const notes = repairReferences(p);
+    assert.deepEqual(att.mesh!.weights![0], [{ bone: 'root', w: 1 }]);
+    assert.deepEqual(att.mesh!.weights![1], [{ bone: 'root', w: 1 }]);
+    assert.ok(notes.some((x) => /2 vertex weight list/.test(x)), notes.join('; '));
+  });
+});

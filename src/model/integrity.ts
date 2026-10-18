@@ -42,9 +42,11 @@ export function repairReferences(p: Project): string[] {
     if (!m?.weights) continue;
     let changed = 0;
     let rigid = false;
-    const next = m.weights.map((list) => {
+    const next = m.weights.map((raw) => {
+      // A list that is not an array (null from a failed computation) counts as empty.
+      const list = Array.isArray(raw) ? raw.filter((x) => x && typeof x.bone === 'string' && Number.isFinite(x.w)) : [];
       const sum = list.reduce((s, x) => s + x.w, 0);
-      if (list.every((x) => boneIds.has(x.bone)) && Math.abs(sum - 1) < 1e-6) return list;
+      if (list.length === (raw as unknown[] | null)?.length && list.every((x) => boneIds.has(x.bone)) && Math.abs(sum - 1) < 1e-6) return raw;
       changed++;
       const nw = normalizeWeights(list.filter((x) => boneIds.has(x.bone)));
       if (nw) return nw;
