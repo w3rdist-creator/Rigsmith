@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 14 8 2l6 12z' fill='%23ffd166'/%3E%3C/svg%3E" />
+    <title>Rigsmith</title>
+  </head>
+  <body>
+    <header id="toolbar" class="toolbar" role="toolbar" aria-label="Editor toolbar"></header>
+    <main class="workspace">
+      <aside class="side left" aria-label="Skeleton and images">
+        <section id="skeleton-panel" class="panel grow"></section>
+        <section id="images-panel" class="panel"></section>
+      </aside>
+      <section class="stage" aria-label="Canvas">
+        <canvas id="stage-canvas" tabindex="0" data-testid="stage" aria-label="Rig canvas. Use the toolbar tools; press ? for controls."></canvas>
+        <div id="mode-badge" class="mode-badge" data-testid="mode-badge">SETUP</div>
+        <div id="tool-hint" class="tool-hint"></div>
+        <div id="empty-stage" class="empty-stage" data-testid="empty-stage">
+          <h1>Start a rig</h1>
+          <p>Rigsmith animates 2D images with a bone hierarchy and a keyframe timeline.</p>
+          <div class="empty-actions">
+            <button id="empty-demo" class="accent" data-testid="empty-demo">Open the demo rig</button>
+            <button id="empty-import">Import images…</button>
+            <button id="empty-bone">Draw bones (B)</button>
+            <button id="empty-open">Open project…</button>
+          </div>
+          <p class="dim">Drop PNG/JPEG/WebP/GIF files or a <code>.rig.json</code> project anywhere on the canvas.</p>
+        </div>
+        <div id="toasts" class="toasts" aria-live="assertive"></div>
+      </section>
+      <aside class="side right" aria-label="Inspector">
+        <section id="inspector-panel" class="panel grow" data-testid="inspector"></section>
+      </aside>
+    </main>
+    <section id="timeline" class="timeline" aria-label="Timeline" data-testid="timeline"></section>
+    <footer class="statusbar"><span id="status-msg" data-testid="status" aria-live="polite"></span></footer>
+    <dialog id="help-dialog" class="help" data-testid="help-dialog">
+      <h2>Controls</h2>
+      <table><tbody></tbody></table>
+      <form method="dialog"><button class="accent">Close</button></form>
+    </dialog>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
