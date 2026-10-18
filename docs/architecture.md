@@ -120,13 +120,19 @@ image, skin, draw order) → mesh vertices.
 
 - **Stepped slot channels** (visibility, image, draw order) show the setup value before
   their first key; interpolated channels (bone channels, opacity) hold their first key.
-- **Two-bone IK**: law of cosines with the cosine clamped to [−1, 1]: unreachable targets
-  straighten the chain toward the target, too-close targets fold it, a target on the
-  chain root leaves the keyed pose. `bendPositive` puts the elbow on the clockwise side
-  of the shoulder→target line; a mirrored parent (negative determinant) mirrors the
-  side. Solved angles are written back as local rotations through the inverse parent
-  matrix (exact for mirrored and uniformly scaled parents), kept on the keyed turn, and
-  `mix` blends local rotations from keyed (0) to solved (1).
+- **Two-bone IK**: solved in the chain parent's local space, where any parent scale
+  (non-uniform or mirrored) is undone. There the shoulder→tip length depends only on the
+  elbow angle, so the elbow angle solves `|S1·(e + k·(cos r2, sin r2))| = |target − shoulder|`
+  (S1 = bone 1's own scale, e = child offset, k = child scaleX × length): |v|² is
+  monotonic between its extremes, so each root is bracketed and bisected to rounding;
+  bone 1 then turns the result onto the target. Unreachable targets take the closest
+  length in parent space (straighten toward the target, or fold), a target on the chain
+  root leaves the keyed pose. `bendPositive` puts the elbow on the clockwise side of the
+  shoulder→target line in parent space; a mirrored parent mirrors the side on screen.
+  When several elbow angles qualify (possible under non-uniform scale) the one nearest
+  the keyed rotation wins. Solutions are kept on the keyed turn, and `mix` blends local
+  rotations from keyed (0) to solved (1). Unit tests check reach and side against
+  forward kinematics for non-uniform parent, own and mirrored scales (review P2-1).
 - **Path constraints**: arc-length table (32 samples per cubic segment); bone *i* sits at
   `position·L + i·spacing`; open paths clamp, closed paths wrap; `rotate` aligns the
   bone's +x with the tangent plus `rotateOffset`; `mix` blends translation/rotation.

@@ -1,17 +1,25 @@
 // Constraints, applied to the sampled local pose before world matrices are final:
 // every IK constraint in array order, then every path constraint in array order.
-// Each solver works in world space and writes local rotation/translation back, so
-// parents with negative determinants (mirrored rigs) and non-unit scale behave
-// deterministically.
+// Solvers write local rotation/translation back through the inverse parent matrix, so
+// mirrored parents (negative determinant) and scaled parents give the same local
+// solution as the unscaled rig.
 //
-// Two-bone IK (bones [parent, child], target bone T):
-//   l1 = |child origin − parent origin|, l2 = child length (world), d = |T − parent|.
-//   The elbow angle comes from the law of cosines with cos clamped to [−1, 1], so an
-//   unreachable target (d > l1 + l2) straightens the chain toward T and a too-close
-//   target (d < |l1 − l2|) folds it. d ≈ 0 (target on the shoulder) leaves the pose
-//   untouched. `bendPositive` puts the elbow on the clockwise side of the
-//   shoulder→target line on screen; under a mirrored parent the side mirrors too, so a
-//   mirrored rig produces the mirror image of the unmirrored solution.
+// Two-bone IK (bones [parent, child], target bone T) is solved in the chain parent's
+// local space (the space bone 1's local transform lives in), where any parent scale,
+// non-uniform or mirrored, has been undone:
+//   o = shoulder (bone 1 local x, y), t = T mapped into that space,
+//   tip − o = R(r1) · S1 · (e + k·(cos r2, sin r2)), with S1 bone 1's own scale, e the
+//   child's local offset and k = child scaleX · child length.
+//   R(r1) is a pure rotation, so |tip − o| depends only on r2: the elbow angle solves
+//   |S1 · (e + k·(cos r2, sin r2))| = |t − o| (a closed form when S1 is uniform, found
+//   numerically — exact to rounding — between the extremes of that length otherwise),
+//   then r1 turns the result onto t. A target outside the reachable annulus takes the
+//   elbow angle whose length is closest (straightens the chain toward T, or folds it),
+//   measured in parent space. A world distance ≈ 0 (target on the shoulder) leaves the
+//   pose untouched. `bendPositive` puts the elbow on the clockwise side of the
+//   shoulder→target line in parent space; under a mirrored parent the side mirrors on
+//   screen, so a mirrored rig produces the mirror image of the unmirrored solution.
+//   When several elbow angles qualify, the one nearest the keyed rotation wins.
 //   mix blends each bone's local rotation from its keyed value (0) to the solution (1).
 // One-bone IK aims the bone's +x axis at the target.
 //
@@ -84,53 +92,126 @@ export function solveIk(bones: readonly Bone[], pose: Map<string, LocalPose>, ik
   const [pId, cId] = ik.bones;
   const pBone = bones.find((b) => b.id === pId);
   if (!pBone || !pose.has(pId)) return;
-  let world = computeWorld(bones, pose);
+  const world = computeWorld(bones, pose);
   const target = world.get(ik.target);
   const wp = world.get(pId);
   if (!target || !wp) return;
   const t: Vec = { x: target.tx, y: target.ty };
   const p: Vec = { x: wp.tx, y: wp.ty };
-  const base1 = pose.get(pId)!.rotation;
+  const local1 = pose.get(pId)!;
+  const base1 = local1.rotation;
   const parent1 = parentWorldOf(bones, world, pId);
 
   const cBone = cId ? bones.find((b) => b.id === cId) : undefined;
-  const wc = cId ? world.get(cId) : undefined;
-  if (!cBone || !wc) {
+  if (!cBone || !world.get(cId) || !pose.has(cId)) {
     // One bone: aim +x at the target.
     const dir = { x: t.x - p.x, y: t.y - p.y };
     if (Math.hypot(dir.x, dir.y) < EPS) return;
-    const solved = nearTurn(base1, localRotationFor(parent1, dir, pose.get(pId)!));
+    const solved = nearTurn(base1, localRotationFor(parent1, dir, local1));
     setRotation(pose, pId, base1 + mix * (solved - base1));
     return;
   }
-  const base2 = pose.get(cId)!.rotation;
-  const c: Vec = { x: wc.tx, y: wc.ty };
-  const tip = apply(wc, { x: cBone.length, y: 0 });
-  const l1 = Math.hypot(c.x - p.x, c.y - p.y);
-  const l2 = Math.hypot(tip.x - c.x, tip.y - c.y);
-  const d = Math.hypot(t.x - p.x, t.y - p.y);
-  if (d < 1e-6) return; // degenerate: target on the chain root — leave the pose as keyed
-  let solved1 = base1;
-  if (l1 > EPS) {
-    const cosA = l2 > EPS ? Math.min(1, Math.max(-1, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d))) : 1;
-    const mirrored = determinant(parent1) < 0;
-    const side = ik.bendPositive !== mirrored ? 1 : -1;
-    const want = angle({ x: t.x - p.x, y: t.y - p.y }) + side * (Math.acos(cosA) / DEG);
-    const delta = wrap(want - angle({ x: c.x - p.x, y: c.y - p.y }));
-    const xDir = rotate(applyLinear(wp, { x: 1, y: 0 }), delta);
-    solved1 = nearTurn(base1, localRotationFor(parent1, xDir, pose.get(pId)!));
-    setRotation(pose, pId, solved1);
-    world = computeWorld(bones, pose);
-  }
-  const wc2 = world.get(cId)!;
-  const c2: Vec = { x: wc2.tx, y: wc2.ty };
-  const aim = { x: t.x - c2.x, y: t.y - c2.y };
-  let solved2 = base2;
-  if (Math.hypot(aim.x, aim.y) > EPS && l2 > EPS) {
-    solved2 = nearTurn(base2, localRotationFor(world.get(pId)!, aim, pose.get(cId)!));
+  if (Math.hypot(t.x - p.x, t.y - p.y) < 1e-6) return; // degenerate: target on the chain root — leave the pose as keyed
+  if (Math.abs(determinant(parent1)) < 1e-12) return; // collapsed parent: no local solution
+  const local2 = pose.get(cId)!;
+  const base2 = local2.rotation;
+  // Parent-local space: shoulder o, target q relative to o.
+  const tl = apply(invert(parent1), t);
+  const q: Vec = { x: tl.x - local1.x, y: tl.y - local1.y };
+  const D = Math.hypot(q.x, q.y);
+  const chain: Chain = { sx: local1.scaleX, sy: local1.scaleY, ex: local2.x, ey: local2.y, k: local2.scaleX * cBone.length };
+  const { ex, ey, k } = chain;
+  const elbowArm: Vec = { x: chain.sx * ex, y: chain.sy * ey };
+  const side = ik.bendPositive ? 1 : -1;
+
+  let solved1 = base1, solved2 = base2;
+  if (Math.hypot(elbowArm.x, elbowArm.y) <= EPS) {
+    // Child sits on the shoulder: bone 1 keeps its rotation, bone 2 aims at the target.
+    if (Math.abs(k) > EPS) {
+      const aim = { x: t.x - (wp.a * ex + wp.c * ey + wp.tx), y: t.y - (wp.b * ex + wp.d * ey + wp.ty) };
+      if (Math.hypot(aim.x, aim.y) > EPS) solved2 = nearTurn(base2, localRotationFor(wp, aim, local2));
+    }
+  } else if (Math.abs(k) <= EPS) {
+    // Zero-length child: aim the elbow at the target.
+    solved1 = nearTurn(base1, angle(q) - angle(elbowArm));
+  } else {
+    const pick = (r2: number) => {
+      const r1 = angle(q) - angle(chainVec(chain, r2));
+      const el = rotate(elbowArm, r1);
+      return { r1, r2, side: q.x * el.y - q.y * el.x };
+    };
+    const tol = 1e-9 * (D * Math.hypot(elbowArm.x, elbowArm.y) + 1);
+    const options = elbowAngles(chain, D, base2).map(pick);
+    const wanted = options.filter((o) => side * o.side > tol);
+    const straight = options.filter((o) => Math.abs(o.side) <= tol);
+    // Requested side first; a straight (collinear) chain serves either side.
+    const pool = wanted.length ? wanted : straight.length ? straight : options;
+    pool.sort((a, b) => Math.abs(wrap(a.r2 - base2)) - Math.abs(wrap(b.r2 - base2)));
+    solved1 = nearTurn(base1, pool[0].r1);
+    solved2 = nearTurn(base2, pool[0].r2);
   }
   setRotation(pose, pId, base1 + mix * (solved1 - base1));
   setRotation(pose, cId, base2 + mix * (solved2 - base2));
+}
+
+/** Shoulder→tip vector before bone 1's rotation: v(r2) = S1 · (e + k·(cos r2, sin r2)). */
+interface Chain { sx: number; sy: number; ex: number; ey: number; k: number }
+
+function chainVec(c: Chain, r2: number): Vec {
+  return { x: c.sx * (c.ex + c.k * Math.cos(r2 * DEG)), y: c.sy * (c.ey + c.k * Math.sin(r2 * DEG)) };
+}
+
+/** d|v|²/dr2 (per radian), from v'(r2) = S1 · k·(−sin r2, cos r2). */
+function chainSlope(c: Chain, r2: number): number {
+  const w = chainVec(c, r2);
+  return 2 * (w.x * -c.sx * c.k * Math.sin(r2 * DEG) + w.y * c.sy * c.k * Math.cos(r2 * DEG));
+}
+
+const IK_SAMPLES = 720;
+
+function bisect(g: (r: number) => number, lo: number, hi: number): number {
+  let glo = g(lo);
+  for (let i = 0; i < 100 && hi - lo > 1e-13; i++) {
+    const mid = (lo + hi) / 2, gm = g(mid);
+    if (gm === 0) return mid;
+    if (gm < 0 === glo < 0) { lo = mid; glo = gm; } else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+/**
+ * Elbow angles r2 (degrees) with |v(r2)| = D: |v|² is monotonic between consecutive
+ * extremes (roots of its derivative, located by sampling and bisection), so each
+ * stretch holds at most one root, refined by bisection. When D lies outside the reach
+ * annulus, returns the extreme(s) whose length is closest to D.
+ */
+function elbowAngles(c: Chain, D: number, from: number): number[] {
+  const len2 = (r: number) => { const w = chainVec(c, r); return w.x * w.x + w.y * w.y; };
+  const f = (r: number) => len2(r) - D * D;
+  const slope = (r: number) => chainSlope(c, r);
+  const step = 360 / IK_SAMPLES;
+  const extremes: number[] = [];
+  // Samples start off the round angles (where extremes of symmetric chains sit exactly)
+  // and close the loop, so an extreme on a sample boundary is still bracketed once.
+  const start = from - 180 + 0.3819660113 * step;
+  for (let i = 0; i < IK_SAMPLES; i++) {
+    const a = start + i * step, b = i + 1 < IK_SAMPLES ? a + step : start + 360;
+    const da = slope(a), db = slope(b);
+    if (da === 0) extremes.push(a);
+    else if (da < 0 !== db < 0 && db !== 0) extremes.push(bisect(slope, a, b));
+  }
+  if (!extremes.length) return [from]; // |v| constant: every elbow angle reaches equally far
+  const roots: number[] = [];
+  extremes.forEach((a, i) => {
+    const b = i + 1 < extremes.length ? extremes[i + 1] : extremes[0] + 360;
+    const fa = f(a), fb = f(b);
+    if (fa === 0) roots.push(a);
+    else if (fa < 0 !== fb < 0 && fb !== 0) roots.push(bisect(f, a, b));
+  });
+  if (roots.length) return roots;
+  const gap = (r: number) => Math.abs(Math.sqrt(len2(r)) - D);
+  const best = Math.min(...extremes.map(gap));
+  return extremes.filter((r) => gap(r) <= best + 1e-9 * (D + 1));
 }
 
 // ---- Paths --------------------------------------------------------------------------

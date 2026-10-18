@@ -92,7 +92,7 @@ exercises it. The ids and measurements for each row are in
 | Contract item | Status | Notes |
 |---|---|---|
 | Attachment swaps / visibility / opacity / draw-order keys, persisted and in the runtime | delivered | — |
-| Two-bone IK: target, bend direction, mix, unreachable / degenerate / mirrored | delivered | — |
+| Two-bone IK: target, bend direction, mix, unreachable / degenerate / mirrored | delivered | Non-uniform scale missed reachable targets until the drwdmrs3 fix pass (P2-1, `docs/DRWDMRS3-FIX-DELIVERY.md`) |
 | Path constraints: author/edit, sampling/spacing, persistence/export | delivered | Checked against an independent arc-length sampler |
 | Cutout tools: mask/crop, pivot, overlap, patch, non-destructive | delivered | Flat-colour patch only. No hidden art is inferred |
 | Bring the Wiz-prep workflow into visible controls | delivered | Every prep step has a control: polygon masks, pivots, patch, joint extension, colour-threshold selection, flood fill (Shift+click adds), speck removal. Each uses the prep script's semantics and constants as defaults, and speck removal equals the script's rule run through Pillow. Selection cuts render in place with max diff 0 (`dfe27bb`) |

@@ -104,6 +104,126 @@ describe('two-bone IK', () => {
   });
 });
 
+describe('two-bone IK under non-uniform scale (review P2-1)', () => {
+  // Reviewer probe (drwdmrs3 P2-1): with a non-uniformly scaled parent the world-space
+  // law of cosines missed 125/180 reachable targets by up to 71.6 px. Reachability here
+  // is measured by forward kinematics only (computeWorld), independent of the solver.
+  let seed = 777;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  interface Case { root: [number, number]; own?: [number, number]; elbowY?: number; bendPositive?: boolean }
+  function rig(c: Case, tx: number, ty: number): Project {
+    const p = emptyProject('ik');
+    p.version = 2;
+    p.bones = [
+      bone('r', null, 0, 0, 0, 10, c.root[0], c.root[1]),
+      bone('a', 'r', 0, 0, 0, 100, c.own?.[0] ?? 1, c.own?.[1] ?? 1),
+      bone('b', 'a', 100, c.elbowY ?? 0, 0, 80),
+      bone('t', null, tx, ty, 0, 5),
+    ];
+    p.ik = [{ id: 'k', name: 'k', bones: ['a', 'b'], target: 't', mix: 1, bendPositive: c.bendPositive ?? true }];
+    return p;
+  }
+  /** World tip of bone b and elbow (b origin) for given local rotations of a and b. */
+  function fk(p: Project, ra: number, rb: number) {
+    const pose = samplePose(p.bones, null, 0);
+    pose.set('a', { ...pose.get('a')!, rotation: ra });
+    pose.set('b', { ...pose.get('b')!, rotation: rb });
+    const w = computeWorld(p.bones, pose);
+    const b = w.get('b')!;
+    return { tip: apply(b, { x: 80, y: 0 }), elbow: { x: b.tx, y: b.ty }, rootInv: w.get('r')! };
+  }
+  /** Reach annulus in parent (r) space: min/max shoulder→tip distance over the elbow angle. */
+  function reach(p: Project) {
+    const inv = (m: { a: number; b: number; c: number; d: number; tx: number; ty: number }, q: { x: number; y: number }) => {
+      const det = m.a * m.d - m.b * m.c, x = q.x - m.tx, y = q.y - m.ty;
+      return { x: (m.d * x - m.c * y) / det, y: (m.a * y - m.b * x) / det };
+    };
+    let lo = Infinity, hi = 0;
+    for (let i = 0; i < 7200; i++) {
+      const f = fk(p, 0, i / 20);
+      const q = inv(f.rootInv, f.tip);
+      const d = Math.hypot(q.x, q.y);
+      lo = Math.min(lo, d);
+      hi = Math.max(hi, d);
+    }
+    return { lo, hi, local: (q: { x: number; y: number }) => inv(fk(p, 0, 0).rootInv, q) };
+  }
+
+  const cases: [string, Case][] = [
+    ['parent scale (2, 1)', { root: [2, 1] }],
+    ['parent scale (1, 0.5)', { root: [1, 0.5] }],
+    ['parent scale (1.5, 0.75)', { root: [1.5, 0.75] }],
+    ['mirrored parent scale (−2, 1)', { root: [-2, 1] }],
+    ['own scale (1.5, 0.6), elbow off-axis, bend negative', { root: [1, 1], own: [1.5, 0.6], elbowY: 20, bendPositive: false }],
+    ['parent (2, 0.5) and own (0.7, 1.4)', { root: [2, 0.5], own: [0.7, 1.4] }],
+  ];
+  for (const [label, c] of cases) {
+    it(`${label}: reaches every reachable target on the requested side; unreachable targets get the closest reach`, () => {
+      const r = reach(rig(c, 0, 0));
+      let reached = 0;
+      for (let i = 0; i < 60; i++) {
+        const ang = rand() * Math.PI * 2, dist = 40 + rand() * 200;
+        const tx = Math.cos(ang) * dist, ty = Math.sin(ang) * dist;
+        const p = rig(c, tx, ty);
+        const pose = samplePose(p.bones, null, 0);
+        applyConstraints(p, pose, null, 0);
+        const f = fk(p, pose.get('a')!.rotation, pose.get('b')!.rotation);
+        const miss = Math.hypot(f.tip.x - tx, f.tip.y - ty);
+        const tl = r.local({ x: tx, y: ty }), d = Math.hypot(tl.x, tl.y);
+        if (d > r.lo + 0.5 && d < r.hi - 0.5) {
+          reached++;
+          assert.ok(miss < 1e-6, `target (${tx.toFixed(1)}, ${ty.toFixed(1)}) is reachable but missed by ${miss.toFixed(3)} px`);
+          // Bend side in the parent's own space (a mirrored parent mirrors it on screen).
+          const el = r.local(f.elbow);
+          const side = tl.x * el.y - tl.y * el.x;
+          assert.ok((c.bendPositive ?? true) ? side > 0 : side < 0, `elbow on the requested side (${side})`);
+        } else if (d > r.hi + 0.5 || d < r.lo - 0.5) {
+          // Unreachable: the tip lands as close as the chain can get (distance to the annulus, in parent space).
+          const tipL = r.local(f.tip);
+          const gap = Math.hypot(tl.x - tipL.x, tl.y - tipL.y);
+          const best = d > r.hi ? d - r.hi : r.lo - d;
+          assert.ok(gap < best + 1e-3, `unreachable target: parent-space gap ${gap} ≈ ${best}`);
+        }
+      }
+      assert.ok(reached > 20, `enough reachable samples (${reached})`);
+    });
+  }
+
+  it('the reviewer brute-force check: no target with a brute-force solution is missed by the solver', () => {
+    let checked = 0;
+    const tip = (p: Project, a: number, b: number, tx: number, ty: number) => {
+      const t = fk(p, a, b).tip;
+      return Math.hypot(t.x - tx, t.y - ty);
+    };
+    for (const root of [[2, 1], [1, 0.5], [1.5, 0.75]] as [number, number][]) {
+      for (let i = 0; i < 4; i++) {
+        const ang = rand() * Math.PI * 2, dist = 40 + rand() * 200;
+        const tx = Math.cos(ang) * dist, ty = Math.sin(ang) * dist;
+        const p = rig({ root }, tx, ty);
+        let best = { d: Infinity, a: 0, b: 0 };
+        for (let a = -180; a < 180; a += 4) for (let b = -180; b < 180; b += 4) {
+          const d = tip(p, a, b, tx, ty);
+          if (d < best.d) best = { d, a, b };
+        }
+        for (let step = 2; step > 1e-4; ) {
+          let improved = false;
+          for (const [da, db] of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
+            const d = tip(p, best.a + da, best.b + db, tx, ty);
+            if (d < best.d) { best = { d, a: best.a + da, b: best.b + db }; improved = true; }
+          }
+          if (!improved) step /= 2;
+        }
+        const pose = samplePose(p.bones, null, 0);
+        applyConstraints(p, pose, null, 0);
+        const solver = tip(p, pose.get('a')!.rotation, pose.get('b')!.rotation, tx, ty);
+        // The reviewer's criterion: brute force reaches it (< 0.05 px) ⇒ the solver must too.
+        if (best.d < 0.05) checked++;
+        if (best.d < 0.05) assert.ok(solver < 1e-6, `scale (${root}) target (${tx.toFixed(1)}, ${ty.toFixed(1)}): solver misses by ${solver.toFixed(4)} px, brute force ${best.d.toFixed(4)} px`);
+      }
+    }
+  });
+});
+
 describe('path constraint', () => {
   const line: PathShape = { id: 'p', name: 'line', boneId: null, closed: false, nodes: [{ x: 0, y: 0, inX: 0, inY: 0, outX: 100, outY: 0 }, { x: 300, y: 0, inX: -100, inY: 0, outX: 0, outY: 0 }] };
 
