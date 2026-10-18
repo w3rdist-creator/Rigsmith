@@ -150,6 +150,11 @@ Phase-3 decisions and limits (also in docs/architecture.md):
   no weight smoothing/mirroring tools, no automatic outline tracing from alpha.
 
 ### Phase 4 — follow-ons and pipeline
+Fresh gate runs: `.hermes/evidence/roadmap/phase4{a..f}-gates/` per sub-phase. Final run at
+`dfe27bb`: `.hermes/evidence/roadmap/final-gates/summary.txt` (preservation 16/16, test-id
+audit 0 missing of 263, unit 157/157, typecheck, build, e2e 132/132, cli 13/13, wiz 16/16 —
+all exit 0).
+
 | Item | Status | Evidence |
 |---|---|---|
 | Skins / attachment sets, validation | delivered | Skins panel (`skin-add`, `skin-active`, `skin-name`, `skin-duplicate`, `skin-delete`, `skin-summary`, `skin-diagnostics`); attachment inspector `skin-image` (setup image) and `skin-from-<image>` (keyed images); export `seq-skin` switches the editor skin; `src/model/skinOps.ts`; unit `skins-mix.test.ts` (rule incl. keyed images, ops, diagnostics, format rejections); p4-skins-mix: setup + keyed replacement render vs the reference (0 px over tolerance), `seq-skin` changes the pixels, aspect warning, shared-image note, duplicate name rejected, delete + undo, image removal confirm drops entries + undo, save/reopen deep-equal |

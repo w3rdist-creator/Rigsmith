@@ -26,25 +26,28 @@ measurements, not quality verdicts.
 | 4d | `ec57b7e` | Headless CLI/API (`scripts/rigsmith.ts`), brand-pipeline example |
 | 4e | `10aa08a` | Lottie supported-subset exporter with diagnostics |
 | 4f | `468a13b` | Animated media: APNG + GIF (editor and CLI), WebM/MP4 via ffmpeg (CLI) |
-| docs | the commit that adds this file | this report, README/architecture/matrix sync, STATUS |
+| docs | `e4c4180` | First version of this report, README/architecture/matrix sync, STATUS |
+| 2 (completion) | `dfe27bb` | Colour selection (flood fill / threshold), selection cuts, speck removal; media format-note wording; CLI media cancel after the last frame is piped |
+| docs | the commit that updates this file | Final numbers, STATUS |
 
-## 2. Final gate run, fresh, on the tree of `468a13b`
+## 2. Final gate run, fresh, at HEAD `dfe27bb`
 
-- **Run:** `sh scripts/roadmap/run-gates.sh final-gates`, finished 2026-10-18T05:43Z.
+- **Run:** `sh scripts/roadmap/run-gates.sh final-gates`, finished 2026-10-18T05:59Z.
 - **Raw logs:** `.hermes/evidence/roadmap/final-gates/<gate>.log`, with a summary in
   `summary.txt`.
-- **Tree:** the only uncommitted changes at run time were docs (README, architecture,
-  matrix) and `.hermes/STATUS.md`. No code or test differed from `468a13b`.
+- **Tree:** clean at run time; this docs update came after the run.
+- **Earlier final run:** an earlier `final-gates` run on `468a13b` was superseded and its
+  folder replaced.
 
 | Gate | Command | Exit | Result |
 |---|---|---|---|
 | Preservation | `python3 -I scripts/roadmap/check_preservation.py` | 0 | 16/16 protected originals match `preservation-baseline.json` (SHA-256) |
-| Control coverage | `node scripts/roadmap/testid-audit.ts` | 0 | 260 UI test ids, 0 allow-listed, 0 never referenced by a test |
-| Unit | `npm test` | 0 | 152/152 pass |
+| Control coverage | `node scripts/roadmap/testid-audit.ts` | 0 | 263 UI test ids, 0 allow-listed, 0 never referenced by a test |
+| Unit | `npm test` | 0 | 157/157 pass |
 | Typecheck | `npm run typecheck` (app + tests/scripts/examples) | 0 | — |
 | Build | `npm run build` | 0 | `tsc --noEmit` + Vite (index, player, render pages) |
-| Browser e2e | `npm run test:e2e` (headless Chrome for Testing 155.0.8059.39, project-local profiles) | 0 | 129/129 pass |
-| CLI | `npm run test:cli` | 0 | 12/12 pass |
+| Browser e2e | `npm run test:e2e` (headless Chrome for Testing 155.0.8059.39, project-local profiles) | 0 | 132/132 pass |
+| CLI | `npm run test:cli` | 0 | 13/13 pass |
 | Wiz acceptance | `npm run test:wiz` | 0 | 16/16 pass |
 
 Failure buckets: none in this run. The historical baseline counts (43 unit, 20 browser,
@@ -66,6 +69,7 @@ Per-phase gate runs, each fresh, all exit 0 (`.hermes/evidence/roadmap/<label>/s
 | `phase4d-gates` | 141 | 118 | 8 | 16 |
 | `phase4e-gates` | 145 | 122 | 9 | 16 |
 | `phase4f-gates` | 152 | 129 | 12 | 16 |
+| `final-gates` (at `dfe27bb`) | 157 | 132 | 13 | 16 |
 
 ## 3. Matrix against the contract
 
@@ -91,7 +95,7 @@ exercises it. The ids and measurements for each row are in
 | Two-bone IK: target, bend direction, mix, unreachable / degenerate / mirrored | delivered | — |
 | Path constraints: author/edit, sampling/spacing, persistence/export | delivered | Checked against an independent arc-length sampler |
 | Cutout tools: mask/crop, pivot, overlap, patch, non-destructive | delivered | Flat-colour patch only. No hidden art is inferred |
-| Bring the Wiz-prep workflow into visible controls | **partial** | Mapped: polygon masks, pivots, patch, joint extension. **Not offered:** colour-threshold masks, flood-fill selection, speck removal (these need pixel-selection tools) |
+| Bring the Wiz-prep workflow into visible controls | delivered | Every prep step has a control: polygon masks, pivots, patch, joint extension, colour-threshold selection, flood fill (Shift+click adds), speck removal. Each uses the prep script's semantics and constants as defaults, and speck removal equals the script's rule run through Pillow. Selection cuts render in place with max diff 0 (`dfe27bb`) |
 | Demonstrate authoring, swaps and bent limbs via the UI | delivered | `npm run demo:phase2` on original procedural art |
 | Jointed Wiz v2 (optional, "may") | not produced | The generic tools are demonstrated on original art |
 
@@ -161,8 +165,10 @@ Export gates (contract §"Export gates") for every shipped output:
   - CLI render/mix ZIPs and GIFs are byte-identical to the editor's.
 - **Authorship:** Wiz greeting v2 and the demos were authored by scripts driving visible
   controls, not by a human animator. No claim is made about art quality or appeal.
-- **Not offered:** colour-threshold masks, flood fill, speck removal; weight smoothing or
-  mirroring; on-canvas add/delete of mesh vertices; automatic outline tracing.
+- **Pixel tools:** selections are pixel-exact (no antialiased edge, no feathering). Speck
+  removal handles faint isolated pixels only; there is no general pixel painting.
+- **Not offered:** weight smoothing or mirroring; on-canvas add/delete of mesh vertices;
+  automatic outline tracing.
 - **REA:** no REA MCP calls were made during the roadmap work. `docs/rea-evidence.md`
   covers only the original slice. All roadmap evidence is from the repo's own tests and
   the independent decoders named above.
