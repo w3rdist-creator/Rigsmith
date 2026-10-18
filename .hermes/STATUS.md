@@ -1,4 +1,23 @@
 TERMINAL_STATE: READY_FOR_HERMES_VERIFICATION
+Worker: claude-opus-5-5 (use-case milestone "Wiz v3, authored through the editor": review RV-001 … RV-008; no other agents/models)
+Hermes relays this handoff and adds no product-acceptance stage; this is a worker handoff, not a certification.
+State: implemented; gates passed at 251dd79; awaiting Hermes verification. Visual preference, timing and (g) are operator-owned.
+
+Record: docs/WIZ-V3-DELIVERY.md (commits, gates, per-finding results, artifacts, deviations, operator decisions)
+Commits: e425d5c (RV-002/004/005/006/007), c9c45dc (RV-003), dd08697 (RV-001/RV-008), 251dd79 (RV-003/RV-007 on Wiz,
+mix-frame exercised), then the docs commit with this file. Local only; nothing pushed.
+Latest fresh gates (.hermes/evidence/usecase-milestone/gates-251dd79/summary.txt, run 20261018T181350Z-67777,
+HEAD 251dd79, clean tree): preservation 16/16, unit 219/219, typecheck 0, build 0, e2e 165/165, cli 14/14,
+wiz 31/31, testid-audit 0 (306 ids, 70 allow-listed, 0 never interacted with), profiles 0 — all exit 0.
+Wiz originals: all 201 pre-milestone hashes re-checked after the last gate run, same file set (wiz-assets-sha-last-check.txt).
+Artifacts (git-ignored): .hermes/assets/wiz/v3-output/ (wiz-v3.rig.json, dialog exports) and v3-output/delivery/ (MANIFEST.json, 21 files).
+Partial: RV-008 bake command not implemented (decision record only); v3 Lottie refused (meshes + IK), no mesh support claimed.
+Open (operator-owned): RV-011 preference / timing baseline, criterion (g), v3 motion departures, baking, fallback-download UX,
+frame default, sleeve-hole sliver / elbow creases / neck blend, the thirty-minute human session; DRW-009 unchanged.
+Preview: not running (no owned vite/Chrome/ffmpeg processes left).
+
+---- History: post-review fix pass (superseded by the use-case milestone above) ----
+POST_REVIEW_STATE (historical): READY_FOR_HERMES_VERIFICATION
 Worker: claude-opus-5-5 (post-review fix pass on the Fable 5.1 findings FR-001 … FR-007; no other agents/models)
 Hermes relays this handoff and adds no product-acceptance stage; this is a worker handoff, not a certification.
 

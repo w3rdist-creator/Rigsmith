@@ -59,6 +59,12 @@ refused feature can still be exported after baking that feature into bone keys b
     lottie-web frame i+10 against editor frame i gives 81.6%. Both must exceed 5%.
   - This rig includes a non-uniformly scaled parent null (skewed children); lottie-web's
     canvas renderer matches it.
+- On the Wiz mascot (use-case review RV-008, `tests/acceptance/wiz-lottie.acceptance.test.ts`,
+  private assets): the flat, FK-only greeting-demo exports inside the subset, and every
+  one of its 72 frames is within the same budget for both the evaluator and lottie-web.
+  The meshed IK Wiz v3 is refused, naming its 4 IK constraints and 5 meshes. Numbers are
+  in `docs/WIZ-V3-DELIVERY.md`. No "bake constraints" command exists yet. A baked copy
+  would still be refused for its meshes.
 - **Not tested** in lottie-web's SVG or HTML renderers, After Effects, or any other Lottie
   player. The dialog states this.
 - No masks, mattes, shapes, text or expressions are written. One composition per
