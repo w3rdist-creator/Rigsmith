@@ -28,6 +28,8 @@ read-only test probe.
 | `mix <project> --from A --to B --at T --out f.zip [--duration S] [--missing setup\|hold] [--skin S] [--fps N]` | yes | transition sequence (stored mix duration unless `--duration`); identical bytes to the Mix dialog export |
 | `lottie <project> --anim A --out f.json [--skin S]` | no | Lottie supported subset (docs/lottie.md); exit 1 with every refusal when the rig is outside it; identical bytes to **Export Lottie…** |
 | `media <project> --format apng\|gif\|webm\|mp4 (--anim A \| --from A --to B --at T) --out f [render options] [--background #rrggbb]` | yes (+ ffmpeg for webm/mp4) | one animated file from the same PNG frames as `render` (docs/media.md). APNG/GIF: built in, the editor's encoders (GIF bytes identical to the editor's; APNG identical pixels). WebM (VP9 + alpha) / MP4 (H.264, no alpha, on `--background`, default white): need a local `ffmpeg` (or `RIGSMITH_FFMPEG`) with libvpx-vp9 / libx264, else exit 3. JSON includes the codec/alpha label and, for GIF, the alpha-loss counts |
+| `sequence <project> --name S --out f [--format zip\|apng\|gif\|webm\|mp4] [--skin S] [--fps N] [--scale X] [--padding P] [--background #rrggbb] [frame]` | yes (+ ffmpeg for webm/mp4) | renders a saved clip sequence (RV-009): ordered clips with repeat counts and the stored mix durations between them; ZIP bytes identical to the **Sequences…** dialog export with the same settings; JSON lists each step's start frame and frame count |
+| `set-sequence <project> --name S --steps "idle*2,greeting,idle" [--loop] --out p2` | no | creates or replaces a saved sequence; `name*N` = N plays (1–100); unknown animations or bad counts → exit 1, nothing written |
 | `add-image <project> --file x.png [--name n] --out p2` | no | adds a PNG (id derived from the name — reproducible) |
 | `replace-image <project> --image n --file x.png [--allow-resize] --out p2` | no | swaps pixels keeping the id (attachments, keys and skins follow); a size change needs `--allow-resize` |
 | `skin <project> --name S [--set att=image …] [--keyed att:fromImage=image …] --out p2` | no | creates/extends a skin (setup-image and keyed-image entries) |
@@ -77,6 +79,6 @@ limits, inverted range → exit 1 with nothing written; missing Chrome → exit 
 mid-render → exit 4, no output, no browser left running; `lottie` (subset export, refusal
 exit 1); `media` WebM/MP4 decoded by ffmpeg vs the PNG sequence (alpha_mode 1, measured
 error bounds, deterministic bytes), missing ffmpeg exit 3, Ctrl+C during the ffmpeg phase
-exit 4 with nothing left behind, also after the last frame was piped (stand-in encoder) (GIF/APNG CLI vs editor are checked in
+exit 4 with nothing left behind, also after the last frame was piped (stand-in encoder); `set-sequence` + `sequence` (RV-009: saved list, invalid step lists and unknown sequence → exit 1 with nothing written, ZIP byte-identical to the Sequences dialog export) (GIF/APNG CLI vs editor are checked in
 `tests/e2e/p4-media.e2e.test.ts`); authoring commands; the brand
 pipeline twice with identical manifests and recoloured-but-identical silhouettes.

@@ -21,6 +21,7 @@ import { buildDemoImages } from './demoArt.ts';
 import { ExportDialog } from './exportDialog.ts';
 import { MixDialog } from './mixDialog.ts';
 import { SequenceDialog } from './sequenceDialog.ts';
+import { GuideDialog } from './guideDialog.ts';
 import { ImportAnimDialog } from './importAnimDialog.ts';
 import { AtlasDialog } from './atlasDialog.ts';
 import { LottieDialog } from './lottieDialog.ts';
@@ -51,6 +52,7 @@ export class App {
   lottieDialog!: LottieDialog;
   cutout!: CutoutDialog;
   meshDialog!: MeshDialog;
+  guide!: GuideDialog;
   private statusEl!: HTMLElement;
   private toastEl!: HTMLElement;
   private statusTimer = 0;
@@ -70,6 +72,7 @@ export class App {
     this.lottieDialog = new LottieDialog(this);
     this.cutout = new CutoutDialog(this);
     this.meshDialog = new MeshDialog(this);
+    this.guide = new GuideDialog(this);
     this.storageReady = migrateLegacy()
       .then(async (moved) => {
         this.browserSaved = !!(await readStored(BROWSER_SAVE));
@@ -147,7 +150,8 @@ export class App {
     window.setTimeout(() => box.remove(), 12000);
   }
 
-  private guard(fn: () => void): void {
+  /** Runs an edit; a thrown error is reported instead of escaping (mutate() has rolled back). */
+  guard(fn: () => void): void {
     try {
       fn();
     } catch (e) {

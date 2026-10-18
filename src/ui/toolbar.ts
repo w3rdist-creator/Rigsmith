@@ -54,6 +54,7 @@ export function renderToolbar(app: App, root: HTMLElement, onHelp: () => void): 
       onionControls(app),
     ),
     h('div', { class: 'tb-spacer' }),
+    h('button', { 'data-testid': 'guide-open', title: 'Step-by-step checklist from one flat character PNG to a first idle (import, cut limbs, bones, mesh, idle)', onclick: () => app.guide.open() }, 'Flat-art guide…'),
     h('button', { class: 'accent', 'data-testid': 'load-demo', title: 'Open the built-in Tock demo rig', onclick: () => void app.loadDemo() }, 'Demo'),
     h('button', { 'data-testid': 'help', 'aria-label': 'Keyboard and mouse controls', title: 'Controls', onclick: onHelp }, '?'),
   );

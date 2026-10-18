@@ -200,6 +200,15 @@ button.transport.play.on { background: var(--animate); border-color: var(--anima
 
 dialog.help { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; max-width: 640px; }
 dialog.help::backdrop { background: rgba(0, 0, 0, 0.55); }
+/* Over the stage's left edge: the skeleton tree, inspector and timeline stay uncovered. */
+dialog.guide { position: fixed; inset: 80px auto auto 258px; margin: 0; width: 360px; max-height: max(260px, calc(100vh - 420px)); overflow: auto; z-index: 20; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45); }
+.guide-steps { margin: 0; padding-left: 18px; }
+.guide-step { margin: 0 0 10px; }
+.guide-step p { margin: 2px 0; font-size: 12px; }
+.guide-title { font-weight: 500; }
+.guide-mark { display: inline-block; width: 1.3em; color: var(--accent); }
+.guide-step.done .guide-title { color: #9fe3b4; }
+.guide-hint { border-left: 3px solid var(--accent); padding-left: 8px; }
 dialog.help h2 { margin: 0 0 10px; font-size: 16px; }
 dialog.help table { border-collapse: collapse; width: 100%; }
 dialog.help th { text-align: left; font-weight: 500; color: var(--accent); padding: 4px 14px 4px 0; vertical-align: top; font-size: 12px; white-space: nowrap; }

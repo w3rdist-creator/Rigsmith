@@ -1,0 +1,54 @@
+{
+  "comment": "RV-010 inputs for recreating the nine Wiz pieces through the Cut out piece dialog only. Source pixel coordinates of wiz_master.png (1024x1536, y down). Every value was read by eye from gridded zoom crops of the source (.hermes/evidence/usecase/rv010/views/, made by views/crop.py) — none was taken from prepared/*.png, manifest.json contours or bboxes. Fixed before the first run (pass 1); a later pass must be logged as a new pass, not edited in place.",
+  "provenance": {
+    "byEye": "read from the gridded source crops (sleeve_l, cuff_l, arm_l, arm_r, legs, full)",
+    "dialogDefault": "the dialog's documented default value",
+    "prepParameter": "a numeric choice copied from scripts/wiz/masks.json (prep-script parameter, not an output)"
+  },
+  "metric": {
+    "placement": "each piece is placed at its offset in a 1024x1536 transparent canvas: produced pieces at derived.offsetX/offsetY, prepared pieces at manifest parts[*].bbox x,y",
+    "alphaIoU": "|alphaA>0 AND alphaB>0| / |alphaA>0 OR alphaB>0|",
+    "visiblePixels": "the union of alpha>0 of the two pieces",
+    "visibleDiff": "each piece composited (straight alpha, source-over) on flat RGB 128,128,128; per pixel the maximum absolute channel difference; pass when at least 99% of visible pixels differ by at most 8/255",
+    "iouPass": ">= 0.98",
+    "synthesized": "derived.synthesized vs manifest limbs[*].syntheticPx (arms, legs) and limbs[*].holePx (sleeve holes); pass within 25%",
+    "body": "the attachment's final remainder image (full 1024x1536, offset 0,0) vs body.png"
+  },
+  "global": {
+    "overlap": { "value": 0, "provenance": "chosen: the prepared pieces have no grown overlap (only hidden joint extension), so the dialog default of 4 px would add visible duplicate pixels at every cut line" },
+    "despeckleFirst": { "faintBelow": 100, "solidAbove": 200, "distance": 6, "provenance": "dialogDefault (the same numbers as the prep script's speck rule)" },
+    "order": "despeckle the master, then arm_l, arm_r, leg_l, leg_r (polygon cuts on the current remainder), then hand_l, hand_r (Select colour on the remainder after the arms are gone), body = final remainder"
+  },
+  "polygonCuts": [
+    {
+      "name": "arm_l", "parent": "root",
+      "polygon": [[184, 760], [209, 747], [266, 776], [272, 780], [255.5, 807], [262, 822], [244, 846], [222, 875], [138, 828], [150, 800], [177, 767]],
+      "pivot": [240, 761], "extend": 60,
+      "provenance": "byEye: cut lines follow the orange stick's top edge at the sleeve rim (214,746)-(266,776) and bottom edge at the glove cuff (150,835)-(206,866); sides facing background are loose; pivot = midpoint of the top edge; extend 60 = prepParameter topExtension",
+      "patchTrial": { "pick": [282, 795], "provenance": "byEye: a pixel of the visible pink sleeve interior beside the stick" }
+    },
+    {
+      "name": "arm_r", "parent": "root",
+      "polygon": [[815, 745], [843, 768], [870, 782], [889, 829], [802, 873.5], [765, 832], [771, 817], [751, 781]],
+      "pivot": [787, 761], "extend": 60,
+      "provenance": "byEye: top edge (762,775)-(812,747), cuff edge (818,865)-(877,835); pivot = midpoint of the top edge; extend 60 = prepParameter topExtension",
+      "patchTrial": { "pick": [745, 795], "provenance": "byEye: visible sleeve interior beside the stick" }
+    },
+    {
+      "name": "leg_l", "parent": "root",
+      "polygon": [[386, 1110], [458, 1134], [505, 1150], [505, 1536], [195, 1536], [195, 1250], [360, 1125]],
+      "pivot": [424, 1122.5], "extend": 50,
+      "provenance": "byEye: cut line along the orange top edge under the bun (400,1115)-(448,1130); everything below (stick + shoe) is loose against background; pivot = midpoint of the top edge; extend 50 = prepParameter topExtension"
+    },
+    {
+      "name": "leg_r", "parent": "root",
+      "polygon": [[559, 1135.5], [520, 1150], [520, 1536], [845, 1536], [845, 1250], [660, 1125], [636, 1111]],
+      "pivot": [597, 1123.3], "extend": 50,
+      "provenance": "byEye: cut line (570,1132)-(623,1115); pivot = midpoint; extend 50 = prepParameter topExtension"
+    }
+  ],
+  "selectionCuts": [
+    { "name": "hand_l", "parent": "arm_l", "seed": [100, 960], "tolerance": 255, "minAlpha": 0, "contiguous": true, "pivot": [178, 850.4], "provenance": "byEye: seed on the white palm; tolerance 255 + flood fill = the connected matte region once the arm stick is cut away; pivot = midpoint of the cuff edge" },
+    { "name": "hand_r", "parent": "arm_r", "seed": [920, 960], "tolerance": 255, "minAlpha": 0, "contiguous": true, "pivot": [847.5, 850], "provenance": "byEye: as hand_l" }
+  ]
+}

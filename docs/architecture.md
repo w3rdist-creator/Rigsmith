@@ -121,6 +121,7 @@ files that declare version 1 but contain v2 fields, and versions newer than 2.
 | `Animation.slots[attId].deform` | deform keys: `value` = per-vertex offsets `[dx0,dy0,…]` in image pixels (2 per vertex), interpolated |
 | `skins: [{id, name, entries: [{attachmentId, imageId, from?}]}]` | attachment sets: an entry without `from` replaces the attachment's setup image wherever it shows (including through an image key that shows the setup image); an entry with `from` replaces that keyed image. At most one entry per (attachment, from) |
 | `mixes: [{from, to, duration}]` | stored crossfade durations per ordered animation pair (seconds, 0–10; default 0.2 s when absent) |
+| `sequences: [{id, name, steps: [{animId, repeat}], loop}]` | saved clip sequences (RV-009): ordered animations, each played `repeat` (1–100) times; transitions use the stored `mixes` durations; `loop` = exported animated files loop. Deleting an animation removes its steps, with a repair note (the sequence itself stays, possibly empty) |
 
 Evaluation order (`src/model/evaluate.ts`, shared by the viewport, onion skin, sequence
 export and runtime export): sample local pose → IK constraints (array order) → path
@@ -251,9 +252,40 @@ coverage depend on previously drawn frames.
   the CLI. WebM (VP9 alpha) / MP4 (H.264, no alpha) are CLI-only via a local ffmpeg
   (`scripts/lib/rigsmith-api.ts`). Details: docs/media.md.
 
+## Motion reuse and onboarding (RV-009, RV-012)
+
+- **Clip sequences** (`src/model/clipSequence.ts`): a sequence is scheduled at the export
+  rate — each play of a step is `max(1, round(duration · fps))` frames, steps follow each
+  other on one clock, and step *i* blends in from the live pose over the stored mix
+  duration of (step *i−1* → step *i*), evaluated by the Mix dialog's `evaluateMix`. The
+  Sequences… dialog and `rigsmith sequence` render the same frames (the CLI test checks
+  byte-identical ZIPs). The dialog defaults to the project frame when one is set; the CLI
+  uses it with `--frame project` (its default is `fit`, as for the other render commands).
+- **Animation import** (`src/model/animImport.ts`): animations from another project file
+  are copied with an explicit source → target map for bones, attachments, constraints
+  and images (exact-name defaults, every entry changeable or skippable). The dialog shows
+  a dry-run report (unmatched objects, keys that would be dropped) before Import, which
+  is one undo step. Key values are copied unchanged (they are local to the bone).
+- **Key clipboard** (`src/model/clipboard.ts`): copied keys are stored with the *names* of
+  what they reference; pasting resolves same id + name, else the unique same name, and
+  reports what does not resolve instead of guessing.
+- **Flat-art guide** (`src/model/onboarding.ts`, `src/ui/guideDialog.ts`): a non-modal
+  checklist on top of the existing tools. Its progress is **derived from the project**
+  (an original image exists; the art attachment is on a bone; a `cleanup` image is in the
+  art's lineage; pieces with / without a cut polygon; the art's mesh has weights; an
+  animation has keys). Nothing is stored, so the file format is unchanged, old files need
+  no migration, and undo, redo and autosave recovery show the right state by
+  construction. Each guide action is one undo step: root bone + attach, grid mesh + auto
+  weights (to the art's bone and the bones below it), and a starter idle (2 s loop, root
+  bob of 1 % of the art height, ±3° sway on bones whose origin is above the art's centre).
+  The cut steps open the existing Cut out piece… dialog with presets (overlap 0, extend 40
+  for limbs; Select colour at tolerance 255 for hands) and a note with the RV-010 limits.
+
 ## Persistence
 
 - Save = download of `<name>.rig.json` (images embedded). Open = file picker or drag &
   drop a `.json` onto the canvas.
-- "Save to browser" stores the same JSON in `localStorage` (`rigsmith:project:v1`); a
-  `QuotaExceededError` is shown as an error telling the user to download instead.
+- Browser storage is IndexedDB (database `rigsmith`, store `kv`; `src/ui/storage.ts`):
+  `browser-save` ("Save to browser"), `autosave` (offered for recovery after a reload),
+  and `clipboard` (the last copied keys, `rigsmith.keys` v1, so they survive a reload and
+  can be pasted into another project). The old `localStorage` copies are migrated once.

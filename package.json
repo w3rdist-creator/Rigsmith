@@ -20,6 +20,8 @@
     "wiz:v3": "node scripts/roadmap/wiz-v3.ts",
     "wiz:v3:deliver": "node scripts/roadmap/wiz-v3-deliver.ts",
     "wiz:motion-reuse": "node scripts/roadmap/wiz-motion-reuse.ts",
+    "wiz:cutout-rv010": "node scripts/roadmap/wiz-cutout-rv010.ts",
+    "wiz:guide-rv012": "node scripts/roadmap/wiz-guide-rv012.ts",
     "gates": "sh scripts/roadmap/run-gates.sh",
     "demo:phase2": "node scripts/roadmap/demo-phase2.ts",
     "demo:phase3": "node scripts/roadmap/demo-phase3.ts",

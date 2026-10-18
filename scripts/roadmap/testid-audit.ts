@@ -48,7 +48,7 @@ export function uiTestIds(): Map<string, string> {
     // const testId = cond ? 'a' : `b-${…}` — every literal on the line.
     for (const m of text.matchAll(/\btestId\s*=\s*([^;\n]*)/g)) for (const id of literals(m[1])) add(id, f);
     // Helper calls: the first id literal argument is the test id.
-    for (const m of text.matchAll(/\b(?:keyToggle|checkbox|select|textField|num|check|keyable|numberlessText|reselectNum|speckNum|tool|animSelect|labeledSelect|row|frameSelect|frameWarning)\((?=([^\n]*))/g)) {
+    for (const m of text.matchAll(/\b(?:keyToggle|checkbox|select|textField|num|check|keyable|numberlessText|reselectNum|speckNum|tool|animSelect|labeledSelect|row|frameSelect|frameWarning|btn)\((?=([^\n]*))/g)) {
       const id = literals(m[1])[0];
       if (id) add(id, f);
     }

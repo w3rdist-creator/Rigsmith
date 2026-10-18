@@ -302,7 +302,8 @@ Builder outputs in `.hermes/assets/wiz/v3-output/`:
   - `sequence.json` records `frame`.
 - **Not done (non-goals or later priorities):**
   - new art, blinks or mouths;
-  - RV-009 (motion reuse), RV-010, RV-012 onward;
+  - RV-009 (motion reuse), RV-010, RV-012 onward (RV-009/010/012 were delivered
+    later; see docs/RV-009-010-012-DELIVERY.md);
   - constraint baking;
   - mesh support in Lottie;
   - renderer changes.

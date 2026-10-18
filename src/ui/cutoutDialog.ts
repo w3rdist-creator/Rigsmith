@@ -19,6 +19,14 @@ import { imagePixels } from './atlasDialog.ts';
 import { append, clear, h } from './dom.ts';
 
 type Mode = 'polygon' | 'rect' | 'pivot' | 'pick' | 'wand';
+/** Starting values instead of the defaults (the onboarding guide, RV-012), plus a visible note. */
+export interface CutPreset {
+  mode?: Mode;
+  overlap?: number;
+  extend?: number;
+  tolerance?: number;
+  hint?: string;
+}
 const VIEW_W = 520;
 const VIEW_H = 400;
 
@@ -51,6 +59,7 @@ export class CutoutDialog {
   private specks: SpeckOptions = { ...DEFAULT_SPECKS };
   private exact: { id: string; px: Rgba } | null = null;
   private speckCache: { key: string; count: number } | null = null;
+  private hint = '';
 
   constructor(app: App) {
     this.app = app;
@@ -63,7 +72,7 @@ export class CutoutDialog {
     return this.dlg.open;
   }
 
-  open(attId: string): void {
+  open(attId: string, preset: CutPreset = {}): void {
     const p = this.app.ed.project;
     const att = p.attachments.find((a) => a.id === attId);
     if (!att) return;
@@ -88,8 +97,16 @@ export class CutoutDialog {
     this.minAlpha = 0;
     this.contiguous = true;
     this.specks = { ...DEFAULT_SPECKS };
+    if (preset.mode) this.mode = preset.mode;
+    if (preset.overlap !== undefined) this.overlap = preset.overlap;
+    if (preset.extend !== undefined) this.extend = preset.extend;
+    if (this.extend > 0) this.behind = true;
+    if (preset.tolerance !== undefined) this.tolerance = preset.tolerance;
+    this.hint = preset.hint ?? '';
+    this.dlg.scrollTop = 0;
     this.render();
     this.dlg.showModal();
+    this.dlg.scrollTop = 0;
     void this.loadExact();
   }
 
@@ -135,6 +152,18 @@ export class CutoutDialog {
   }
 
   private render(): void {
+    // The dialog can be taller than the window and scroll. Rebuilding the body would move
+    // the scroll offset — and the canvas under the pointer — after each click (RV-012 on
+    // the Wiz art: every outline point after the first landed ~124 CSS px off). Keep it.
+    const scroll = this.dlg.scrollTop;
+    try {
+      this.renderBody();
+    } finally {
+      this.dlg.scrollTop = scroll;
+    }
+  }
+
+  private renderBody(): void {
     const src = this.source();
     clear(this.body);
     if (!src) return;
@@ -185,6 +214,7 @@ export class CutoutDialog {
     const reselectNum = (testId: string, label: string, value: number, set: (v: number) => void, max: number) => num(testId, label, value, (v) => (set(Math.min(max, Math.max(0, Math.round(v) || 0))), this.reselect()), max);
     append(this.body,
       h('p', { class: 'dim' }, `Source: ${im.name} (${im.width}×${im.height}) — never modified. The piece keeps its exact position.`),
+      this.hint ? h('p', { class: 'hint guide-hint', 'data-testid': 'cut-guide-hint' }, this.hint) : null,
       h('div', { class: 'row-key' },
         modeBtn('polygon', 'Polygon', 'Click to add outline points'),
         modeBtn('rect', 'Rectangle', 'Drag a crop rectangle'),
