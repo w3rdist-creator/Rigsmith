@@ -40,6 +40,8 @@ declare const process: {
   exitCode: number | undefined;
   stdout: { write(s: string | Uint8Array): boolean };
   stderr: { write(s: string | Uint8Array): boolean };
+  on(event: 'SIGINT' | 'SIGTERM', fn: () => void): void;
+  execPath: string;
 };
 
 declare module 'node:assert/strict' {
@@ -86,6 +88,7 @@ declare module 'node:fs' {
   export function copyFileSync(src: string, dest: string): void;
   export function statSync(path: string): { size: number; isDirectory(): boolean; isFile(): boolean };
   export function mkdtempSync(prefix: string): string;
+  export function renameSync(from: string, to: string): void;
 }
 
 declare module 'node:path' {
@@ -96,6 +99,7 @@ declare module 'node:path' {
     basename(p: string, ext?: string): string;
     extname(p: string): string;
     relative(from: string, to: string): string;
+    isAbsolute(p: string): boolean;
     sep: string;
   }
   const path: Path;
@@ -116,7 +120,7 @@ declare module 'node:child_process' {
   }
   export function spawn(cmd: string, args: readonly string[], opts?: { cwd?: string; stdio?: readonly ('ignore' | 'pipe' | 'inherit')[]; env?: Record<string, string | undefined> }): ChildProcess;
   export function execFileSync(cmd: string, args: readonly string[], opts?: { cwd?: string; encoding?: 'utf8'; stdio?: readonly ('ignore' | 'pipe' | 'inherit')[]; maxBuffer?: number }): string;
-  export function spawnSync(cmd: string, args: readonly string[], opts?: { cwd?: string; encoding?: 'utf8'; maxBuffer?: number; input?: string | Uint8Array }): { status: number | null; stdout: string; stderr: string; error?: Error };
+  export function spawnSync(cmd: string, args: readonly string[], opts?: { cwd?: string; encoding?: 'utf8'; maxBuffer?: number; input?: string | Uint8Array; env?: Record<string, string | undefined> }): { status: number | null; stdout: string; stderr: string; error?: Error };
 }
 
 declare module 'node:net' {

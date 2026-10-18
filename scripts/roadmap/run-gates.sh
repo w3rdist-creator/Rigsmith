@@ -20,5 +20,6 @@ run unit npm test
 run typecheck npm run typecheck
 run build npm run build
 run e2e npm run test:e2e
+run cli npm run test:cli
 run wiz npm run test:wiz
 echo "saved to $OUT"

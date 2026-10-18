@@ -1,0 +1,8 @@
+{
+  "base": { "primary": "#4a6cf7", "secondary": "#ffd166", "accent": "#ef476f", "ink": "#1d1f2b" },
+  "brands": [
+    { "name": "tidewater", "palette": { "primary": "#118ab2", "secondary": "#e0fbfc", "accent": "#06d6a0", "ink": "#073b4c" } },
+    { "name": "ember", "palette": { "primary": "#d1495b", "secondary": "#edae49", "accent": "#00798c", "ink": "#30343f" } },
+    { "name": "grove", "palette": { "primary": "#2d6a4f", "secondary": "#d8f3dc", "accent": "#f4a261", "ink": "#1b4332" } }
+  ]
+}
