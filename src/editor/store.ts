@@ -3,7 +3,7 @@
 import { playbackTime, snapToFrame } from '../model/animation.ts';
 import type { Frame } from '../model/evaluate.ts';
 import { evaluate } from '../model/evaluate.ts';
-import { History } from '../model/history.ts';
+import { deepEqualJson, History, shareUnchanged } from '../model/history.ts';
 import type { KeyClipboard, KeyRef } from '../model/keys.ts';
 import { parseLane, sameRef, validRefs } from '../model/keys.ts';
 import type { Mat } from '../model/math.ts';
@@ -69,7 +69,8 @@ export class Editor {
   playing = false;
   showBones = true;
   dirty = false;
-  readonly history = new History<Project>();
+  /** Snapshots share unchanged subtrees; undo/redo hand back deep copies (review P3-2). */
+  readonly history = new History<Project>({ share: shareUnchanged, restore: cloneProject });
 
   private listeners = new Set<(r: ChangeReason) => void>();
   private gestureBefore: Project | null = null;
@@ -100,6 +101,12 @@ export class Editor {
       this.emit('project');
       throw e;
     }
+    if (deepEqualJson(this.project, before)) {
+      // Nothing changed (after repairs): no undo step, dirty state unchanged.
+      this.sanitize();
+      this.emit('project');
+      return;
+    }
     this.history.record(label, before);
     this.dirty = true;
     this.sanitize();
@@ -118,12 +125,12 @@ export class Editor {
     this.emit('project');
   }
 
-  /** Commits the gesture as a single undo step (no-op if nothing changed). */
+  /** Commits the gesture as a single undo step (no-op if nothing changed, e.g. dragged back to the start). */
   endGesture(label: string): void {
     const before = this.gestureBefore;
     this.gestureBefore = null;
-    if (before && this.gestureChanged) {
-      this.lastRepairs = repairReferences(this.project);
+    if (before && this.gestureChanged) this.lastRepairs = repairReferences(this.project);
+    if (before && this.gestureChanged && !deepEqualJson(this.project, before)) {
       this.history.record(label, before);
       this.dirty = true;
       this.emit('project');

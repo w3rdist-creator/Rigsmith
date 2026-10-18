@@ -67,6 +67,15 @@ between snapshots. Canvas drags and timeline key drags are gestures: a snapshot 
 pointer-down, live edits, one history entry on pointer-up (none if nothing changed; Esc
 cancels and restores). Selection, view, playhead and playback are not undoable.
 
+Memory (drwdmrs3 review P3-2): an action (or gesture) that leaves the project
+structurally unchanged after `repairReferences` records no step. Each recorded snapshot
+shares every subtree equal to the previous snapshot's (`shareUnchanged`), so undo/redo
+hand back a deep copy (`cloneProject`) and shared parts are never mutated. Measured on
+the review's 300-bone / 9 920-key / 2 025-vertex rig, 200 single-key edits retain about
+7 MB instead of about 1 121 MB; the costs are about 3 ms more per edit (≈ 12.7 ms) and
+≈ 16 ms per undo/redo (the copy). Depth stays 200 steps; nothing is dropped by size.
+Numbers: `.hermes/evidence/post-review/first-fix/{pre,post}/history-perf.txt`.
+
 ## Project format (`rigsmith.project`, version 1)
 
 ```jsonc

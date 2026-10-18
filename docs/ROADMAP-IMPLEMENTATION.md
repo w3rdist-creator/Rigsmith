@@ -28,7 +28,7 @@ Legend: **absent** · **in progress** · **delivered** (visible control + exerci
   a project uses no v2 feature, so v1 files re-save byte-identically; otherwise v2.
   v1 readers reject v2 files (version check) — documented, not "backwards compatible".
   Files whose content needs v2 but declare v1 are rejected.
-- **Undo** snapshots use a generic deep clone that shares only immutable `ImageAsset`s.
+- **Undo** snapshots use a generic deep clone that shares only immutable `ImageAsset`s; since the drwdmrs3 fix pass (P3-2) consecutive snapshots also share unchanged subtrees and no-op actions record no step (`docs/architecture.md`, Undo/redo).
 - **Independent references**: tests carry their own PNG decoder and compositor that do
   not import `src/model`.
 
