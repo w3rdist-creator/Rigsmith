@@ -9,7 +9,7 @@ Hermes verification has NOT been performed; this is a worker handoff, not a cert
 - Delivery report: docs/DELIVERY.md (implemented/partial/absent checklist, commands, results, gaps, residual uncertainty)
 - REA record: docs/rea-evidence.md (12 calls, Evidence IDs, blockers); raw bundle .hermes/evidence/rea/rea-evidence-bundle.json (11 records)
 - Provenance: docs/provenance.md · Architecture/format: docs/architecture.md · Gates: AGENTS.md · Run/test: README.md
-- Preview: http://127.0.0.1:47613/ (vite preview of final dist, loopback only; started by the worker session; restart with `npm run build && npm run preview`)
+- Preview: NOT RUNNING. The worker's `vite preview` on http://127.0.0.1:47613/ served the final build (verified HTTP 200 for index.html and index-bftQBcAc.js), then was terminated externally (exit 143 / SIGTERM). Restart with `npm run build && npm run preview`.
 
 ## Final gate results (2026-10-17/18 UTC, build dist/assets/index-bftQBcAc.js sha256 64586339e4783b57c169948f0b0e6b1bbbbbe7c1fad35f2c5cba8baebf5096fb)
 | Gate | Command | Result | Raw output |

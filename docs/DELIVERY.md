@@ -107,10 +107,11 @@ and by REA controlled scenario `ev_19ca685c…` (11/11 steps, 0 console/page err
 
 ## Preview
 
-`http://127.0.0.1:47613/` (`?demo` opens the playing demo) — `vite preview` of the final
-`dist/`, bound to 127.0.0.1 only, verified HTTP 200 serving `index-bftQBcAc.js`. It was
-started by the worker session and may stop when that session ends; restart with
-`npm run build && npm run preview`.
+**Not running at handoff.** The worker's `vite preview` of the final `dist/` on
+`http://127.0.0.1:47613/` (loopback only) was verified HTTP 200 serving
+`index-bftQBcAc.js`, then terminated externally (exit 143 / SIGTERM). Restart with
+`npm run build && npm run preview`, then open `http://127.0.0.1:47613/?demo` for the
+playing demo.
 
 ## Provenance
 
