@@ -9,10 +9,11 @@ import { describe, it } from 'node:test';
 import type { Rgba } from '../../src/model/cutout.ts';
 import { DEFAULT_SPECKS, cutOutMask, dilateMask, findSpecks, maskBounds, patchBehindMask, removeSpecks, selectColour } from '../../src/model/cutout.ts';
 import { parseProject, serializeProject } from '../../src/model/format.ts';
+import { EVIDENCE } from '../support/evidence.ts';
 import { encodePng } from '../support/png-encode.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
-const OUT = path.join(ROOT, '.hermes/evidence/roadmap/unit-cutout-select');
+const OUT = path.join(EVIDENCE, 'roadmap/unit-cutout-select');
 mkdirSync(OUT, { recursive: true });
 
 /** Two same-coloured blobs (not touching), a near colour, a gradient, faint specks. */

@@ -6,13 +6,14 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { EVIDENCE } from '../support/evidence.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const SCRIPT = path.join(ROOT, 'scripts/roadmap/run-gates.sh');
 
 function runWithShims(failing: 'none' | 'npm' | 'python3'): { status: number | null; out: string; summary: string } {
-  mkdirSync(path.join(ROOT, '.hermes/evidence'), { recursive: true });
-  const dir = mkdtempSync(path.join(ROOT, '.hermes/evidence/tmp-gates-'));
+  mkdirSync(EVIDENCE, { recursive: true });
+  const dir = mkdtempSync(path.join(EVIDENCE, 'tmp-gates-'));
   try {
     const bin = path.join(dir, 'bin');
     mkdirSync(bin);

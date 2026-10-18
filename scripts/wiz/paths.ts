@@ -10,7 +10,8 @@ export const SOURCE = path.join(WIZ, 'source/wiz_master.png');
 export const PREPARED = path.join(WIZ, 'prepared');
 export const OUTPUT = path.join(WIZ, 'output');
 export const PROJECT_FILE = path.join(OUTPUT, 'wiz.rig.json');
-export const EVIDENCE = path.join(ROOT, '.hermes/evidence/wiz');
+// RIGSMITH_EVIDENCE (see tests/support/evidence.ts) redirects raw test outputs.
+export const EVIDENCE = path.join(process.env.RIGSMITH_EVIDENCE ? path.resolve(process.env.RIGSMITH_EVIDENCE) : path.join(ROOT, '.hermes/evidence'), 'wiz');
 
 export function loadManifest(): Manifest {
   return JSON.parse(readFileSync(path.join(PREPARED, 'manifest.json'), 'utf8')) as Manifest;

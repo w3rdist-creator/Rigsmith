@@ -8,10 +8,10 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { GIF_MAX_FPS, MediaCancelled, encodeAnimated, gifDelays, mediaErrors } from '../../src/model/media.ts';
 import { ffprobe, hasFfmpeg, pillow } from '../support/media-check.ts';
+import { EVIDENCE } from '../support/evidence.ts';
 import { encodePng } from '../support/png-encode.ts';
 
-const ROOT = path.resolve(import.meta.dirname, '../..');
-const OUT = path.join(ROOT, '.hermes/evidence/roadmap/unit-media');
+const OUT = path.join(EVIDENCE, 'roadmap/unit-media');
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 

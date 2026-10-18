@@ -7,8 +7,8 @@ import net from 'node:net';
 import path from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 
-export const ROOT = path.resolve(import.meta.dirname, '../..');
-export const EVIDENCE = path.join(ROOT, '.hermes/evidence');
+export { EVIDENCE, ROOT } from '../support/evidence.ts';
+import { EVIDENCE, ROOT } from '../support/evidence.ts';
 export const CFT =
   process.env.RIGSMITH_CFT ??
   '/Users/w3rd/chrome-for-testing/chrome/mac_arm-155.0.8059.39/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
