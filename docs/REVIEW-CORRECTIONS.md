@@ -11,6 +11,29 @@ New tests: `tests/unit/review-corrections.test.ts` (15), `tests/e2e/review-corre
 (10), one CLI case (`tests/cli/cli.test.ts`, "wave at 120 fps, scale 0.5 (LP-004)"), and
 the mix cases in `tests/unit/reference-constraints.test.ts`.
 
+**Gates.** Fresh run on `e9e50d0` with a clean tree
+(`.hermes/evidence/review-corrections/gates-e9e50d0/summary.txt`, run
+20261018T215414Z-68031):
+
+| Gate | Result |
+|---|---|
+| preservation | 0 |
+| unit | 256/256 |
+| typecheck | 0 |
+| build | 0 |
+| e2e | 194/194 |
+| cli | 15/15 |
+| wiz | 31/31 |
+| testid-audit | 0 (368 ids, 92 allow-listed, 0 never interacted with) |
+| profiles | 0 |
+
+ALL GATES PASSED.
+- The first run, on `d1a9061`, failed **testid-audit only**. Three new read-only notices
+  (`guide-scope`, `imp-driven`, `imp-rig`) were not in the allow-list. They were added with
+  reasons in `e9e50d0`, following the existing convention for read-only containers.
+- **Wiz originals.** All 201 pre-milestone hashes were re-checked after the last gate run
+  and are OK, with an identical file set (`wiz-assets-sha-check-e9e50d0.txt`).
+
 **Red on the reviewed commit.** The new e2e file was run against a `git archive` build of
 `40ad69c`, in `head-40ad69c/` in the evidence directory: 9 of 10 failed
 (`e2e-review-corrections-on-head.txt`).

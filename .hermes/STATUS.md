@@ -1,4 +1,25 @@
 TERMINAL_STATE: READY_FOR_HERMES_VERIFICATION
+Worker: claude-opus-5-5 (Fable review corrections LP-001 … LP-014 on the later priorities; no other agents/models)
+This is a worker handoff, not a certification. Status: corrections implemented, awaiting Hermes verification;
+product acceptance and the operator decisions below are not the worker's.
+
+Record: docs/REVIEW-CORRECTIONS.md (disposition + evidence per finding, HEAD red check, operator decisions).
+Commits: d1a9061 (corrections), e9e50d0 (test-id allow-list for three read-only notices), then the docs commit
+with this file. Local only; nothing pushed.
+Latest fresh gates (.hermes/evidence/review-corrections/gates-e9e50d0/summary.txt, run 20261018T215414Z-68031,
+HEAD e9e50d0, clean tree): preservation 0, unit 256/256, typecheck 0, build 0, e2e 194/194, cli 15/15, wiz 31/31,
+testid-audit 0 (368 ids, 92 allow-listed, 0 never interacted with), profiles 0: ALL GATES PASSED.
+The run on d1a9061 failed testid-audit only (the three notices were not allow-listed).
+Wiz originals: 201/201 hashes OK after the last gate run, identical file set (wiz-assets-sha-check-e9e50d0.txt).
+Fixed: LP-001 (override warning + opt-in mix-0 key; default off), LP-002, LP-004 (software-raster exports,
+editor x3 = CLI at scale 0.5; mechanism not established), LP-006 … LP-012, paste retarget, RV-008 wording.
+Message only: LP-003 (no chunked CLI). Not changed: LP-005 (operator). Carried: LP-013, LP-014, RV-008 bake, RV-011.
+LP-001 acceptance (2) did not hold as written (body scale moves the IK target; 4.85 deg range); a substitute
+proof (arm_r skipped vs not: 1.1e-13 deg) is recorded. Export bytes changed with LP-004; FR-003 budgets recalibrated.
+Preview: not running (no owned vite/Chrome/ffmpeg processes left).
+
+---- History: RV-009/010/012 (superseded by the review corrections above) ----
+RV009_012_STATE (historical): READY_FOR_HERMES_VERIFICATION
 Worker: claude-opus-5-5 (approved later priorities RV-009, RV-010 → RV-012; no other agents/models)
 This is a worker handoff, not a certification. Status: delivered, pending external verification; the
 product review belongs to the next Fable stage.
