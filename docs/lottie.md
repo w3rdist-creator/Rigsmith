@@ -45,8 +45,21 @@ refused feature can still be exported after baking that feature into bone keys b
   - Control: the unskinned file compared with skinned frames gives 23.1% over tolerance,
     which shows the comparison detects differences.
   - The CLI output is byte-identical to the dialog's file.
-- **Not tested** in lottie-web, After Effects, or any other Lottie player; none is
-  available offline here. The dialog states this. Players differ in how they handle
-  parented nulls with non-uniform scale (skew), and this rig uses one.
+- Third-party player (same browser test, FR-001): the dialog-exported JSON is played by
+  **lottie-web 5.13.0**, canvas renderer, in the isolated headless Chrome for Testing.
+  - lottie-web is a pinned `devDependency` only (MIT; installed with `--ignore-scripts`).
+    The test injects `node_modules/lottie-web/build/player/lottie_canvas.js` into a blank
+    page; nothing in `src/` imports it and it is not in `dist/`.
+  - The canvas is the sequence geometry (w × h, dpr 1); each frame is
+    `goToAndStop(frame, true)` and read back with `toDataURL`.
+  - Budget, declared before the first run: per frame ≤ 0.5% of covered px over tolerance
+    24 and mean ≤ 1.5. Measured: 0 of 206 221 covered px over tolerance on all 30 frames,
+    for both the default images and skin `alt` (worst mean 0.002).
+  - Controls: the unskinned file against the skinned frames gives 23.0% over tolerance;
+    lottie-web frame i+10 against editor frame i gives 81.6%. Both must exceed 5%.
+  - This rig includes a non-uniformly scaled parent null (skewed children); lottie-web's
+    canvas renderer matches it.
+- **Not tested** in lottie-web's SVG or HTML renderers, After Effects, or any other Lottie
+  player. The dialog states this.
 - No masks, mattes, shapes, text or expressions are written. One composition per
   animation; no mixing.

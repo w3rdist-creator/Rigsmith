@@ -233,7 +233,8 @@ coverage depend on previously drawn frames.
 - `src/model/lottie.ts` writes a Lottie *subset* (bones → parented null layers, flat
   images → image layers, exact easing mapping; discrete keys and skins → in/out-point
   layer runs) and refuses IK, paths, meshes, deform/draw-order/constraint keys with named
-  diagnostics. Verified only by an in-repo evaluator (`tests/support/lottie-eval.ts`).
+  diagnostics. Verified by an in-repo evaluator (`tests/support/lottie-eval.ts`) and,
+  frame by frame, by lottie-web 5.13.0's canvas renderer (test-only devDependency).
   Details: docs/lottie.md.
 - `src/model/media.ts` turns the PNG-sequence frames into APNG (lossless) or GIF (global
   palette, 1-bit alpha, centisecond delays); pure TS, shared by the export dialog and

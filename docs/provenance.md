@@ -36,6 +36,7 @@ module-preload helper Vite injects (part of Vite, MIT).
 | postcss, nanoid, picocolors, picomatch, fdir, tinyglobby, source-map-js, detect-libc | see package-lock | MIT / ISC / BSD-3-Clause / Apache-2.0 | Vite transitive deps |
 | typescript | 5.9.3 | Apache-2.0 | type checking |
 | playwright-core | 1.64.1 | Apache-2.0 | drives the isolated Chrome for Testing in e2e tests (no bundled browser download used) |
+| lottie-web | 5.13.0 (exact pin) | MIT | test-only third-party Lottie player: `tests/e2e/p4-lottie.e2e.test.ts` injects `build/player/lottie_canvas.js` into a blank page to play the exported Lottie (post-review FR-001). Installed with `--ignore-scripts`; not imported by `src/`, not in `dist/` |
 
 Tooling used but not vendored: Node 25.9.0 (built-in `node:test`, type stripping, `zlib`),
 Chrome for Testing 155.0.8059.39 (pre-installed on the Mac mini), REA 6.4.0

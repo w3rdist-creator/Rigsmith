@@ -47,7 +47,7 @@ export function lottieDiagnostics(project: Project, anim: Animation): LottieDiag
   for (const im of project.images) if (im.mime !== 'image/png') err('image format', im.name, `${im.name} is ${im.mime}; only PNG assets are embedded.`);
   const discrete = Object.values(anim.slots ?? {}).some((s) => s.visible?.length || s.image?.length);
   if (discrete) out.push({ level: 'note', feature: 'visibility / image keys', item: anim.name, message: 'Exported as separate image layers switched by in/out points: exact at whole frames; a key between frames takes effect at the next frame (as in the PNG sequence).' });
-  out.push({ level: 'note', feature: 'validation', item: anim.name, message: 'Fidelity is verified against Rigsmith’s own frames by an in-repo Lottie subset evaluator only; not tested in lottie-web, After Effects or other players.' });
+  out.push({ level: 'note', feature: 'validation', item: anim.name, message: 'Fidelity is verified against Rigsmith’s own frames by an in-repo Lottie subset evaluator and by lottie-web 5.13.0 (canvas renderer, Chrome); not tested in lottie-web’s SVG/HTML renderers, After Effects or other players.' });
   return out;
 }
 
