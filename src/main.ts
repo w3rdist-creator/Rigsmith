@@ -2,6 +2,7 @@ import { App } from './ui/app.ts';
 import { Autosave } from './ui/autosave.ts';
 import { h } from './ui/dom.ts';
 import { renderImages, renderInspector, renderSkeleton } from './ui/panels.ts';
+import { renderConstraintList } from './ui/rigPanels.ts';
 import { Timeline } from './ui/timeline.ts';
 import { HELP_ROWS, renderToolbar, toolHint } from './ui/toolbar.ts';
 import './styles.css';
@@ -21,6 +22,7 @@ app.autosave.checkForRecovery($('banners'));
 const toolbar = $('toolbar');
 const skeleton = $('skeleton-panel');
 const images = $('images-panel');
+const constraints = $('constraints-panel');
 const inspector = $('inspector-panel');
 const modeBadge = $('mode-badge');
 const toolHintEl = $('tool-hint');
@@ -31,6 +33,8 @@ function refresh(full: boolean): void {
   renderToolbar(app, toolbar, openHelp);
   if (full) {
     renderSkeleton(app, skeleton);
+    constraints.replaceChildren();
+    renderConstraintList(app, constraints);
     renderImages(app, images);
   }
   if (!ed.playing) renderInspector(app, inspector);
@@ -79,6 +83,8 @@ Object.defineProperty(window, '__rigsmith', {
       keySels: app.ed.keySels.map((k) => ({ ...k })),
       onion: { ...app.ed.onion },
       skinId: app.ed.skinId,
+      pivotMode: app.ed.pivotMode,
+      pathNode: app.ed.pathNode,
       autosavePending: app.autosave?.pending ?? false,
       undo: app.ed.history.size.undo,
       redo: app.ed.history.size.redo,
@@ -87,6 +93,9 @@ Object.defineProperty(window, '__rigsmith', {
     project: () => app.snapshot(),
     bone: (name: string) => app.boneScreen(name),
     attachment: (name: string) => app.attachmentScreen(name),
+    frame: () => app.frameState(),
+    path: (name: string, i: number) => app.pathScreen(name, i),
+    worlds: () => Object.fromEntries([...app.ed.world()].map(([id, m]) => [id, [m.a, m.b, m.c, m.d, m.tx, m.ty]])),
     worldAt: (x: number, y: number) => app.worldAt(x, y),
   }),
 });

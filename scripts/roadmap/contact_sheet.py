@@ -1,11 +1,11 @@
-"""Old/new greeting contact sheet built only from the PNG-sequence ZIPs that
-Rigsmith's Export sequence… dialog produced (no re-rendering here).
+"""Contact sheet built only from PNG-sequence ZIPs that Rigsmith's Export sequence…
+dialog produced (no re-rendering here).
 
-usage: python3 -I scripts/roadmap/contact_sheet.py <v1.zip> <v2.zip> <out.png>
+usage: python3 -I scripts/roadmap/contact_sheet.py <out.png> <label=seq.zip> [<label=seq.zip> ...]
+       [--frames 0,4,8,...]
 
-Rows: v1 greeting (top) and v2 greeting (bottom) at the same frames, over a
-checkerboard so the exported alpha is visible. Writes <out>.json with the
-frame list and per-frame alpha statistics.
+One row per ZIP at the same frame numbers, over a checkerboard so the exported alpha
+is visible. Writes <out>.json with the frame list and per-frame alpha statistics.
 """
 import io
 import json
@@ -14,7 +14,7 @@ import zipfile
 
 from PIL import Image, ImageDraw
 
-FRAMES = [0, 4, 8, 12, 16, 18, 22, 26, 30, 36, 48, 60]
+DEFAULT_FRAMES = [0, 4, 8, 12, 16, 18, 22, 26, 30, 36, 48, 60]
 CELL = 180
 LABEL = 22
 
@@ -41,19 +41,21 @@ def fit(img):
     return img.resize((max(1, round(img.width * k)), max(1, round(img.height * k))), Image.LANCZOS)
 
 
-def main(v1zip, v2zip, out):
-    rows = [("greeting (original, unchanged)", *frames(v1zip)), ("greeting-v2 (curves, anticipation, overshoot, follow-through)", *frames(v2zip))]
-    sheet = Image.new("RGBA", (CELL * len(FRAMES), (CELL + LABEL) * len(rows) + LABEL), (255, 255, 255, 255))
+def main(out, rows_spec, frame_list):
+    rows = []
+    for spec in rows_spec:
+        label, path = spec.split("=", 1)
+        rows.append((label, path, *frames(path)))
+    sheet = Image.new("RGBA", (CELL * len(frame_list), (CELL + LABEL) * len(rows) + LABEL), (255, 255, 255, 255))
     d = ImageDraw.Draw(sheet)
     stats = {}
-    for r, (title, imgs, meta) in enumerate(rows):
+    for r, (title, _path, imgs, meta) in enumerate(rows):
         y0 = r * (CELL + LABEL) + LABEL
-        d.text((4, y0 - LABEL + 4), f"{title} - {meta['width']}x{meta['height']} @ {meta['fps']} fps", fill=(0, 0, 0, 255))
+        d.text((4, y0 - LABEL + 4), f"{title} - {meta['width']}x{meta['height']} @ {meta['fps']} fps, {len(imgs)} frames", fill=(0, 0, 0, 255))
         stats[title] = []
-        for c, f in enumerate(FRAMES):
+        for c, f in enumerate(frame_list):
             img = imgs[f % len(imgs)]
-            a = img.getchannel("A")
-            hist = a.histogram()
+            hist = img.getchannel("A").histogram()
             stats[title].append({"frame": f, "opaque": hist[255], "translucent": sum(hist[1:255]), "transparent": hist[0]})
             cell = checker(CELL, CELL)
             t = fit(img)
@@ -63,11 +65,17 @@ def main(v1zip, v2zip, out):
     d.text((4, sheet.height - LABEL + 4), "Frames copied from the exported sequence ZIPs; checkerboard shows exported alpha.", fill=(60, 60, 60, 255))
     sheet.convert("RGB").save(out)
     with open(out.rsplit(".", 1)[0] + ".json", "w") as fh:
-        json.dump({"frames": FRAMES, "sources": [v1zip, v2zip], "alpha": stats}, fh, indent=1)
+        json.dump({"frames": frame_list, "sources": [r[1] for r in rows], "alpha": stats}, fh, indent=1)
     print(f"wrote {out} ({sheet.width}x{sheet.height})")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
+    args = sys.argv[1:]
+    frame_list = DEFAULT_FRAMES
+    if "--frames" in args:
+        i = args.index("--frames")
+        frame_list = [int(x) for x in args[i + 1].split(",")]
+        del args[i:i + 2]
+    if len(args) < 2 or any("=" not in a for a in args[1:]):
         sys.exit(__doc__)
-    main(*sys.argv[1:])
+    main(args[0], args[1:], frame_list)

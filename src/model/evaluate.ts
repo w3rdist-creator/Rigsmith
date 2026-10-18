@@ -72,7 +72,10 @@ export function evaluate(project: Project, anim: Animation | null, time: number,
     const skinned = skin?.entries.find((e) => e.attachmentId === att.id);
     // A skin replaces the attachment's setup image; image keys still pick explicitly.
     if (skinned && !steppedAt(st?.image, time)) imageId = skinned.imageId;
-    const vis = st?.visible?.length ? sampleKeys(st.visible, time, [1])[0] >= 0.5 : !att.hidden;
+    // Stepped slot channels (visibility, image, draw order) show the setup value before
+    // their first key; interpolated opacity holds its first key like bone channels.
+    const visKey = steppedAt(st?.visible, time);
+    const vis = visKey ? visKey.value[0] >= 0.5 : !att.hidden;
     const opacity = st?.opacity?.length ? sampleKeys(st.opacity, time, [att.opacity])[0] : att.opacity;
     const w = attachmentWorld(att, world);
     const frame: AttachmentFrame = { att, image: imageById.get(imageId), visible: vis, opacity: Math.min(1, Math.max(0, opacity)), world: w };

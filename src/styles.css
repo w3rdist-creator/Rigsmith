@@ -233,3 +233,21 @@ dialog.export { width: 640px; max-width: 92vw; }
 .seq-previews figure { margin: 0; text-align: center; font-size: 11px; color: var(--dim); }
 .seq-preview { display: block; background: repeating-conic-gradient(#2a2d38 0 25%, #1f222b 0 50%) 0 0 / 12px 12px; border-radius: 4px; }
 .export-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+
+/* ---- Phase 2: slots, constraints, paths, cutout ---- */
+.row-key { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; }
+.row-key > .field { flex: 1; }
+.field.check { display: flex; align-items: center; gap: 6px; flex-direction: row; font-size: 12px; }
+.field.check input { margin: 0; }
+.field.inline { display: inline-flex; align-items: center; gap: 6px; }
+button.danger { color: #ff8fa8; border-color: #7a3a4a; margin-top: 8px; }
+button.mini.on { border-color: var(--accent); color: var(--accent); }
+.bone-picks { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; max-height: 120px; overflow: auto; margin: 4px 0 6px; font-size: 12px; }
+.bone-picks .pick { display: flex; gap: 4px; align-items: center; }
+#constraints-panel { max-height: 22vh; overflow: auto; }
+.image-row .derived { color: #c792ff; }
+dialog.cutout { width: 580px; }
+.cutout-canvas { display: block; margin: 8px 0; border: 1px solid #333; cursor: crosshair; touch-action: none; }
+.seq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dialog-actions { display: flex; gap: 8px; margin-top: 10px; }
+.seq-errors { color: #ff8fa8; margin: 6px 0; }

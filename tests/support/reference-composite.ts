@@ -6,7 +6,7 @@
 import type { Decoded } from './png-decode.ts';
 import { decodePng } from './png-decode.ts';
 
-type M = [number, number, number, number, number, number]; // a b c d tx ty
+export type M = [number, number, number, number, number, number]; // a b c d tx ty
 
 const mul = (m: M, n: M): M => [
   m[0] * n[0] + m[2] * n[1],
@@ -92,8 +92,10 @@ export function decodeProjectImages(project: any): Map<string, Decoded> {
  * Composites the project at time t into a w×h transparent RGBA buffer where world point
  * (x,y) maps to pixel ((x - originX)·scale, (y - originY)·scale).
  */
-export function composite(project: any, anim: any | null, t: number, images: Map<string, Decoded>, w: number, h: number, originX: number, originY: number, scale: number): RefImage {
-  const worlds = boneWorlds(project, anim, t);
+export function composite(project: any, anim: any | null, t: number, images: Map<string, Decoded>, w: number, h: number, originX: number, originY: number, scale: number, worldOverride?: Map<string, M>): RefImage {
+  // Constraints (IK/paths) are not re-solved here: callers that need them pass bone
+  // world matrices measured elsewhere and check the constraint geometry separately.
+  const worlds = worldOverride ?? boneWorlds(project, anim, t);
   // Premultiplied float accumulation.
   const acc = new Float64Array(w * h * 4);
   const view: M = [scale, 0, 0, scale, -originX * scale, -originY * scale];
@@ -102,7 +104,9 @@ export function composite(project: any, anim: any | null, t: number, images: Map
   const order: any[] = dk ? dk.order.map((id: string) => byId.get(id)) : project.attachments;
   for (const a of order) {
     const st = anim?.slots?.[a.id];
-    const visible = st?.visible?.length ? sampleTrack(st.visible, t, [1])[0] >= 0.5 : !a.hidden;
+    // Stepped channels show the setup value before their first key.
+    const vk = stepped(st?.visible, t);
+    const visible = vk ? vk.value[0] >= 0.5 : !a.hidden;
     const opacity = st?.opacity?.length ? sampleTrack(st.opacity, t, [a.opacity])[0] : a.opacity;
     if (!visible || opacity <= 0) continue;
     const imageId = stepped(st?.image, t)?.imageId ?? a.imageId;

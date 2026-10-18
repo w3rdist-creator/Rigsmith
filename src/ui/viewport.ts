@@ -5,9 +5,11 @@ import { attachmentPoints, evaluate } from '../model/evaluate.ts';
 import type { Mat, Vec } from '../model/math.ts';
 import { angleOf, apply, determinant, invert, wrapDegrees } from '../model/math.ts';
 import { applyPoseEdit, makeBone, uniqueName } from '../model/ops.ts';
-import { attachmentWorld, boneTip, parentWorld, toLocal, topoOrder } from '../model/skeleton.ts';
-import type { Bone, Project } from '../model/types.ts';
-import { newId } from '../model/types.ts';
+import { PathTable, pathWorldMatrix } from '../model/constraints.ts';
+import { moveBonePivot } from '../model/rigOps.ts';
+import { attachmentWorld, boneTip, computeWorld, parentWorld, toLocal, topoOrder } from '../model/skeleton.ts';
+import type { Bone, PathShape, Project } from '../model/types.ts';
+import { cloneProject, newId } from '../model/types.ts';
 import { drawFrame } from '../render/draw.ts';
 import type { ImageCache } from './images.ts';
 
@@ -24,11 +26,24 @@ type Drag =
   | { kind: 'rotate'; target: 'bone' | 'att'; id: string; origin: Vec; startRot: number; lastAngle: number; accum: number; sign: number }
   | { kind: 'scale'; target: 'bone' | 'att'; id: string; origin: Vec; startDist: number; sx: number; sy: number }
   | { kind: 'create'; id: string; start: Vec }
+  | { kind: 'pivot'; id: string; grab: Vec; base: Project }
+  | { kind: 'path-point'; pathId: string; index: number; part: PathPart }
   | { kind: 'pending-pan'; startX: number; startY: number; viewX: number; viewY: number };
 
 export interface Hit {
-  kind: 'bone' | 'attachment';
+  kind: 'bone' | 'attachment' | 'path';
   id: string;
+}
+
+type PathPart = 'node' | 'in' | 'out';
+
+/** World positions of a path's nodes and handles. */
+export function pathPoints(path: PathShape, m: Mat): { node: Vec; in: Vec; out: Vec }[] {
+  return path.nodes.map((n) => ({
+    node: apply(m, { x: n.x, y: n.y }),
+    in: apply(m, { x: n.x + n.inX, y: n.y + n.inY }),
+    out: apply(m, { x: n.x + n.outX, y: n.y + n.outY }),
+  }));
 }
 
 const BONE_HIT_PX = 7;
@@ -156,12 +171,38 @@ export class Viewport {
         if (d <= BONE_HIT_PX && (!best || d <= best.d)) best = { id: b.id, d };
       }
       if (best) return { kind: 'bone', id: best.id };
+      for (const path of p.paths ?? []) {
+        const t = new PathTable(path, pathWorldMatrix(path, world));
+        for (let s = 0; s <= t.length; s += 4) {
+          const q = this.toScreen(t.at(s).point);
+          if (Math.hypot(q.x - sx, q.y - sy) <= 6) return { kind: 'path', id: path.id };
+        }
+      }
     }
     const drawn = this.ed.frame().attachments;
     for (let i = drawn.length - 1; i >= 0; i--) {
       if (drawn[i].visible && this.insideAttachment(drawn[i].att.id, sx, sy, world)) return { kind: 'attachment', id: drawn[i].att.id };
     }
     return null;
+  }
+
+  /** Node/handle of the selected path under the cursor. */
+  pathPointAt(sx: number, sy: number): { pathId: string; index: number; part: PathPart } | null {
+    const sel = this.ed.selection;
+    if (sel?.kind !== 'path' || !this.ed.showBones) return null;
+    const path = this.ed.project.paths?.find((x) => x.id === sel.id);
+    if (!path) return null;
+    const pts = pathPoints(path, pathWorldMatrix(path, this.ed.world()));
+    let best: { pathId: string; index: number; part: PathPart; d: number } | null = null;
+    pts.forEach((pt, index) => {
+      for (const part of ['node', 'in', 'out'] as const) {
+        if (part !== 'node' && index !== this.ed.pathNode) continue;
+        const q = this.toScreen(pt[part]);
+        const d = Math.hypot(q.x - sx, q.y - sy);
+        if (d <= 8 && (!best || d < best.d)) best = { pathId: path.id, index, part, d };
+      }
+    });
+    return best;
   }
 
   private insideAttachment(id: string, sx: number, sy: number, _world: Map<string, Mat>): boolean {
@@ -195,10 +236,22 @@ export class Viewport {
       return;
     }
 
+    const pp = this.pathPointAt(s.x, s.y);
+    if (pp) {
+      ed.pathNode = pp.index;
+      ed.beginGesture();
+      this.drag = { kind: 'path-point', ...pp };
+      ed.emit('selection');
+      return;
+    }
     const hit = this.hitTest(s.x, s.y);
-    let target: Hit | null = hit;
-    if (hit) ed.select({ kind: hit.kind, id: hit.id });
-    else if ((ed.tool === 'rotate' || ed.tool === 'scale') && ed.selection) {
+    if (hit?.kind === 'path') {
+      ed.select({ kind: 'path', id: hit.id });
+      return;
+    }
+    let target: { kind: 'bone' | 'attachment'; id: string } | null = hit as { kind: 'bone' | 'attachment'; id: string } | null;
+    if (target) ed.select({ kind: target.kind, id: target.id });
+    else if ((ed.tool === 'rotate' || ed.tool === 'scale') && (ed.selection?.kind === 'bone' || ed.selection?.kind === 'attachment')) {
       // Rotate/scale tools act on the current selection when dragging empty canvas.
       target = { kind: ed.selection.kind, id: ed.selection.id };
     } else {
@@ -234,7 +287,8 @@ export class Viewport {
     ed.beginGesture();
     if (ed.tool === 'move') {
       const grab = { x: info.origin.x - wp.x, y: info.origin.y - wp.y };
-      this.drag = tKind === 'bone' ? { kind: 'move-bone', id: target.id, grab } : { kind: 'move-att', id: target.id, grab };
+      if (tKind === 'bone' && ed.pivotMode && ed.mode === 'setup') this.drag = { kind: 'pivot', id: target.id, grab, base: cloneProject(ed.project) };
+      else this.drag = tKind === 'bone' ? { kind: 'move-bone', id: target.id, grab } : { kind: 'move-att', id: target.id, grab };
     } else if (ed.tool === 'rotate') {
       const ang = Math.atan2(wp.y - info.origin.y, wp.x - info.origin.x) * (180 / Math.PI);
       this.drag = { kind: 'rotate', target: tKind, id: target.id, origin: info.origin, startRot: info.rot, lastAngle: ang, accum: 0, sign: info.parentDet < 0 ? -1 : 1 };
@@ -292,6 +346,35 @@ export class Viewport {
         const target = { x: wp.x + d.grab.x, y: wp.y + d.grab.y };
         const local = toLocal(pw, target);
         ed.gestureMutate((p) => applyPoseEdit(p, ed.mode, ed.animId, ed.time, d.id, { x: round2(local.x), y: round2(local.y) }));
+        return;
+      }
+      case 'pivot': {
+        const pw = parentWorld(d.base.bones, computeWorld(d.base.bones), d.id);
+        const local = toLocal(pw, { x: wp.x + d.grab.x, y: wp.y + d.grab.y });
+        // Recompute from the drag's start state so compensation never accumulates error.
+        ed.gestureMutate((p) => {
+          Object.assign(p, cloneProject(d.base));
+          moveBonePivot(p, d.id, round2(local.x), round2(local.y));
+        });
+        return;
+      }
+      case 'path-point': {
+        const path = ed.project.paths?.find((x) => x.id === d.pathId);
+        const n = path?.nodes[d.index];
+        if (!path || !n) return;
+        const q = toLocal(pathWorldMatrix(path, ed.world()), wp);
+        ed.gestureMutate(() => {
+          if (d.part === 'node') {
+            n.x = round2(q.x);
+            n.y = round2(q.y);
+          } else if (d.part === 'in') {
+            n.inX = round2(q.x - n.x);
+            n.inY = round2(q.y - n.y);
+          } else {
+            n.outX = round2(q.x - n.x);
+            n.outY = round2(q.y - n.y);
+          }
+        });
         return;
       }
       case 'move-att': {
@@ -368,6 +451,12 @@ export class Viewport {
       case 'move-att':
         ed.endGesture('Move attachment');
         break;
+      case 'pivot':
+        ed.endGesture('Move pivot');
+        break;
+      case 'path-point':
+        ed.endGesture(d.part === 'node' ? 'Move path node' : 'Edit path handle');
+        break;
       case 'rotate':
         ed.endGesture(d.target === 'bone' ? (ed.mode === 'animate' ? 'Key bone rotation' : 'Rotate bone') : 'Rotate attachment');
         break;
@@ -441,7 +530,82 @@ export class Viewport {
       if (!isSel && !isHover) continue;
       this.outlineAttachment(g, vm, f, isSel ? '#ffd166' : 'rgba(255,209,102,0.5)');
     }
-    if (ed.showBones) this.drawBones(g, p, world, vm, dpr);
+    if (ed.showBones) {
+      this.drawPaths(g, p, world, vm, dpr);
+      this.drawBones(g, p, world, vm, dpr);
+      this.drawIk(g, p, world, vm, dpr);
+    }
+  }
+
+  private drawPaths(g: CanvasRenderingContext2D, p: Project, world: Map<string, Mat>, vm: Mat, dpr: number): void {
+    const sel = this.ed.selection;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    for (const path of p.paths ?? []) {
+      const m = pathWorldMatrix(path, world);
+      const isSel = sel?.kind === 'path' && sel.id === path.id;
+      const t = new PathTable(path, m);
+      g.beginPath();
+      for (const s of t.segs) {
+        const [a, b, c, d] = s.map((q) => apply(vm, q));
+        if (s === t.segs[0]) g.moveTo(a.x, a.y);
+        g.bezierCurveTo(b.x, b.y, c.x, c.y, d.x, d.y);
+      }
+      g.lineWidth = (isSel ? 2.5 : 1.5) * dpr;
+      g.strokeStyle = isSel ? '#c792ff' : 'rgba(199,146,255,0.6)';
+      g.stroke();
+      if (!isSel) continue;
+      pathPoints(path, m).forEach((pt, i) => {
+        const n = apply(vm, pt.node);
+        if (i === this.ed.pathNode) {
+          for (const h of [pt.in, pt.out]) {
+            const q = apply(vm, h);
+            g.beginPath();
+            g.moveTo(n.x, n.y);
+            g.lineTo(q.x, q.y);
+            g.lineWidth = 1 * dpr;
+            g.strokeStyle = 'rgba(255,255,255,0.6)';
+            g.stroke();
+            g.beginPath();
+            g.arc(q.x, q.y, 3.5 * dpr, 0, Math.PI * 2);
+            g.fillStyle = '#ffffff';
+            g.fill();
+          }
+        }
+        g.beginPath();
+        g.rect(n.x - 4.5 * dpr, n.y - 4.5 * dpr, 9 * dpr, 9 * dpr);
+        g.fillStyle = i === this.ed.pathNode ? '#ffd166' : '#c792ff';
+        g.fill();
+        g.strokeStyle = '#111';
+        g.stroke();
+      });
+    }
+  }
+
+  private drawIk(g: CanvasRenderingContext2D, p: Project, world: Map<string, Mat>, vm: Mat, dpr: number): void {
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    for (const ik of p.ik ?? []) {
+      const t = world.get(ik.target), r = world.get(ik.bones[0]);
+      if (!t || !r) continue;
+      const tq = apply(vm, { x: t.tx, y: t.ty });
+      const rq = apply(vm, { x: r.tx, y: r.ty });
+      g.setLineDash([2 * dpr, 4 * dpr]);
+      g.beginPath();
+      g.moveTo(rq.x, rq.y);
+      g.lineTo(tq.x, tq.y);
+      g.lineWidth = 1 * dpr;
+      g.strokeStyle = 'rgba(255,107,154,0.7)';
+      g.stroke();
+      g.setLineDash([]);
+      g.beginPath();
+      g.arc(tq.x, tq.y, 9 * dpr, 0, Math.PI * 2);
+      g.moveTo(tq.x - 13 * dpr, tq.y);
+      g.lineTo(tq.x + 13 * dpr, tq.y);
+      g.moveTo(tq.x, tq.y - 13 * dpr);
+      g.lineTo(tq.x, tq.y + 13 * dpr);
+      g.lineWidth = 1.5 * dpr;
+      g.strokeStyle = '#ff6b9a';
+      g.stroke();
+    }
   }
 
   /** Onion skin: translucent tinted ghosts of neighbouring frames (view state only). */

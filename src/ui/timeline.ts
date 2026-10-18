@@ -87,9 +87,12 @@ export class Timeline {
       const chans = (['visible', 'opacity', 'image', 'deform'] as const).filter((ch) => st?.[ch]?.length || (a.id === selAtt && ch !== 'deform') || (a.id === selAtt && ch === 'deform' && a.mesh));
       for (const ch of chans) rows.push({ lane: slotLane(a.id, ch), owner: a.name, ch, selected: a.id === selAtt, onLabel: () => ed.select({ kind: 'attachment', id: a.id }) });
     }
+    const selC = ed.selection?.kind === 'constraint' ? ed.selection.id : null;
     for (const c of [...(p.ik ?? []), ...(p.pathConstraints ?? [])]) {
       const ct = anim.constraints?.[c.id];
-      for (const ch of ['mix', 'position'] as const) if (ct?.[ch]?.length) rows.push({ lane: constraintLane(c.id, ch), owner: c.name, ch, selected: false });
+      const chans = 'pathId' in c ? (['mix', 'position'] as const) : (['mix'] as const);
+      for (const ch of chans)
+        if (ct?.[ch]?.length || c.id === selC) rows.push({ lane: constraintLane(c.id, ch), owner: c.name, ch, selected: c.id === selC, onLabel: () => ed.select({ kind: 'constraint', id: c.id }) });
     }
     if (anim.drawOrder?.length) rows.push({ lane: DRAW_LANE, owner: 'draw order', ch: 'order', selected: false });
     return rows;

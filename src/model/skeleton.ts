@@ -1,5 +1,5 @@
 import type { Mat, Vec } from './math.ts';
-import { apply, decompose, fromTRS, identity, invert, multiply } from './math.ts';
+import { apply, applyLinear, decompose, fromTRS, identity, invert, multiply } from './math.ts';
 import type { Attachment, Bone, LocalPose, Project } from './types.ts';
 
 export function boneById(bones: readonly Bone[], id: string | null | undefined): Bone | undefined {
@@ -197,6 +197,18 @@ export function deleteBone(project: Project, boneId: string): void {
     att.scaleX = local.scaleX;
     att.scaleY = local.scaleY;
     att.boneId = newParentId;
+  }
+  // Paths drawn in the bone's space move to the parent's space, keeping their shape.
+  const boneWorld = world.get(boneId) ?? identity();
+  for (const path of project.paths ?? []) {
+    if (path.boneId !== boneId) continue;
+    const m = multiply(invert(newParent), boneWorld);
+    for (const n of path.nodes) {
+      const q = apply(m, n);
+      const i = applyLinear(m, { x: n.inX, y: n.inY }), o = applyLinear(m, { x: n.outX, y: n.outY });
+      Object.assign(n, { x: q.x, y: q.y, inX: i.x, inY: i.y, outX: o.x, outY: o.y });
+    }
+    path.boneId = newParentId;
   }
   project.bones = project.bones.filter((b) => b.id !== boneId);
   for (const anim of project.animations) delete anim.tracks[boneId];

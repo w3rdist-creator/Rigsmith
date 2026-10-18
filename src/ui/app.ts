@@ -18,6 +18,8 @@ import { drawFrame } from '../render/draw.ts';
 import type { Autosave } from './autosave.ts';
 import { buildDemoImages } from './demoArt.ts';
 import { ExportDialog } from './exportDialog.ts';
+import { CutoutDialog } from './cutoutDialog.ts';
+import { deleteConstraint, deletePath } from '../model/rigOps.ts';
 import { h } from './dom.ts';
 import { ImageCache, importImageFile } from './images.ts';
 import { Viewport, isTyping } from './viewport.ts';
@@ -30,6 +32,7 @@ export class App {
   viewport!: Viewport;
   autosave: Autosave | null = null;
   exportDialog!: ExportDialog;
+  cutout!: CutoutDialog;
   private statusEl!: HTMLElement;
   private toastEl!: HTMLElement;
   private statusTimer = 0;
@@ -42,6 +45,7 @@ export class App {
     this.viewport = new Viewport(canvas, this.ed, this.images);
     this.viewport.onStatus = (m) => this.status(m);
     this.exportDialog = new ExportDialog(this);
+    this.cutout = new CutoutDialog(this);
     document.body.append(this.fileInput, this.imageInput);
     this.fileInput.addEventListener('change', () => {
       const f = this.fileInput.files?.[0];
@@ -325,6 +329,11 @@ export class App {
     if (sel.kind === 'bone') {
       const b = ed.project.bones.find((x) => x.id === sel.id);
       ed.mutate(`Delete bone ${b?.name ?? ''}`, (p) => deleteBone(p, sel.id));
+      if (ed.lastRepairs.length) this.status(ed.lastRepairs.join(' '));
+    } else if (sel.kind === 'constraint') {
+      ed.mutate('Delete constraint', (p) => deleteConstraint(p, sel.id));
+    } else if (sel.kind === 'path') {
+      ed.mutate('Delete path', (p) => deletePath(p, sel.id));
     } else {
       ed.mutate('Delete attachment', (p) => {
         p.attachments = p.attachments.filter((a) => a.id !== sel.id);
@@ -521,7 +530,7 @@ export class App {
     let changed: string[] = [];
     ed.mutate('Close loop seam', (p) => {
       const a = p.animations.find((x) => x.id === anim.id)!;
-      changed = closeLoopSeam(a, lanes);
+      changed = closeLoopSeam(a, lanes, p);
     });
     this.status(`Loop seam closed on ${changed.length} lane(s): each lane’s first key copied to frame ${Math.round(anim.duration * anim.fps)}.`);
   }
@@ -669,6 +678,25 @@ export class App {
     const t = this.viewport.toScreen(boneTip(b, m));
     const c = (p: { x: number; y: number }) => ({ x: r.left + p.x, y: r.top + p.y });
     return { origin: c(o), tip: c(t), mid: c({ x: (o.x + t.x) / 2, y: (o.y + t.y) / 2 }), world: { x: m.tx, y: m.ty, angle: (Math.atan2(m.b, m.a) * 180) / Math.PI } };
+  }
+
+  /** Evaluated attachments in draw order (what the canvas shows now). */
+  frameState(): { name: string; visible: boolean; opacity: number; image: string | null }[] {
+    return this.ed.frame().attachments.map((f) => ({ name: f.att.name, visible: f.visible, opacity: f.opacity, image: f.image?.name ?? null }));
+  }
+
+  /** Client-space positions of a path's node i and its handles. */
+  pathScreen(name: string, i: number): { node: { x: number; y: number }; in: { x: number; y: number }; out: { x: number; y: number } } | null {
+    const path = this.ed.project.paths?.find((x) => x.name === name);
+    const n = path?.nodes[i];
+    if (!path || !n) return null;
+    const m = (path.boneId && this.ed.world().get(path.boneId)) || { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+    const r = this.viewport.canvas.getBoundingClientRect();
+    const c = (x: number, y: number) => {
+      const s = this.viewport.toScreen(apply(m, { x, y }));
+      return { x: r.left + s.x, y: r.top + s.y };
+    };
+    return { node: c(n.x, n.y), in: c(n.x + n.inX, n.y + n.inY), out: c(n.x + n.outX, n.y + n.outY) };
   }
 
   attachmentScreen(name: string): { x: number; y: number } | null {

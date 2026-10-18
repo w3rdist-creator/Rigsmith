@@ -5,6 +5,7 @@ import { descendantIds, depthOf, topoOrder } from '../model/skeleton.ts';
 import type { Attachment, Channel, LocalPose } from '../model/types.ts';
 import type { App } from './app.ts';
 import { append, clear, h, numberField } from './dom.ts';
+import { attachmentSlotSection, boneRigSection, renderConstraintInspector, renderPathInspector } from './rigPanels.ts';
 
 export function renderSkeleton(app: App, root: HTMLElement): void {
   const { ed } = app;
@@ -90,7 +91,11 @@ export function renderImages(app: App, root: HTMLElement): void {
     list.append(
       h('div', { class: 'image-row', 'data-testid': `image-${im.name}` },
         h('img', { src: im.dataUrl, alt: '', class: 'thumb' }),
-        h('div', { class: 'image-meta' }, h('div', { class: 'image-name', title: im.name }, im.name), h('div', { class: 'dim' }, `${im.width}×${im.height}${uses ? ` · used ${uses}×` : ''}`)),
+        h('div', { class: 'image-meta' },
+          h('div', { class: 'image-name', title: im.name }, im.name),
+          h('div', { class: 'dim' }, `${im.width}×${im.height}${uses ? ` · used ${uses}×` : ''}`),
+          im.derived ? h('div', { class: 'dim derived', 'data-testid': `image-derived-${im.name}`, title: im.derived.note ?? '' }, `${im.derived.kind} of ${p.images.find((x) => x.id === im.derived!.sourceId)?.name ?? '(removed image)'}${im.derived.synthesized ? ` · ${im.derived.synthesized} px synthesized` : ''}`) : null,
+        ),
         h('button', {
           class: 'mini',
           'data-testid': `attach-${im.name}`,
@@ -125,6 +130,9 @@ export function renderInspector(app: App, root: HTMLElement): void {
     );
     return;
   }
+
+  if (sel.kind === 'constraint') return renderConstraintInspector(app, root, sel.id);
+  if (sel.kind === 'path') return renderPathInspector(app, root, sel.id);
 
   if (sel.kind === 'bone') {
     const b = p.bones.find((x) => x.id === sel.id);
@@ -182,6 +190,7 @@ export function renderInspector(app: App, root: HTMLElement): void {
         colorField(b.color, (v) => ed.mutate('Bone colour', (q) => void (q.bones.find((x) => x.id === b.id)!.color = v))),
       ),
       animate ? h('p', { class: 'hint' }, 'Animate mode: edits here and on the canvas write keys at the current frame. Setup values live under Setup mode (Tab).') : null,
+      ...boneRigSection(app, b),
     );
     return;
   }
@@ -196,8 +205,12 @@ export function renderInspector(app: App, root: HTMLElement): void {
   imgSel.value = a.imageId;
   imgSel.addEventListener('change', () => setA('Swap image', (x) => void (x.imageId = imgSel.value)));
   const idx = p.attachments.indexOf(a);
-  root.append(
-    h('div', { class: 'kind-badge' }, 'Image attachment · setup'),
+  const animating = ed.mode === 'animate' && !!ed.anim();
+  // Animate mode: slot keys first (what can be keyed now), setup fields below.
+  if (animating) root.append(h('div', { class: 'kind-badge' }, `Image attachment · keying at frame ${Math.round(ed.time * ed.anim()!.fps)}`), ...attachmentSlotSection(app, a), h('div', { class: 'group-label' }, 'Setup (shared by all animations)'));
+  append(
+    root,
+    animating ? null : h('div', { class: 'kind-badge' }, 'Image attachment · setup'),
     numberlessText('Name', a.name, 'att-name', (v) => v.trim() && setA('Rename attachment', (x) => void (x.name = v.trim()))),
     h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Bone'), boneSel),
     h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Image'), imgSel),
@@ -212,11 +225,12 @@ export function renderInspector(app: App, root: HTMLElement): void {
       numberField({ label: 'Scale Y', value: a.scaleY, step: 0.05, testId: 'att-scale-y', onCommit: (v) => setA('Edit scale', (x) => void (x.scaleY = v)) }),
     ),
     numberField({ label: 'Opacity', value: a.opacity, step: 0.05, min: 0, max: 1, testId: 'att-opacity', onCommit: (v) => setA('Edit opacity', (x) => void (x.opacity = Math.min(1, Math.max(0, v)))) }),
-    h('div', { class: 'group-label' }, `Draw order ${idx + 1} of ${p.attachments.length}`),
+    h('div', { class: 'group-label' }, `Setup draw order ${idx + 1} of ${p.attachments.length}`),
     h('div', { class: 'row2' },
       h('button', { class: 'mini', 'data-testid': 'att-backward', disabled: idx === 0, onclick: () => app.moveAttachmentOrder(a.id, -1) }, 'Send backward'),
       h('button', { class: 'mini', 'data-testid': 'att-forward', disabled: idx === p.attachments.length - 1, onclick: () => app.moveAttachmentOrder(a.id, 1) }, 'Bring forward'),
     ),
+    ...(animating ? [] : attachmentSlotSection(app, a)),
   );
 }
 

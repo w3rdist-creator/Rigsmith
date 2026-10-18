@@ -88,12 +88,59 @@ fps/duration, tracks for missing bones. After validation every image is decoded
 **before** the project is swapped in; any decode failure aborts the load with an error and
 leaves the current project untouched.
 
+## Project format version 2 (roadmap)
+
+Version 2 is a strict superset of version 1; every new field is optional and omitted
+when unused. The writer emits the **minimum** version a project needs (`requiredVersion`
+in `format.ts`), so a project using no v2 feature is still written — byte for byte — as
+version 1, and v1 files load without any defaults being added. A version-1 reader rejects
+version-2 files by version number (it is not "backwards compatible"); this editor rejects
+files that declare version 1 but contain v2 fields, and versions newer than 2.
+
+| Field | Meaning |
+|---|---|
+| `Key.interp: "bezier"` + `Key.curve: [x1,y1,x2,y2]` | cubic easing of the segment leaving the key; x in [0,1], y unbounded (overshoot/anticipation); `curve` only on bezier keys |
+| `Attachment.hidden` | hidden in the setup pose (visibility keys can show it) |
+| `Animation.slots[attId].visible / opacity / image` | slot keys: visibility `[0|1]` (stepped), opacity `[0..1]` (interpolated), image swaps `{time, imageId}` (stepped) |
+| `Animation.drawOrder: [{time, order: [attId…]}]` | stepped draw-order keys; each `order` lists every attachment exactly once |
+| `Animation.constraints[id].mix / position` | keyed constraint mix and path position |
+| `ik: [{id, name, bones: [parent, child] or [bone], target, mix, bendPositive}]` | IK constraints |
+| `paths: [{id, name, boneId, closed, nodes: [{x,y,inX,inY,outX,outY}]}]` | cubic Bezier paths in a bone's space (null = world); handles relative to their node |
+| `pathConstraints: [{id, name, pathId, bones, position, spacing, mix, rotate, rotateOffset}]` | bones placed along a path |
+| `ImageAsset.derived: {kind, sourceId, offsetX, offsetY, polygon?, synthesized, note?}` | provenance of cutout/remainder/patch images; the source image is kept unmodified |
+
+Evaluation order (`src/model/evaluate.ts`, shared by the viewport, onion skin, sequence
+export and runtime export): sample local pose → IK constraints (array order) → path
+constraints (array order) → world matrices → per-attachment state (visibility, opacity,
+image, skin, draw order) → mesh vertices.
+
+- **Stepped slot channels** (visibility, image, draw order) show the setup value before
+  their first key; interpolated channels (bone channels, opacity) hold their first key.
+- **Two-bone IK**: law of cosines with the cosine clamped to [−1, 1]: unreachable targets
+  straighten the chain toward the target, too-close targets fold it, a target on the
+  chain root leaves the keyed pose. `bendPositive` puts the elbow on the clockwise side
+  of the shoulder→target line; a mirrored parent (negative determinant) mirrors the
+  side. Solved angles are written back as local rotations through the inverse parent
+  matrix (exact for mirrored and uniformly scaled parents), kept on the keyed turn, and
+  `mix` blends local rotations from keyed (0) to solved (1).
+- **Path constraints**: arc-length table (32 samples per cubic segment); bone *i* sits at
+  `position·L + i·spacing`; open paths clamp, closed paths wrap; `rotate` aligns the
+  bone's +x with the tangent plus `rotateOffset`; `mix` blends translation/rotation.
+- **Integrity**: every undoable edit runs `repairReferences` (same undo step) so deleting
+  bones/attachments/images drops or fixes dependent constraints, slot keys, skin entries
+  and draw-order keys, and the project always re-opens.
+- **Cutouts** (`src/model/cutout.ts`): coverage from the signed distance to the outline
+  (1-px anti-aliased edge, exact outward overlap); piece and remainder are complementary
+  at overlap 0; patches fill only transparent pixels inside the outline with a flat
+  colour placed behind existing pixels and record the synthesized pixel count.
+
 ## Runtime export (`rigsmith.runtime`, version 1)
 
 Bones/attachments by **name** (images referenced by file name, bytes not embedded), each
 animation's keys, plus `baked[boneName][frame] = [worldX, worldY, worldRotDeg,
-worldScaleX, worldScaleY]` for every frame, so a consumer can play it without
-implementing interpolation.
+worldScaleX, worldScaleY]` for every frame (after constraints), so a consumer can play it
+without implementing interpolation. Animations with slot or draw-order keys also carry
+`bakedSlots[frame]` = attachments back→front with `{attachment, visible, opacity, image}`.
 
 ## Persistence
 

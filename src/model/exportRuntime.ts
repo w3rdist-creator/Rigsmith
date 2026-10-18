@@ -1,9 +1,10 @@
 // "rigsmith.runtime" export: a playback-oriented file without embedded image bytes.
 // Bones and attachments are referenced by name; each animation carries its keys plus
 // per-frame baked world transforms so a consumer can play it without an interpolator.
-import { frameCount, samplePose } from './animation.ts';
+import { frameCount } from './animation.ts';
+import { evaluate } from './evaluate.ts';
 import { angleOf, round } from './math.ts';
-import { computeWorld, topoOrder } from './skeleton.ts';
+import { topoOrder } from './skeleton.ts';
 import type { Project } from './types.ts';
 
 export const RUNTIME_FORMAT_ID = 'rigsmith.runtime';
@@ -22,8 +23,10 @@ export interface RuntimeExport {
     loop: boolean;
     frames: number;
     keys: Record<string, { translate: unknown[]; rotate: unknown[]; scale: unknown[] }>;
-    /** baked[boneName][frame] = [worldX, worldY, worldRotationDeg, worldScaleX, worldScaleY] */
+    /** baked[boneName][frame] = [worldX, worldY, worldRotationDeg, worldScaleX, worldScaleY] (after IK/path constraints) */
     baked: Record<string, number[][]>;
+    /** Only when the animation keys slots or draw order: per frame, attachments back→front with their state. */
+    bakedSlots?: { attachment: string; visible: boolean; opacity: number; image: string }[][];
   }[];
 }
 
@@ -65,9 +68,13 @@ export function exportRuntime(project: Project): RuntimeExport {
       const frames = frameCount(anim) + (anim.loop ? 0 : 1);
       const baked: Record<string, number[][]> = {};
       for (const b of ordered) baked[b.name] = [];
+      const slotted = !!(anim.drawOrder?.length || Object.keys(anim.slots ?? {}).length);
+      const bakedSlots: NonNullable<RuntimeExport['animations'][number]['bakedSlots']> = [];
       for (let f = 0; f < frames; f++) {
         const t = Math.min(anim.duration, f / anim.fps);
-        const world = computeWorld(project.bones, samplePose(project.bones, anim, t));
+        const fr = evaluate(project, anim, t);
+        const world = fr.world;
+        if (slotted) bakedSlots.push(fr.attachments.map((a) => ({ attachment: a.att.name, visible: a.visible, opacity: round(a.opacity, 4), image: a.image?.name ?? '' })));
         for (const b of ordered) {
           const m = world.get(b.id)!;
           baked[b.name].push([round(m.tx, 3), round(m.ty, 3), round(angleOf(m), 3), round(Math.hypot(m.a, m.b), 4), round(Math.hypot(m.c, m.d), 4)]);
@@ -80,7 +87,7 @@ export function exportRuntime(project: Project): RuntimeExport {
         const conv = (ks: typeof track.translate) => ks.map((k) => ({ time: round(k.time, 6), value: k.value.map((v) => round(v)), interp: k.interp }));
         keys[n] = { translate: conv(track.translate), rotate: conv(track.rotate), scale: conv(track.scale) };
       }
-      return { name: anim.name, duration: anim.duration, fps: anim.fps, loop: anim.loop, frames, keys, baked };
+      return { name: anim.name, duration: anim.duration, fps: anim.fps, loop: anim.loop, frames, keys, baked, ...(slotted ? { bakedSlots } : {}) };
     }),
   };
 }

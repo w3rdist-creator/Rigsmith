@@ -11,8 +11,15 @@ import type { EditMode } from '../model/ops.ts';
 import { animationById } from '../model/ops.ts';
 import type { Animation, LocalPose, Project } from '../model/types.ts';
 import { cloneProject, emptyProject } from '../model/types.ts';
+import { repairReferences } from '../model/integrity.ts';
 
-export type Selection = { kind: 'bone'; id: string } | { kind: 'attachment'; id: string } | null;
+export type Selection =
+  | { kind: 'bone'; id: string }
+  | { kind: 'attachment'; id: string }
+  /** IK or path constraint (ids are unique across both). */
+  | { kind: 'constraint'; id: string }
+  | { kind: 'path'; id: string }
+  | null;
 export type Tool = 'move' | 'rotate' | 'scale' | 'create';
 export type KeySelection = KeyRef;
 export type ChangeReason = 'project' | 'selection' | 'time' | 'view' | 'mode' | 'load';
@@ -42,6 +49,12 @@ export class Editor {
    * canceller here; Esc calls them. Each returns true if it cancelled something.
    */
   readonly cancelHooks = new Set<() => boolean>();
+  /** Setup-mode Move tool moves a bone's origin only (images/children stay put). */
+  pivotMode = false;
+  /** Selected node of the selected path (view state). */
+  pathNode = 0;
+  /** Notes from the last reference repair (e.g. constraints removed with a bone). */
+  lastRepairs: string[] = [];
   mode: EditMode = 'setup';
   tool: Tool = 'move';
   animId: string | null = null;
@@ -74,6 +87,7 @@ export class Editor {
     const before = cloneProject(this.project);
     try {
       fn(this.project);
+      this.lastRepairs = repairReferences(this.project);
     } catch (e) {
       this.project = before;
       this.emit('project');
@@ -102,6 +116,7 @@ export class Editor {
     const before = this.gestureBefore;
     this.gestureBefore = null;
     if (before && this.gestureChanged) {
+      this.lastRepairs = repairReferences(this.project);
       this.history.record(label, before);
       this.dirty = true;
       this.emit('project');
@@ -172,6 +187,10 @@ export class Editor {
     const p = this.project;
     if (this.selection?.kind === 'bone' && !p.bones.some((b) => b.id === this.selection!.id)) this.selection = null;
     if (this.selection?.kind === 'attachment' && !p.attachments.some((a) => a.id === this.selection!.id)) this.selection = null;
+    if (this.selection?.kind === 'constraint' && ![...(p.ik ?? []), ...(p.pathConstraints ?? [])].some((c) => c.id === this.selection!.id)) this.selection = null;
+    if (this.selection?.kind === 'path' && !p.paths?.some((x) => x.id === this.selection!.id)) this.selection = null;
+    const path = this.selection?.kind === 'path' ? p.paths?.find((x) => x.id === this.selection!.id) : undefined;
+    if (path && this.pathNode >= path.nodes.length) this.pathNode = path.nodes.length - 1;
     if (this.animId && !p.animations.some((a) => a.id === this.animId)) this.animId = p.animations[0]?.id ?? null;
     if (!this.animId && this.mode === 'animate') this.mode = 'setup';
     const anim = this.anim();
@@ -188,9 +207,10 @@ export class Editor {
     // Keep selected keys that belong to the newly selected item; drop the rest.
     const owner = (r: KeyRef) => {
       const info = parseLane(r.lane);
-      if (!info || info.kind === 'draw' || info.kind === 'constraint') return null;
-      return { kind: info.kind === 'bone' ? 'bone' : 'attachment', id: info.id };
+      if (!info || info.kind === 'draw') return null;
+      return { kind: info.kind === 'bone' ? 'bone' : info.kind === 'slot' ? 'attachment' : 'constraint', id: info.id };
     };
+    if (sel?.kind === 'path' && (this.selection?.kind !== 'path' || this.selection.id !== sel.id)) this.pathNode = 0;
     this.keySels = sel ? this.keySels.filter((r) => {
       const o = owner(r);
       return !o || (o.kind === sel.kind && o.id === sel.id);
@@ -207,6 +227,7 @@ export class Editor {
       const info = parseLane(k.lane);
       if (info?.kind === 'bone') this.selection = { kind: 'bone', id: info.id };
       else if (info?.kind === 'slot') this.selection = { kind: 'attachment', id: info.id };
+      else if (info?.kind === 'constraint') this.selection = { kind: 'constraint', id: info.id };
       this.setTime(k.time);
       if (this.mode !== 'animate') this.setMode('animate');
     }

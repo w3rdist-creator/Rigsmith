@@ -60,14 +60,33 @@ browser driving visible controls, not by a human artist; "better" is not claimed
 only the measured properties above.
 
 ### Phase 2 — expressive articulation and flat-art workflow
+Fresh gate run: `.hermes/evidence/roadmap/phase2-gates/summary.txt` (unit 102/102, typecheck,
+build, e2e 58/58, wiz 16/16, preservation 16/16 — all exit 0).
+
 | Item | Status | Evidence |
 |---|---|---|
-| Attachment (slot) visibility/opacity/image keys | absent | |
-| Draw-order keys | absent | |
-| Two-bone IK (target, bend dir, mix, unreachable/degenerate/mirrored) | absent | |
-| Path constraints (authoring, sampling/spacing, persistence/export) | absent | |
-| Cutout tools (mask/crop, pivot, overlap, patch, non-destructive) | absent | |
-| UI demonstration: authoring, swaps, bent limbs (original art) | absent | |
+| Attachment (slot) visibility/opacity/image keys | delivered | inspector `slot-visible`, `slot-opacity`, `slot-image` + key toggles; `src/model/rigOps.ts`; p2-rig "visibility, opacity and image keys…"; reference compositor diff `p2-rig/slots-reference.txt` |
+| Draw-order keys | delivered | `draw-backward/forward` (Animate mode); integrity pass keeps keys valid on attachment add/delete (`src/model/integrity.ts`); p2-rig "draw-order keys…"; unit `rig-ops.test.ts` |
+| Two-bone IK (target, bend dir, mix, unreachable/degenerate/mirrored) | delivered | `src/model/constraints.ts`; `ik-add-2/1`, `ik-target`, `ik-mix` (+key), `ik-bend`, pink target on canvas; unit `constraints.test.ts` (reach, straighten, fold, degenerate, mirror, mix, turns); p2-rig IK suite incl. Esc, mirrored root, reference render |
+| Path constraints (authoring, sampling/spacing, persistence/export) | delivered | `+ Path`, canvas node/handle drag, `path-closed`, `path-add-node`, `pc-bone-*`, `path-constrain`, `pc-position/mix/spacing/rotate/offset` (+keys); arc-length `PathTable`; p2-rig path suite checks position against an independent arc-length sampler; save/reopen test |
+| Cutout tools (mask/crop, pivot, overlap, patch, non-destructive) | delivered | `src/model/cutout.ts` (pure, unit-tested), `✂ Cut out piece…` dialog (`cutout-canvas`, polygon/rectangle/pivot modes, `cut-overlap`, `cut-remainder`, `cut-patch`, `cut-bone`); provenance `ImageAsset.derived` shown in Images panel; pivot mode (`pivot-mode`) via `moveBonePivot`; p2-rig: cut in place renders pixel-identical (max diff 0), source bytes unchanged, patch labelled with synthesized pixel count |
+| UI demonstration: authoring, swaps, bent limbs (original art) | delivered | `scripts/roadmap/demo-phase2.ts` (`npm run demo:phase2`) drives the UI with procedural original art (`tests/support/png-encode.ts`): rounded-joint cutout elbow, IK wave, hand image swaps, badge blink + draw order; outputs `.hermes/assets/roadmap-demos/phase2/` (rig, sequence ZIP, contact sheet, editor screenshot) |
+
+Phase-2 semantics and limits (also in docs/architecture.md):
+- Stepped slot channels (visibility, image, draw order) show the setup value before their
+  first key; interpolated opacity holds its first key (like bone channels). Close loop
+  writes the frame-0 value at the end (setup value for stepped lanes keyed after 0).
+- Constraint order: all IK constraints (array order), then all path constraints.
+  Open paths clamp at the ends (no extrapolation); closed paths wrap.
+- Pivot mode compensates setup transforms exactly; children's translate keys are
+  compensated for the setup rotation/scale of the moved bone only.
+- A straight cut opens a wedge on the outer side of a bend; a rounded outline centred on
+  the pivot (as in the demo) avoids it. Patching fills only with a flat colour — no
+  hidden artwork is inferred.
+- Jointed Wiz v2 (optional in the contract) was not produced; the generic tools are
+  demonstrated on original procedural art.
+- The v1 runtime export now bakes worlds through `evaluate()` (constraints included) and
+  adds per-frame slot state; the full runtime schema + player is phase 4.
 
 ### Phase 3 — meshes, weights, deformation
 | Item | Status | Evidence |

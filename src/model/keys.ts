@@ -11,7 +11,7 @@
 // Moved keys are computed from the gesture's start state, so a key passed over during a
 // drag reappears unless the drop finally lands on it.
 import { TIME_EPSILON, findKeyIndex, insertSorted } from './animation.ts';
-import type { Animation, BoneTrack, Channel, ConstraintTrack, SlotTrack } from './types.ts';
+import type { Animation, BoneTrack, Channel, ConstraintTrack, Project, SlotTrack } from './types.ts';
 import { CHANNELS, emptyTrack } from './types.ts';
 
 export type SlotChannel = keyof SlotTrack;
@@ -207,12 +207,32 @@ export function pasteKeys(anim: Animation, clip: KeyClipboard, time: number, ret
   return { refs, skipped };
 }
 
+/** Stepped lanes show the setup value before their first key (visibility, image, draw order). */
+export function isSteppedLane(lane: string): boolean {
+  const info = parseLane(lane);
+  return info?.kind === 'draw' || (info?.kind === 'slot' && (info.channel === 'visible' || info.channel === 'image'));
+}
+
+/** A key holding the setup value of a stepped lane (what frame 0 shows before any key). */
+function setupKey(project: Project, lane: string, time: number): TimedKey | null {
+  const info = parseLane(lane);
+  if (info?.kind === 'draw') return { time, order: project.attachments.map((a) => a.id) } as TimedKey;
+  if (info?.kind !== 'slot') return null;
+  const att = project.attachments.find((a) => a.id === info.id);
+  if (!att) return null;
+  if (info.channel === 'visible') return { time, value: [att.hidden ? 0 : 1], interp: 'step' } as TimedKey;
+  if (info.channel === 'image') return { time, imageId: att.imageId } as TimedKey;
+  return null;
+}
+
 /**
- * Loop-seam helper: for each lane (default: all keyed lanes) copies the first key to the
- * animation's end so the loop closes exactly. Lanes whose last key already sits at the
- * end are overwritten with the first key's value. Returns the lanes changed.
+ * Loop-seam helper: for each lane (default: all keyed lanes) writes, at the animation's
+ * end, the value frame 0 shows, so the loop closes exactly: the first key for
+ * interpolated lanes (which hold their first key before it), and — with `project` — the
+ * setup value for stepped lanes whose first key comes after frame 0. A key already at
+ * the end is overwritten. Returns the lanes changed.
  */
-export function closeLoopSeam(anim: Animation, lanes?: readonly string[]): string[] {
+export function closeLoopSeam(anim: Animation, lanes?: readonly string[], project?: Project): string[] {
   const changed: string[] = [];
   for (const lane of lanes ?? allLanes(anim)) {
     const keys = laneKeys(anim, lane);
@@ -220,7 +240,8 @@ export function closeLoopSeam(anim: Animation, lanes?: readonly string[]): strin
     const first = keys[0];
     if (Math.abs(first.time - anim.duration) < TIME_EPSILON) continue;
     const end = findKeyIndex(keys, anim.duration);
-    const k = cloneKey(first);
+    const fromSetup = project && isSteppedLane(lane) && first.time > TIME_EPSILON ? setupKey(project, lane, anim.duration) : null;
+    const k = fromSetup ?? cloneKey(first);
     k.time = anim.duration;
     if (end >= 0) {
       // Keep the end key's own outgoing interpolation (it has no segment anyway).

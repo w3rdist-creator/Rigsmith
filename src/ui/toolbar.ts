@@ -98,5 +98,10 @@ export const HELP_ROWS: [string, string][] = [
   ['Ctrl/⌘+Z · Ctrl/⌘+Shift+Z or Ctrl+Y', 'Undo · Redo'],
   ['Ctrl/⌘+S · Ctrl/⌘+O', 'Save (download) · Open project'],
   ['Shift while rotating / scaling', 'Snap to 15° / scale X only'],
-  ['H · Esc', 'Toggle bones · cancel the current drag (canvas, keys, curve handle) or deselect'],
+  ['H · Esc', 'Toggle bones · cancel the current drag (canvas, keys, curve handle, path node) or deselect'],
+  ['Inspector (image, Animate mode)', 'Key visibility, opacity, image swaps and draw order at the current frame'],
+  ['Inspector (bone) · + 2-bone IK', 'Adds a pink target at the bone tip; drag it to bend the limb (keys it in Animate mode)'],
+  ['Constraints · + Path', 'Bezier path: drag squares (nodes) and round handles; tick bones and “Create path constraint”'],
+  ['Inspector (image, Setup) · ✂ Cut out piece…', 'Polygon/rectangle mask, pivot, overlap, remainder and flat patch — the source image is kept'],
+  ['Inspector (bone, Setup) · Pivot mode', 'Move tool moves only the bone origin; its images and children stay put'],
 ];
