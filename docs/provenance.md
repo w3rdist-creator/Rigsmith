@@ -40,3 +40,10 @@ module-preload helper Vite injects (part of Vite, MIT).
 Tooling used but not vendored: Node 25.9.0 (built-in `node:test`, type stripping, `zlib`),
 Chrome for Testing 155.0.8059.39 (pre-installed on the Mac mini), REA 6.4.0
 (`rea-agents`, upstream `github.com/morluto/rea`, MIT) for evidence collection only.
+
+External programs run but not vendored or bundled (drwdmrs3 review P3-3):
+
+| Program | Version seen here | Used by | Licence position |
+|---|---|---|---|
+| ffmpeg / ffprobe | 9.0.1 (Homebrew, `/opt/homebrew/bin`) | CLI `media --format webm\|mp4` spawns the user's `ffmpeg` (or `RIGSMITH_FFMPEG`) as a separate process and pipes it PNG frames (`scripts/lib/rigsmith-api.ts`); tests decode the results with ffmpeg/ffprobe (`tests/support/media-check.ts`, `tests/cli`, `tests/e2e/p4-media`). The browser editor never runs it. | Not distributed with Rigsmith, not linked; the user installs it. Its licence (LGPL-2.1+, or GPL when built with `--enable-gpl` and x264/x265 as this Homebrew build is) is that of the user's own build and governs that binary and what the user does with it. Without ffmpeg, WebM/MP4 export exits 3; APNG/GIF need nothing. |
+| python3 + Pillow | Python 3.14.8, Pillow 12.3.0 | Development scripts only: preservation check (`scripts/roadmap/check_preservation.py`), demo contact sheets (`scripts/roadmap/contact_sheet.py`), Wiz asset preparation (`scripts/wiz/*.py`), and as an independent decoder in media verification. Not used by the editor, runtime or CLI. | Python (PSF licence) and Pillow (MIT-CMU) are user-installed; nothing is vendored. |
