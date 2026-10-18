@@ -102,7 +102,7 @@ exercises it. The ids and measurements for each row are in
 ### Phase 3: meshes, weights, deformation
 | Contract item | Status | Notes |
 |---|---|---|
-| Mesh authoring/triangulation, textured rendering, editable vertices, normalized weights + weight paint, deform keys, undo/redo, import validation | delivered | Auto weights failed on vertices far from every bone until the drwdmrs3 fix pass (P1-1) |
+| Mesh authoring/triangulation, textured rendering, editable vertices, normalized weights + weight paint, deform keys, undo/redo, import validation | delivered | Auto weights failed on vertices far from every bone until the drwdmrs3 fix pass (P1-1), and cut influences off at 100 px (tearing a skinned mesh by up to 102 px) until the post-review fix pass made the weights continuous (FR-002) |
 | Smallest sound renderer, with seams/flips/alpha/degenerate triangles verified independently | delivered | Canvas2D clipped affine triangles, layered. Verified on CfT's software raster only |
 | Versioned format, lossless v1 migration, documented reader limits | delivered | v1 files re-save byte-identically; v1 readers reject v2 (documented) |
 | Bendy-limb / secondary-motion demo with rendered reference tests | delivered | `npm run demo:phase3`. Appeal is the operator's call |
@@ -123,7 +123,11 @@ exercises it. The ids and measurements for each row are in
 skins are exported. IK, paths, meshes, deform keys, draw-order keys and constraint keys
 are refused, and the diagnostic names the item. Fidelity was checked only by an in-repo
 evaluator, frame by frame against the editor: 0.108% px over tolerance; a wrong-skin
-control gives 23.1%. **Not tested in lottie-web, After Effects or any other player.**
+control gives 23.1%. Since the post-review fix pass (FR-001) the same JSON is also played
+by **lottie-web 5.13.0** (canvas renderer, pinned devDependency, isolated headless Chrome):
+0 of 206 221 covered px over tolerance 24 on all 30 frames, both skins; a wrong-skin
+control gives 23.0% and a 10-frame offset 81.6%. **Not tested in lottie-web's SVG/HTML
+renderers, After Effects or any other player.**
 
 **Media.**
 - APNG (lossless, the frames exactly) and GIF (256 colours, 1-bit alpha with the alpha
@@ -152,8 +156,9 @@ Export gates (contract §"Export gates") for every shipped output:
     Mac only.
   - Canvas2D mesh rendering reallocates the mesh layer canvas on every mesh draw (cost
     grows with mesh count). This fixed a history-dependent antialiasing bug.
-- **Lottie:** limited to the subset above; validated by our own evaluator, not a
-  third-party player. Players differ on skewed parented nulls.
+- **Lottie:** limited to the subset above; validated by our own evaluator and by
+  lottie-web 5.13.0's canvas renderer only (which matches skewed children of a non-uniformly
+  scaled parent null; other players may differ).
 - **Media:**
   - GIF has a 50 fps cap and binary alpha.
   - WebM/MP4 bytes are deterministic only for this machine's ffmpeg build.
