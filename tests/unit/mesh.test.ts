@@ -363,6 +363,36 @@ describe('auto weights far from every bone (review P1-1)', () => {
     assert.ok(far > 20, `the case has many vertices > 100 px from every bone (${far})`);
   });
 
+  // The first P1-1 fix scaled weights by the strongest before the cut, which also kept
+  // a second influence beyond 100 px for vertices the old code already weighted, and
+  // changed the bend of the phase-3 demo arm. Vertices that had weights keep exactly
+  // the old ones; only the previously unweighted ones fall back to the nearest bone.
+  it('leaves every previously weighted vertex unchanged (absolute 1e-4 cut)', () => {
+    const p = bigPanel();
+    const att = p.attachments[0];
+    const w = autoWeights(p, att, ['root', 'tip']);
+    const n = att.mesh!.points.length / 2;
+    let single = 0, pair = 0;
+    for (let i = 0; i < n; i++) {
+      const x = att.mesh!.points[2 * i] - 200, y = att.mesh!.points[2 * i + 1] - 200;
+      const d = [{ bone: 'root', d: seg(x, y, 0, 0, 30, 0) }, { bone: 'tip', d: seg(x, y, 30, 0, 60, 0) }]
+        .map((e) => ({ bone: e.bone, w: 1 / Math.max(1, e.d) ** 2 }))
+        .sort((a, b) => b.w - a.w);
+      if (Math.abs(d[0].w - d[1].w) < 1e-12) continue;
+      const kept = d.filter((e) => e.w >= 1e-4);
+      const sum = kept.reduce((s, e) => s + e.w, 0);
+      const want = kept.length ? kept.map((e) => ({ bone: e.bone, w: e.w / sum })) : [{ bone: d[0].bone, w: 1 }];
+      assert.equal(w[i].length, want.length, `vertex ${i} influence count`);
+      want.forEach((e, j) => {
+        assert.equal(w[i][j].bone, e.bone);
+        assert.ok(Math.abs(w[i][j].w - e.w) < 1e-12, `vertex ${i} weight ${j}: ${w[i][j].w} vs ${e.w}`);
+      });
+      if (kept.length === 1) single++;
+      if (kept.length === 2) pair++;
+    }
+    assert.ok(single > 5 && pair > 5, `covers one- and two-influence vertices (${single}, ${pair})`);
+  });
+
   it('the integrity pass repairs a missing or non-array weight list instead of throwing', () => {
     const p = bigPanel();
     const att = p.attachments[0];

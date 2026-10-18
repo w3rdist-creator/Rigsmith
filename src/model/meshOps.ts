@@ -244,10 +244,9 @@ export function setupVertices(project: Project, att: Attachment): V[] {
 
 /**
  * Automatic weights: inverse-square distance (setup pose) from each vertex to each
- * chosen bone's segment, keeping the `maxInfluences` strongest, normalized. Weights are
- * taken relative to the strongest influence before normalizing, so the nearest bone
- * always survives the MIN_WEIGHT cut however far the vertex is from every bone (an
- * absolute 1/d² fell under MIN_WEIGHT beyond 100 px and left the vertex unweighted).
+ * chosen bone's segment, keeping the `maxInfluences` strongest, normalized. Influences
+ * whose absolute 1/d² is under MIN_WEIGHT (farther than 100 px) are dropped; a vertex
+ * that loses them all is bound fully to the nearest bone rather than left unweighted.
  */
 export function autoWeights(project: Project, att: Attachment, boneIds: readonly string[], maxInfluences = 2): VertexWeights[] {
   if (!boneIds.length) throw new Error('Auto weights needs at least one bone.');
@@ -260,8 +259,7 @@ export function autoWeights(project: Project, att: Attachment, boneIds: readonly
   return setupVertices(project, att).map((v) => {
     const ws = segs.map((s) => ({ bone: s.id, w: 1 / Math.max(1, distToSegment(v, s.a, s.b)) ** 2 }));
     ws.sort((x, y) => y.w - x.w);
-    const top = ws[0].w;
-    return normalizeWeights(ws.slice(0, maxInfluences).map((x) => ({ bone: x.bone, w: x.w / top }))) ?? [{ bone: ws[0].bone, w: 1 }];
+    return normalizeWeights(ws.slice(0, maxInfluences)) ?? [{ bone: ws[0].bone, w: 1 }];
   });
 }
 
