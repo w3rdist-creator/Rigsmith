@@ -314,4 +314,52 @@ describe('P2-2 / P3-1: the reference player validates runtime files and never sh
     assert.equal(v.probe.frames, 16);
     assert.deepEqual(playerErrors, []);
   });
+
+  it('FR-007: twenty loads (and one undecodable PNG) leave no live object URL; the frame checksum is unchanged', async () => {
+    // Test-side instrumentation only: count object URLs created and not yet revoked.
+    await player.addInitScript(() => {
+      const live = new Set<string>();
+      let created = 0;
+      const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = (o: Blob | MediaSource) => { const u = create(o); live.add(u); created++; return u; };
+      URL.revokeObjectURL = (u: string) => { live.delete(u); revoke(u); };
+      Object.defineProperty(window, '__objectUrls', { value: () => ({ live: live.size, created }) });
+    });
+    await player.reload();
+    await player.getByTestId('player-files').waitFor({ state: 'attached' });
+    const urls = () => player.evaluate(() => (window as any).__objectUrls() as { live: number; created: number });
+    const checksum = () => player.evaluate(() => {
+      const c = document.querySelector('[data-testid="player-canvas"]') as HTMLCanvasElement;
+      const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let h = 2166136261;
+      for (let i = 0; i < d.length; i++) h = Math.imul(h ^ d[i], 16777619) >>> 0;
+      return `${c.width}x${c.height}:${h.toString(16)}`;
+    });
+    const sums = new Set<string>();
+    const live: number[] = [];
+    const createdPerLoad: number[] = [];
+    // Chrome fires no change event for an identical file list, so alternate the runtime file name.
+    for (let i = 0; i < 20; i++) {
+      const before = (await urls()).created;
+      await load(runtime(`valid-${i % 2}`));
+      assert.match((await view()).status, /^Loaded “runtime-rig”/);
+      sums.add(await checksum());
+      const u = await urls();
+      live.push(u.live);
+      createdPerLoad.push(u.created - before);
+    }
+    const broken = path.join(DIR, 'broken.png');
+    writeFileSync(broken, Buffer.from('not a png'));
+    await player.getByTestId('player-files').setInputFiles([runtime('valid'), broken, ...images]);
+    await player.waitForFunction(() => document.querySelector('[data-testid="player-status"]')!.textContent !== 'Loading…');
+    assert.match((await view()).errors, /Could not decode broken\.png/);
+    const after = await urls();
+    writeFileSync(path.join(OUT, 'fr-007-object-urls.json'), JSON.stringify({ createdPerLoad, livePerLoad: live, afterUndecodable: after, checksums: [...sums] }, null, 2));
+    assert.deepEqual(createdPerLoad, Array(20).fill(images.length), 'every load decoded every PNG');
+    assert.deepEqual(live, Array(20).fill(0), 'no object URL outlives a load');
+    assert.equal(after.live, 0, 'the undecodable image\'s URL is revoked too');
+    assert.equal(sums.size, 1, `one frame checksum across 20 loads: ${[...sums].join(', ')}`);
+    await loadValid();
+    assert.deepEqual(playerErrors, []);
+  });
 });

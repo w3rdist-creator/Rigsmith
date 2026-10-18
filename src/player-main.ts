@@ -70,9 +70,11 @@ function clearView(): void {
 function decodeImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`Could not decode ${file.name}.`));
-    img.src = URL.createObjectURL(file);
+    const url = URL.createObjectURL(file);
+    // The decoded image outlives its blob URL; revoke it either way so reloads do not leak.
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(`Could not decode ${file.name}.`)); };
+    img.src = url;
   });
 }
 
