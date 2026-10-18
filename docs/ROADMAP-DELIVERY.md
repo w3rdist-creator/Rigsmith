@@ -157,7 +157,9 @@ Export gates (contract §"Export gates") for every shipped output:
 - **Media:**
   - GIF has a 50 fps cap and binary alpha.
   - WebM/MP4 bytes are deterministic only for this machine's ffmpeg build.
-  - No browser or player playback of WebM alpha was tested.
+  - WebM alpha playback was tested in headless Chrome for Testing 155 `<video>` only
+    (seeked and played frames vs the PNG sequence, with a no-alpha control; DRW-005).
+    No other browser or player was tested.
   - The editor cannot write WebM/MP4: there is no muxer in the browser build.
 - **Bytes:**
   - CLI APNG/atlas PNG bytes differ from the editor's (Node vs Chrome zlib); the pixels

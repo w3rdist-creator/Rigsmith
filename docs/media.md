@@ -57,8 +57,9 @@ machine gave identical bytes. Other ffmpeg/libvpx/x264 builds may give other byt
 ## Not claimed
 
 - No player or platform support beyond the decoders named above: Pillow 12.3, this
-  machine's ffmpeg, and headless Chrome for Testing 155 `ImageDecoder` for APNG and GIF.
-  WebM alpha playback in browsers, Safari/iOS behaviour and social-platform upload
-  handling were not tested.
+  machine's ffmpeg, headless Chrome for Testing 155 `ImageDecoder` for APNG and GIF, and
+  headless Chrome for Testing 155 `<video>` for WebM alpha (seeked and played frames
+  match the PNG-sequence alpha; tests/e2e/p4-media). WebM in other browsers, MP4 in a
+  browser, Safari/iOS behaviour and social-platform upload handling were not tested.
 - Absent: HEVC with alpha, ProRes 4444, animated WebP, WebM/MP4 from inside the editor
   (the browser build has no muxer), audio.

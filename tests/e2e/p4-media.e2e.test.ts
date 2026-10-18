@@ -247,3 +247,111 @@ describe('animated media export (APNG / GIF) from the Export sequence dialog', (
     assert.deepEqual(pageErrors, []);
   });
 });
+
+// DRW-005 (drwdmrs3 review, missing verification): "WebM alpha in a browser". The CLI
+// WebM (VP9 + alpha) is decoded by Chrome for Testing's own <video> element — not
+// Rigsmith code and not ffmpeg — both seeked frame by frame and during real playback,
+// and every frame read back from a canvas is compared with the PNG sequence.
+// Headless CfT does not fire requestVideoFrameCallback for a paused, seeked video, so
+// seeked frames are drawn on 'seeked'; during playback the callback's mediaTime names
+// the frame (probes/webm-video-*.txt in the fix-pass evidence).
+describe('WebM alpha plays in Chrome for Testing (review DRW-005)', { skip: !hasFfmpeg() && 'ffmpeg is not installed' }, () => {
+  async function chromeVideo(file: string, n: number, fps: number) {
+    const r = await page.evaluate(async ({ b64, n, fps }) => {
+      const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const v = document.createElement('video');
+      v.muted = true;
+      v.preload = 'auto';
+      v.src = URL.createObjectURL(new Blob([bin], { type: 'video/webm' }));
+      await new Promise((res, rej) => {
+        v.onloadeddata = res;
+        v.onerror = () => rej(new Error(`video error ${v.error?.code}: ${v.error?.message}`));
+      });
+      const w = v.videoWidth, h = v.videoHeight;
+      const c = new OffscreenCanvas(w, h);
+      const g = c.getContext('2d', { willReadFrequently: true })!;
+      const grab = () => {
+        g.clearRect(0, 0, w, h);
+        g.drawImage(v, 0, 0);
+        const d = g.getImageData(0, 0, w, h).data;
+        let s = '';
+        for (let k = 0; k < d.length; k += 0x8000) s += String.fromCharCode(...d.subarray(k, k + 0x8000));
+        return btoa(s);
+      };
+      const seeked: string[] = [];
+      for (let i = 0; i < n; i++) {
+        const done = new Promise((res) => (v.onseeked = res));
+        v.currentTime = (i + 0.5) / fps;
+        await done;
+        seeked.push(grab());
+      }
+      const rewound = new Promise((res) => (v.onseeked = res));
+      v.currentTime = 0;
+      await rewound;
+      v.playbackRate = 0.25; // headless may drop frames at full speed
+      const played: { t: number; px: string }[] = [];
+      const onFrame = (_now: number, m: { mediaTime: number }) => {
+        played.push({ t: m.mediaTime, px: grab() });
+        if (!v.ended) (v as any).requestVideoFrameCallback(onFrame);
+      };
+      (v as any).requestVideoFrameCallback(onFrame);
+      const ended = new Promise((res) => (v.onended = res));
+      await v.play();
+      await ended;
+      return { canPlay: v.canPlayType('video/webm; codecs="vp9"'), w, h, duration: v.duration, seeked, played };
+    }, { b64: readFileSync(file).toString('base64'), n, fps });
+    const px = (b: string) => new Uint8Array(Buffer.from(b, 'base64'));
+    return { ...r, seeked: r.seeked.map(px), played: r.played.map((p) => ({ t: p.t, data: px(p.px) })) };
+  }
+
+  /** Alpha agreement of one decoded frame with its reference frame. */
+  function alphaStats(f: Uint8Array, d: Uint8Array) {
+    let err = 0, max = 0, bg = 0, clear = 0, core = 0, solid = 0;
+    for (let k = 3; k < f.length; k += 4) {
+      const e = Math.abs(f[k] - d[k]);
+      err += e;
+      max = Math.max(max, e);
+      if (d[k] === 0) {
+        bg++;
+        if (f[k] <= 8) clear++;
+      } else if (d[k] === 255) {
+        core++;
+        if (f[k] >= 247) solid++;
+      }
+    }
+    return { mean: err / (f.length / 4), max, bg, clear, core, solid };
+  }
+
+  it('the CLI WebM keeps its transparency in <video>: seeked and played frames match the PNG sequence alpha', async () => {
+    assert.equal(ref.length, 30, 'reference PNG sequence from the first test');
+    const out = path.join(OUT, 'cli-wave.webm');
+    const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts/rigsmith.ts'), 'media', RIG, '--anim', 'wave', '--format', 'webm', '--out', out], { cwd: ROOT, encoding: 'utf8', maxBuffer: 16 << 20 });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const v = await chromeVideo(out, 30, 30);
+    assert.equal(v.canPlay, 'probably');
+    assert.deepEqual([v.w, v.h], [ref[0].width, ref[0].height]);
+    assert.ok(Math.abs(v.duration - 1) < 0.05, `duration ${v.duration}`);
+    const check = (label: string, f: Uint8Array, i: number) => {
+      const s = alphaStats(f, ref[i].data);
+      const line = `${label} frame ${i}: alpha mean abs error ${s.mean.toFixed(3)} (max ${s.max}); clear ${s.clear}/${s.bg}; solid ${s.solid}/${s.core}`;
+      assert.ok(s.bg > 0 && s.core > 0, line);
+      assert.ok(s.mean < 1 && s.clear / s.bg > 0.995 && s.solid / s.core > 0.995, line);
+      return s;
+    };
+    let worstMean = 0;
+    v.seeked.forEach((f, i) => (worstMean = Math.max(worstMean, check('seeked', f, i).mean)));
+    // Playback: each presented frame is the reference frame its media time names.
+    const playedFrames = v.played.map((p) => Math.round(p.t * 30));
+    assert.ok(v.played.length >= 20, `playback presented ${v.played.length} of 30 frames`);
+    assert.deepEqual(playedFrames, [...playedFrames].sort((a, b) => a - b), 'in order');
+    v.played.forEach((p, k) => (worstMean = Math.max(worstMean, check('played', p.data, playedFrames[k]).mean)));
+    // Control: the same video re-encoded without alpha must fail the transparency check.
+    const opaque = path.join(OUT, 'cli-wave-noalpha.webm');
+    const enc = spawnSync('ffmpeg', ['-v', 'error', '-y', '-i', out, '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuv420p', '-b:v', '0', '-crf', '30', opaque], { encoding: 'utf8' });
+    assert.equal(enc.status, 0, enc.stderr);
+    const c = alphaStats((await chromeVideo(opaque, 1, 30)).seeked[0], ref[0].data);
+    assert.ok(c.clear / c.bg < 0.01, `control without alpha shows an opaque background (${c.clear}/${c.bg} clear)`);
+    report.push(`webm in Chrome <video>: 30/30 seeked frames and ${v.played.length} played frames (${playedFrames.join(',')}) match the PNG sequence alpha; worst frame alpha mean abs error ${worstMean.toFixed(3)}; control re-encoded without alpha: ${c.clear}/${c.bg} background px clear`);
+    assert.deepEqual(pageErrors, []);
+  });
+});
