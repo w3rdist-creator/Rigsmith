@@ -5,7 +5,11 @@ parity with any commercial tool.
 
 ## Authority
 - Work only inside this repo, `.hermes/browser-profiles/` and `.hermes/evidence/`.
-- No remotes, pushes, deploys or public binds. Preview binds `127.0.0.1` only, on a port
+- Agent work is local-only: agents add no remotes and never push, deploy or publish.
+  Private GitHub publication is owned solely by the operator-authorized Hermes
+  controller. `.gitignore` keeps `.hermes/{dispatch,assets,evidence,browser-profiles}/`,
+  credentials and env files out of every commit.
+- No public binds. Preview binds `127.0.0.1` only, on a port
   checked free first (default 47613; e2e picks 47614–47617).
 - Never open/focus the user's Chrome. Automation uses headless Chrome for Testing with a
   project-local profile (`tests/e2e/harness.ts`). Kill only processes you started.

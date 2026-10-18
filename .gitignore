@@ -1,18 +1,24 @@
 node_modules/
 dist/
-.hermes/evidence/
-.hermes/browser-profiles/
-.hermes/dispatch/worker.ndjson
-.hermes/dispatch/worker.stderr
-.hermes/dispatch/exit.json
-.hermes/dispatch/pid
 .playwright/
 *.dmg
 *.rig.json
 !tests/fixtures/*.rig.json
 
-# Private Wiz source, derived cutouts, and rendered acceptance-test assets
+# Local agent workspace: dispatch prompts/logs, private Wiz source art and renders, raw
+# evidence and browser profiles never leave this machine. Only .hermes/STATUS.md is tracked.
+.hermes/dispatch/
 .hermes/assets/
-.hermes/dispatch/wiz/worker.ndjson
-.hermes/dispatch/wiz/worker.stderr
-.hermes/dispatch/wiz/exit.json
+.hermes/evidence/
+.hermes/browser-profiles/
+
+# Credentials and local environment files
+.env
+.env.*
+*.pem
+*.key
+*.p12
+.npmrc
+.netrc
+credentials*
+secrets*
