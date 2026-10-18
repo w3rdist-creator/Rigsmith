@@ -84,7 +84,8 @@ export function solveIkRef(project: any, pose: Map<string, Local>, ik: any, mix:
     return;
   }
   if (Math.hypot(tw[4] - w1[4], tw[5] - w1[5]) < 1e-6) return; // target on the shoulder: keyed pose
-  if (Math.abs(l1.scaleX) !== Math.abs(l1.scaleY)) throw new Error(`reference IK covers uniform bone-1 scale only (${ik.name})`);
+  // Within float noise (Reparent keeps world placement and can leave 1 ± 2e-16).
+  if (Math.abs(Math.abs(l1.scaleX) - Math.abs(l1.scaleY)) > 1e-9) throw new Error(`reference IK covers uniform bone-1 scale only (${ik.name})`);
   const l2 = pose.get(p2)!;
   const child = project.bones.find((b: any) => b.id === p2);
   // Parent-local space: shoulder at l1.(x,y), target q relative to it.

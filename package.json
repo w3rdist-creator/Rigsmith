@@ -17,6 +17,8 @@
     "wiz:prepare": "python3 -I scripts/wiz/prepare_cutouts.py .hermes/assets/wiz/source/wiz_master.png .hermes/assets/wiz/prepared",
     "wiz:build": "node scripts/wiz/build-in-editor.ts && python3 -I scripts/wiz/compare_setup.py .hermes/assets/wiz/source/wiz_master.png .hermes/assets/wiz/output/review/rigsmith-setup-export.png .hermes/assets/wiz/prepared/manifest.json .hermes/assets/wiz/output/review/rigsmith-setup-diff-x4.png",
     "wiz:v2": "node scripts/roadmap/wiz-greeting-v2.ts && python3 -I scripts/roadmap/contact_sheet.py .hermes/assets/wiz/roadmap-output/greeting-contact-sheet.png \"greeting (original, unchanged)=.hermes/assets/wiz/roadmap-output/greeting-v1-seq.zip\" \"greeting-v2 (curves, anticipation, overshoot, follow-through)=.hermes/assets/wiz/roadmap-output/greeting-v2-seq.zip\"",
+    "wiz:v3": "node scripts/roadmap/wiz-v3.ts",
+    "wiz:v3:deliver": "node scripts/roadmap/wiz-v3-deliver.ts",
     "gates": "sh scripts/roadmap/run-gates.sh",
     "demo:phase2": "node scripts/roadmap/demo-phase2.ts",
     "demo:phase3": "node scripts/roadmap/demo-phase3.ts",

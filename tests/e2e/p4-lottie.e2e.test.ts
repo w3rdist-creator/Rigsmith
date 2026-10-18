@@ -20,6 +20,7 @@ import { compositeDraws, diffImages } from '../support/reference-composite.ts';
 import { richProject } from '../support/runtime-fixture.ts';
 import { readZip } from '../support/zip-read.ts';
 import { EVIDENCE, ROOT, launchIsolated, pickPort, startPreview } from './harness.ts';
+import { lottieWebFrames } from './lottie-web.ts';
 
 const OUT = path.join(EVIDENCE, 'roadmap/p4-lottie');
 mkdirSync(OUT, { recursive: true });
@@ -71,45 +72,12 @@ function frameDiff(name: string, lottie: any, seqZip: string) {
   return { over, covered, worstMean };
 }
 
-/**
- * Plays an exported Lottie JSON in lottie-web's canvas renderer (a blank page, the player
- * script injected from node_modules) and returns each requested frame as decoded RGBA.
- */
-async function lottieWebFrames(lottie: any, frames: number[]): Promise<Buffer[]> {
-  const p = await ctx.newPage();
-  p.on('pageerror', (e) => pageErrors.push(`lottie-web: ${e.message}`));
-  try {
-    await p.goto('about:blank');
-    await p.addScriptTag({ path: path.join(ROOT, 'node_modules/lottie-web/build/player/lottie_canvas.js') });
-    const urls: string[] = await p.evaluate(async ([data, list]) => {
-      const host = document.createElement('div');
-      host.style.cssText = `position:absolute;left:0;top:0;width:${data.w}px;height:${data.h}px`;
-      document.body.style.margin = '0';
-      document.body.appendChild(host);
-      const anim = (window as any).lottie.loadAnimation({
-        container: host, renderer: 'canvas', loop: false, autoplay: false, animationData: data,
-        rendererSettings: { clearCanvas: true, dpr: 1, preserveAspectRatio: 'xMidYMid meet' },
-      });
-      await new Promise<void>((res, rej) => {
-        const t = setTimeout(() => rej(new Error('lottie-web did not load')), 10000);
-        anim.addEventListener('DOMLoaded', () => { clearTimeout(t); res(); });
-      });
-      const canvas = host.querySelector('canvas')!;
-      if (canvas.width !== data.w || canvas.height !== data.h) throw new Error(`canvas ${canvas.width}×${canvas.height}`);
-      return list.map((f: number) => { anim.goToAndStop(f, true); return canvas.toDataURL('image/png'); });
-    }, [lottie, frames] as const);
-    return urls.map((u) => Buffer.from(u.split(',')[1], 'base64'));
-  } finally {
-    await p.close();
-  }
-}
-
 /** Every editor sequence frame vs the same frame (or, for the timing control, frame + shift) drawn by lottie-web. */
 async function webDiff(name: string, lottie: any, seqZip: string, shift = 0) {
   const files = readZip(readFileSync(seqZip));
   const meta = JSON.parse(files.find((f) => f.name.endsWith('sequence.json'))!.data.toString('utf8'));
   assert.deepEqual([lottie.w, lottie.h, lottie.fr, lottie.op], [meta.width, meta.height, meta.fps, meta.frames.length], `${name}: composition = sequence canvas`);
-  const pngs = await lottieWebFrames(lottie, meta.frames.map((fr: any) => fr.frame));
+  const pngs = await lottieWebFrames(ctx, lottie, meta.frames.map((fr: any) => fr.frame), (m) => pageErrors.push(m));
   if (!shift) writeFileSync(path.join(OUT, `${name.split(' ')[0]}-f15-lottie-web.png`), pngs[15]);
   const web = pngs.map(decodePng);
   let over = 0, covered = 0, worstMean = 0, worstOver = 0;
