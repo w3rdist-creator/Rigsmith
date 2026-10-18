@@ -14,7 +14,8 @@ import type { BrowserContext, Page } from 'playwright-core';
 import { serializeProject } from '../../src/model/format.ts';
 import { decodePng } from '../support/png-decode.ts';
 import type { Decoded } from '../support/png-decode.ts';
-import { diffImages } from '../support/reference-composite.ts';
+import { boneWorlds, composite, decodeProjectImages, diffImages } from '../support/reference-composite.ts';
+import type { M } from '../support/reference-composite.ts';
 import { richProject } from '../support/runtime-fixture.ts';
 import { readZip } from '../support/zip-read.ts';
 import { EVIDENCE, launchIsolated, pickPort, startPreview } from './harness.ts';
@@ -224,6 +225,74 @@ describe('reference player', () => {
     }
     report.push(`player pose vs editor-baked runtime data: max |Δ| ${worst.toExponential(2)} (px / deg)`);
     assert.ok(worst < 2e-3, `max difference ${worst}`);
+  });
+
+  // Review DRW-006: the checks above compare the player with the editor, and both use
+  // src/model. Here the pixels come from tests/support/reference-composite.ts, which
+  // imports nothing from src/: it does its own keyframe sampling (bezier included), bone
+  // hierarchy, slot/draw-order rules, mesh skinning + deform and compositing. It does
+  // not solve IK or path constraints, so only the constraint-driven bones (and their
+  // descendants) take their world pose from the runtime file's baked rows — that part
+  // stays the exporter's (shared-model) output. Baked rows hold no shear, so they are
+  // used only for bones whose own world pose has none.
+  it('every frame of wave matches an independent renderer; only IK/path bones come from the runtime’s baked rows (review DRW-006)', async () => {
+    const rt = JSON.parse(readFileSync(files.runtime, 'utf8'));
+    const an = rt.animations.find((a: any) => a.name === 'wave');
+    const anim = fixture.animations.find((a) => a.name === 'wave')!;
+    const nameOf = new Map(fixture.bones.map((b) => [b.id, b.name]));
+    const driven = new Set<string>([...(fixture.ik ?? []).flatMap((k) => k.bones), ...(fixture.pathConstraints ?? []).flatMap((k) => k.bones)]);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const b of fixture.bones) if (b.parentId && driven.has(b.parentId) && !driven.has(b.id)) grew = !!driven.add(b.id);
+    }
+    assert.deepEqual([...driven].sort(), ['f1', 'f2', 'lower', 'upper'], 'constraint-driven bones of the fixture');
+    const images = decodeProjectImages(fixture);
+    // A strict mismatch is a solid-vs-clear pixel or a colour difference where both are
+    // opaque; the rest are anti-aliased edge coverages (the reference subsamples 4×4,
+    // the canvas clips analytically), which a deformed mesh outline has many of.
+    const strictCount = (a: Uint8Array, b: Uint8Array): number => {
+      let n = 0;
+      for (let k = 0; k < a.length; k += 4) {
+        const dc = Math.max(...[0, 1, 2].map((c) => Math.abs((a[k + c] * a[k + 3]) / 255 - (b[k + c] * b[k + 3]) / 255)));
+        const solidVsClear = Math.max(a[k + 3], b[k + 3]) >= 224 && Math.min(a[k + 3], b[k + 3]) <= 31;
+        if (solidVsClear || (a[k + 3] === 255 && b[k + 3] === 255 && dc > 24)) n++;
+      }
+      return n;
+    };
+    let over = 0, strict = 0, worstMean = 0, worstEdge = 0, controlStrict = 0, freeWorst = 0;
+    for (let i = 0; i < 30; i++) {
+      await player.getByTestId('player-time').fill(String(i));
+      const got = await playerCanvas();
+      const t = got.frame / an.fps;
+      const own = boneWorlds(fixture, anim, t);
+      const worlds = new Map(own);
+      for (const id of driven) {
+        const [x, y, deg, sx, sy] = an.baked[nameOf.get(id)!][i];
+        const r = (deg * Math.PI) / 180;
+        worlds.set(id, [Math.cos(r) * sx, Math.sin(r) * sx, -Math.sin(r) * sy, Math.cos(r) * sy, x, y]);
+      }
+      // Unconstrained bones: the reference's own pose agrees with the baked position.
+      for (const [id, m] of own) if (!driven.has(id)) {
+        const row = an.baked[nameOf.get(id)!][i];
+        freeWorst = Math.max(freeWorst, Math.abs(m[4] - row[0]), Math.abs(m[5] - row[1]));
+      }
+      const view = [got.img.width, got.img.height, got.ox, got.oy, got.scale] as const;
+      const ref = composite(fixture, anim, t, images, ...view, worlds);
+      const d = diffImages(got.img, ref, 24);
+      const s = strictCount(got.img.data, ref.data);
+      over += d.over;
+      strict += s;
+      worstMean = Math.max(worstMean, d.meanDiff);
+      worstEdge = Math.max(worstEdge, (d.over - s) / d.covered);
+      // Control: the same renderer without the constrained poses must not match.
+      controlStrict += strictCount(got.img.data, composite(fixture, anim, t, images, ...view, own).data);
+    }
+    report.push(`DRW-006 player vs independent reference (IK/path bones from baked rows): 30 frames, ${over} px over tolerance 24 of which ${strict} strict (solid vs clear or opaque colour), worst edge-coverage share ${(worstEdge * 100).toFixed(2)}% of covered px, worst mean ${worstMean.toFixed(3)}; unconstrained bones vs baked max |Δ| ${freeWorst.toExponential(2)} px; control without constraints: ${controlStrict} strict px`);
+    assert.ok(freeWorst < 2e-3, `unconstrained bones differ by ${freeWorst}`);
+    assert.ok(strict <= 30, `${strict} strict mismatches`);
+    assert.ok(worstEdge <= 0.04, `edge-coverage share ${worstEdge}`);
+    assert.ok(worstMean <= 0.5, `mean ${worstMean}`);
+    assert.ok(controlStrict > 100 * Math.max(1, strict), 'the comparison can tell an unconstrained pose apart');
   });
 
   it('the skin and the stored transition match the editor', async () => {

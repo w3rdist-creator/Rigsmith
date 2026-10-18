@@ -130,6 +130,18 @@ What the agreement tests show (`tests/unit/runtime.test.ts`, `tests/e2e/p4-playe
 - Because evaluation and drawing are shared code, these tests do not independently
   re-derive the maths; the independent checks are the reference rasterizer tests of the
   editor renderer (`tests/support/reference-composite.ts`, phases 1–4).
+- Since the drwdmrs3 fix pass (DRW-006), the **player's own canvas** is also compared,
+  frame by frame (wave, 30 frames), with that independent reference. The reference
+  imports nothing from `src/` and does its own key sampling (bezier included), bone
+  hierarchy, slot / draw-order rules, mesh skinning + deform and compositing. It does
+  not solve IK or path constraints: the four constraint-driven bones take their world
+  pose from the runtime file's `baked` rows, i.e. from the shared-code exporter. Result:
+  9 strict mismatches (solid vs clear, or opaque colour) in 30 frames, against 32 376
+  for a control without the constrained poses; the rest are anti-aliased edge
+  coverages along the deformed mesh outline (≤ 3.2 % of covered pixels per frame; the
+  reference subsamples 4×4). Not covered: constraint solving by a non-shared
+  implementation, the skin and the transition (still player vs editor only), and any
+  third-party runtime — none exists for this format.
 
 Limits: Canvas2D only (no WebGL path); verified in headless Chrome for Testing only; one
 skin at a time (no skin composition); transitions in the player are a single A → B
