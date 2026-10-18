@@ -47,8 +47,15 @@ ALL GATES PASSED.
   - LP-001's later tests, LP-006 and the paste test time out behind the earlier failures,
     or on a setup step when run alone. On HEAD these are cascades and missing controls,
     not a direct red of the defect.
-  - For LP-006 the defect was reproduced from the review's reading of the code. The test
-    is green after the fix and has no clean HEAD red.
+  - These were therefore red-checked by mutation on the fixed tree. Each file was restored
+    by `cp` and checked with `shasum -c`, then the tree was rebuilt.
+    - **LP-006:** with the dialog's `subscribe` removed, the test fails on its first
+      assertion: "the list follows the undo", 2 !== 1 (`lp006-mutation/`).
+    - **Paste retarget:** with the "onto the selected bone" clause disabled, the status
+      assertion fails (`paste-retarget-mutation/`). The first attempt there did not build,
+      so it was discarded (`e2e-invalid-build-failed.txt`).
+- **LP-001's behavioural red** is `lp001-measure-before.txt`, measured on the unfixed
+  model: the report has no driven-by-constraint entry, and the arm keys are dead.
 - **The one test that passes on HEAD** is the case HEAD already handled correctly: an older
   legacy autosave is removed.
 - **The unit file cannot load on HEAD:** the new exports are missing
