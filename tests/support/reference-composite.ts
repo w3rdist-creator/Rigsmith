@@ -144,37 +144,12 @@ export function composite(project: any, anim: any | null, t: number, images: Map
       compositeMesh(acc, w, h, view, a, st, t, project, worlds, setup, meta, img, opacity);
       continue;
     }
-    const m = mul(view, mul(base, trs(a.x, a.y, a.rotation, a.scaleX, a.scaleY)));
-    const im = inv(m);
-    const hw = meta.width / 2, hh = meta.height / 2;
-    // Screen bounding box of the quad.
-    const corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]);
-    const x0 = Math.max(0, Math.floor(Math.min(...corners.map((c) => c[0])))), x1 = Math.min(w - 1, Math.ceil(Math.max(...corners.map((c) => c[0]))));
-    const y0 = Math.max(0, Math.floor(Math.min(...corners.map((c) => c[1])))), y1 = Math.min(h - 1, Math.ceil(Math.max(...corners.map((c) => c[1]))));
-    const sx = meta.width / img.width, sy = meta.height / img.height;
-    for (let py = y0; py <= y1; py++) {
-      for (let px = x0; px <= x1; px++) {
-        // Coverage of the pixel by the quad (4×4 subsamples).
-        let cov = 0;
-        for (let j = 0; j < 4; j++)
-          for (let i = 0; i < 4; i++) {
-            const qx = px + (i + 0.5) / 4, qy = py + (j + 0.5) / 4;
-            const u = im[0] * qx + im[2] * qy + im[4], v = im[1] * qx + im[3] * qy + im[5];
-            if (u >= -hw && u <= hw && v >= -hh && v <= hh) cov++;
-          }
-        if (!cov) continue;
-        const cx = px + 0.5, cy = py + 0.5;
-        const u = (im[0] * cx + im[2] * cy + im[4] + hw) / sx - 0.5;
-        const v = (im[1] * cx + im[3] * cy + im[5] + hh) / sy - 0.5;
-        const s = bilinear(img, u, v);
-        const k = (cov / 16) * opacity;
-        const o = (py * w + px) * 4;
-        const sa = s[3] * k;
-        for (let c = 0; c < 3; c++) acc[o + c] = s[c] * k + acc[o + c] * (1 - sa);
-        acc[o + 3] = sa + acc[o + 3] * (1 - sa);
-      }
-    }
+    quad(acc, w, h, mul(view, mul(base, trs(a.x, a.y, a.rotation, a.scaleX, a.scaleY))), meta, img, opacity);
   }
+  return toImage(acc, w, h);
+}
+
+function toImage(acc: Float64Array, w: number, h: number): RefImage {
   const data = new Uint8Array(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     const a = acc[i * 4 + 3];
@@ -182,6 +157,50 @@ export function composite(project: any, anim: any | null, t: number, images: Map
     for (let c = 0; c < 3; c++) data[i * 4 + c] = a > 0 ? Math.round(Math.min(1, acc[i * 4 + c] / a) * 255) : 0;
   }
   return { width: w, height: h, data };
+}
+
+/** Source-over of one image quad (image centred on the origin of `m`) into a premultiplied float buffer. */
+function quad(acc: Float64Array, w: number, h: number, m: M, meta: { width: number; height: number }, img: Decoded, opacity: number): void {
+  const im = inv(m);
+  const hw = meta.width / 2, hh = meta.height / 2;
+  // Screen bounding box of the quad.
+  const corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]);
+  const x0 = Math.max(0, Math.floor(Math.min(...corners.map((c) => c[0])))), x1 = Math.min(w - 1, Math.ceil(Math.max(...corners.map((c) => c[0]))));
+  const y0 = Math.max(0, Math.floor(Math.min(...corners.map((c) => c[1])))), y1 = Math.min(h - 1, Math.ceil(Math.max(...corners.map((c) => c[1]))));
+  const sx = meta.width / img.width, sy = meta.height / img.height;
+  for (let py = y0; py <= y1; py++) {
+    for (let px = x0; px <= x1; px++) {
+      // Coverage of the pixel by the quad (4×4 subsamples).
+      let cov = 0;
+      for (let j = 0; j < 4; j++)
+        for (let i = 0; i < 4; i++) {
+          const qx = px + (i + 0.5) / 4, qy = py + (j + 0.5) / 4;
+          const u = im[0] * qx + im[2] * qy + im[4], v = im[1] * qx + im[3] * qy + im[5];
+          if (u >= -hw && u <= hw && v >= -hh && v <= hh) cov++;
+        }
+      if (!cov) continue;
+      const cx = px + 0.5, cy = py + 0.5;
+      const u = (im[0] * cx + im[2] * cy + im[4] + hw) / sx - 0.5;
+      const v = (im[1] * cx + im[3] * cy + im[5] + hh) / sy - 0.5;
+      const s = bilinear(img, u, v);
+      const k = (cov / 16) * opacity;
+      const o = (py * w + px) * 4;
+      const sa = s[3] * k;
+      for (let c = 0; c < 3; c++) acc[o + c] = s[c] * k + acc[o + c] * (1 - sa);
+      acc[o + 3] = sa + acc[o + 3] * (1 - sa);
+    }
+  }
+}
+
+/**
+ * Composites explicit draws (back to front): each maps centred image coordinates to world
+ * points; world (x,y) → pixel ((x − originX)·scale, (y − originY)·scale).
+ */
+export function compositeDraws(draws: { m: M; width: number; height: number; img: Decoded; opacity: number }[], w: number, h: number, originX: number, originY: number, scale: number): RefImage {
+  const acc = new Float64Array(w * h * 4);
+  const view: M = [scale, 0, 0, scale, -originX * scale, -originY * scale];
+  for (const d of draws) if (d.opacity > 0) quad(acc, w, h, mul(view, d.m), { width: d.width, height: d.height }, d.img, d.opacity);
+  return toImage(acc, w, h);
 }
 
 const apply = (m: M, x: number, y: number): [number, number] => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];

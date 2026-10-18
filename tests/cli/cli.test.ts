@@ -13,6 +13,7 @@ import { exportRuntime } from '../../src/model/exportRuntime.ts';
 import { parseProject, serializeProject } from '../../src/model/format.ts';
 import { decodePng } from '../support/png-decode.ts';
 import { encodePng } from '../support/png-encode.ts';
+import { lottieProject } from '../support/lottie-fixture.ts';
 import { richProject } from '../support/runtime-fixture.ts';
 import { readZip } from '../support/zip-read.ts';
 import { EVIDENCE, ROOT, launchIsolated, pickPort, startPreview } from '../e2e/harness.ts';
@@ -152,6 +153,23 @@ describe('pure-Node commands', () => {
     assert.equal(pr.images.find((i) => i.name === 'torso.png')!.dataUrl, pr.images.find((i) => i.name === 'stripe.png')!.dataUrl, 'replaced pixels');
     assert.deepEqual(pr.mixes!.map((m) => m.duration).sort(), [0.25, 0.3]);
     assert.ok(pr.skins!.find((s) => s.name === 'stripes')!.entries.some((e) => e.from));
+  });
+
+  it('lottie: subset rig exports with diagnostics; out-of-subset rig and unknown names exit 1 and write nothing', () => {
+    const sub = path.join(OUT, 'lottie-subset.rig.json');
+    writeFileSync(sub, serializeProject(lottieProject()));
+    const out = path.join(OUT, 'hop.lottie.json');
+    const ok = cli('lottie', sub, '--anim', 'hop', '--skin', 'alt', '--out', out);
+    assert.equal(ok.code, 0, JSON.stringify(ok.json));
+    assert.deepEqual(ok.json.diagnostics.map((d: any) => d.feature), ['visibility / image keys', 'validation']);
+    assert.equal(JSON.parse(readFileSync(out, 'utf8')).nm, 'lottie-subset — hop (alt)');
+    const bad = path.join(OUT, 'refused.lottie.json');
+    const r = cli('lottie', RIG, '--anim', 'wave', '--out', bad);
+    assert.equal(r.code, 1);
+    assert.match(r.json.errors.join('\n'), /mesh — band/);
+    assert.equal(cli('lottie', sub, '--anim', 'nope', '--out', bad).code, 1);
+    assert.equal(cli('lottie', sub, '--anim', 'hop', '--skin', 'nope', '--out', bad).code, 1);
+    assert.ok(!existsSync(bad));
   });
 });
 

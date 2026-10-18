@@ -20,6 +20,7 @@ import { buildDemoImages } from './demoArt.ts';
 import { ExportDialog } from './exportDialog.ts';
 import { MixDialog } from './mixDialog.ts';
 import { AtlasDialog } from './atlasDialog.ts';
+import { LottieDialog } from './lottieDialog.ts';
 import { CutoutDialog } from './cutoutDialog.ts';
 import { MeshDialog } from './meshDialog.ts';
 import { deleteConstraint, deletePath } from '../model/rigOps.ts';
@@ -37,6 +38,7 @@ export class App {
   exportDialog!: ExportDialog;
   mixDialog!: MixDialog;
   atlasDialog!: AtlasDialog;
+  lottieDialog!: LottieDialog;
   cutout!: CutoutDialog;
   meshDialog!: MeshDialog;
   private statusEl!: HTMLElement;
@@ -53,6 +55,7 @@ export class App {
     this.exportDialog = new ExportDialog(this);
     this.mixDialog = new MixDialog(this);
     this.atlasDialog = new AtlasDialog(this);
+    this.lottieDialog = new LottieDialog(this);
     this.cutout = new CutoutDialog(this);
     this.meshDialog = new MeshDialog(this);
     document.body.append(this.fileInput, this.imageInput);

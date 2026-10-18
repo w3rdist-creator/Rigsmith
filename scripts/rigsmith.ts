@@ -7,6 +7,7 @@
 import path from 'node:path';
 import type { MissingPolicy } from '../src/model/mix.ts';
 import { safeName } from '../src/render/sequence.ts';
+import { exportLottie } from '../src/model/lottie.ts';
 import { ApiError, EXIT, addImage, atlas, readProject, replaceImage, runtime, sequenceZip, setMix, setSkin, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
 
 const USAGE = `rigsmith <command> [options]
@@ -16,6 +17,7 @@ const USAGE = `rigsmith <command> [options]
   atlas <project> --out <dir> [--padding 2] [--bleed 1] [--no-trim] [--pot] [--max 2048]
   render <project> --anim <name> --out <file.zip> [--skin <name>] [--fps N] [--start F] [--end F] [--scale S] [--padding P]
   mix <project> --from <anim> --to <anim> --at <seconds> --out <file.zip> [--duration S] [--missing setup|hold] [--skin <name>] [--fps N]
+  lottie <project> --anim <name> --out <file.json> [--skin <name>]
   add-image <project> --file <image.png> [--name <name>] --out <project>
   replace-image <project> --image <name> --file <image.png> [--allow-resize] --out <project>
   skin <project> --name <skin> [--set attachment=image ...] [--keyed attachment:fromImage=image ...] --out <project>
@@ -111,6 +113,13 @@ async function main(): Promise<Record<string, unknown>> {
       process.stderr.write('\n');
       writeOutput(out, sequenceZip(r));
       return { outputs: [out], frames: r.files.length, width: r.meta.width, height: r.meta.height, animation: r.meta.animation };
+    }
+    case 'lottie': {
+      const out = need('out');
+      const r = exportLottie(p, need('anim'), flag('skin') ?? null);
+      if (!r.ok) throw new ApiError('Not exportable as the Lottie subset', r.errors);
+      writeOutput(out, JSON.stringify(r.lottie));
+      return { outputs: [out], diagnostics: r.diagnostics };
     }
     case 'add-image': {
       const out = need('out');

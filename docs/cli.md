@@ -26,6 +26,7 @@ read-only test probe.
 | `atlas <project> --out dir [--padding 2] [--bleed 1] [--no-trim] [--pot] [--max 2048]` | no | `rigsmith.atlas` pages + JSON; same metadata and pixels as **Export atlas…** (PNG bytes may differ: Node's zlib vs Chrome's) |
 | `render <project> --anim A --out f.zip [--skin S] [--fps N] [--start F] [--end F] [--scale X] [--padding P]` | yes | transparent PNG sequence ZIP; identical bytes to **Export sequence…** with the same settings |
 | `mix <project> --from A --to B --at T --out f.zip [--duration S] [--missing setup\|hold] [--skin S] [--fps N]` | yes | transition sequence (stored mix duration unless `--duration`); identical bytes to the Mix dialog export |
+| `lottie <project> --anim A --out f.json [--skin S]` | no | Lottie supported subset (docs/lottie.md); exit 1 with every refusal when the rig is outside it; identical bytes to **Export Lottie…** |
 | `add-image <project> --file x.png [--name n] --out p2` | no | adds a PNG (id derived from the name — reproducible) |
 | `replace-image <project> --image n --file x.png [--allow-resize] --out p2` | no | swaps pixels keeping the id (attachments, keys and skins follow); a size change needs `--allow-resize` |
 | `skin <project> --name S [--set att=image …] [--keyed att:fromImage=image …] --out p2` | no | creates/extends a skin (setup-image and keyed-image entries) |
