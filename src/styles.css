@@ -258,3 +258,6 @@ dialog.cutout { width: 580px; }
 .mix-stage { display: flex; justify-content: center; padding: 6px; background: repeating-conic-gradient(#2a2d36 0 25%, #22252d 0 50%) 0 0 / 16px 16px; border: 1px solid var(--line); }
 .mix-canvas { max-width: 100%; max-height: 260px; }
 .mix-rules { margin: 4px 0; padding-left: 16px; font-size: 12px; }
+.atlas-pages { display: flex; flex-wrap: wrap; gap: 8px; max-height: 320px; overflow: auto; }
+.atlas-pages figure { margin: 0; }
+.atlas-page { max-width: 300px; background: repeating-conic-gradient(#2a2d36 0 25%, #22252d 0 50%) 0 0 / 16px 16px; image-rendering: pixelated; border: 1px solid var(--line); }

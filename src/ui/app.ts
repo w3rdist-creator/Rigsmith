@@ -19,6 +19,7 @@ import type { Autosave } from './autosave.ts';
 import { buildDemoImages } from './demoArt.ts';
 import { ExportDialog } from './exportDialog.ts';
 import { MixDialog } from './mixDialog.ts';
+import { AtlasDialog } from './atlasDialog.ts';
 import { CutoutDialog } from './cutoutDialog.ts';
 import { MeshDialog } from './meshDialog.ts';
 import { deleteConstraint, deletePath } from '../model/rigOps.ts';
@@ -35,6 +36,7 @@ export class App {
   autosave: Autosave | null = null;
   exportDialog!: ExportDialog;
   mixDialog!: MixDialog;
+  atlasDialog!: AtlasDialog;
   cutout!: CutoutDialog;
   meshDialog!: MeshDialog;
   private statusEl!: HTMLElement;
@@ -50,6 +52,7 @@ export class App {
     this.viewport.onStatus = (m) => this.status(m);
     this.exportDialog = new ExportDialog(this);
     this.mixDialog = new MixDialog(this);
+    this.atlasDialog = new AtlasDialog(this);
     this.cutout = new CutoutDialog(this);
     this.meshDialog = new MeshDialog(this);
     document.body.append(this.fileInput, this.imageInput);
