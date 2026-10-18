@@ -53,15 +53,23 @@ export function numberField(opts: {
     'aria-label': opts.label,
     disabled: opts.disabled,
   });
-  input.addEventListener('change', () => {
+  // The field shows a rounded value, so typing exactly what is displayed (e.g. "1" over a
+  // real 0.995) fires no `change` event. Enter therefore commits whenever the typed number
+  // differs from the true value; `last` stops change + Enter committing the same edit twice.
+  let last = opts.value;
+  const commit = () => {
     const v = Number(input.value);
     if (input.value.trim() === '' || !Number.isFinite(v)) {
       input.value = fmt(opts.value);
       return;
     }
+    if (v === last) return;
+    last = v;
     opts.onCommit(v);
-  });
+  };
+  input.addEventListener('change', commit);
   input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') commit();
     if (e.key === 'Escape') {
       input.value = fmt(opts.value);
       input.blur();

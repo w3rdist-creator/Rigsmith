@@ -33,6 +33,10 @@ npm run test:e2e    # browser tests; needs `npm run build` first
 node tests/e2e/tour.ts   # optional: screenshots of main states → .hermes/evidence/screens/
 ```
 
+Character acceptance test (needs the private, git-ignored Wiz art under `.hermes/assets/wiz/`):
+`npm run wiz:prepare && npm run wiz:build && npm run wiz:capture && npm run test:wiz` — see
+`docs/WIZ-ANIMATION-DELIVERY.md`.
+
 The e2e suite launches **headless Chrome for Testing** with a throwaway profile in
 `.hermes/browser-profiles/e2e` and its own `vite preview` on a free port in 47614–47617.
 Set `RIGSMITH_CFT=/path/to/Google Chrome for Testing` if your binary lives elsewhere

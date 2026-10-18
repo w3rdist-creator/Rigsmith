@@ -46,7 +46,11 @@ export async function startPreview(port: number): Promise<ChildProcess> {
   throw new Error('preview server did not start');
 }
 
-export async function launchIsolated(profileName: string, extraArgs: string[] = []): Promise<BrowserContext> {
+export async function launchIsolated(
+  profileName: string,
+  extraArgs: string[] = [],
+  opts: { viewport?: { width: number; height: number }; deviceScaleFactor?: number } = {},
+): Promise<BrowserContext> {
   if (!existsSync(CFT)) throw new Error(`Chrome for Testing not found at ${CFT}`);
   const dir = path.join(ROOT, '.hermes/browser-profiles', profileName);
   rmSync(dir, { recursive: true, force: true });
@@ -56,7 +60,8 @@ export async function launchIsolated(profileName: string, extraArgs: string[] = 
   return chromium.launchPersistentContext(dir, {
     executablePath: CFT,
     headless: true,
-    viewport: { width: 1440, height: 900 },
+    viewport: opts.viewport ?? { width: 1440, height: 900 },
+    deviceScaleFactor: opts.deviceScaleFactor,
     acceptDownloads: true,
     downloadsPath: downloads,
     args: ['--no-first-run', '--no-default-browser-check', '--disable-background-networking', ...extraArgs],

@@ -562,6 +562,25 @@ describe('view navigation and remaining tools', () => {
   });
 });
 
+describe('inspector number fields', () => {
+  // Regression (found by the Wiz acceptance test): a value shown rounded ("1" for a real
+  // 0.995) could not be set to the displayed number — no change event, edit silently lost.
+  it('commits a typed value equal to the rounded display when the real value differs', async () => {
+    await freshPage();
+    await page.getByTestId('add-bone').click();
+    await fill('bone-scale-y', '0.995');
+    assert.equal(await page.getByTestId('bone-scale-y').inputValue(), '1', 'display is rounded');
+    assert.equal((await project()).bones[0].scaleY, 0.995);
+    const undo0 = (await state()).undo;
+    await fill('bone-scale-y', '1');
+    assert.equal((await project()).bones[0].scaleY, 1, 'typed 1 is committed');
+    assert.equal((await state()).undo, undo0 + 1, 'exactly one undo step (no double commit)');
+    // Re-entering the true value is still a no-op.
+    await fill('bone-scale-y', '1');
+    assert.equal((await state()).undo, undo0 + 1, 'unchanged value adds no undo step');
+  });
+});
+
 describe('page health', () => {
   it('raised no uncaught page errors', () => {
     assert.deepEqual(pageErrors, []);

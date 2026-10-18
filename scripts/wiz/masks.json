@@ -1,0 +1,33 @@
+{
+  "comment": "Cut parameters for the Wiz acceptance test, in SOURCE pixel coordinates of wiz_master.png (1024x1536, y down). Read by prepare_cutouts.py. Limb axes are measured from the art (PCA of stick-orange pixels inside axisBox); everything else is derived from the image's own alpha matte and colours.",
+  "sourceSha256": "2197f409dcac8bdd9f8295591979dacd47edddbb61734534770e36f5baf2cab9",
+  "stickOrange": { "rMin": 190, "gMin": 100, "gMax": 205, "bMax": 110, "aMin": 200 },
+  "stickColour": { "rMinusBMin": 90, "rMin": 150, "gMin": 80, "bMax": 110, "aMin": 200 },
+  "arms": [
+    {
+      "name": "arm_l",
+      "hand": "hand_l",
+      "hole": "sleeve_hole_l",
+      "axisBox": [140, 735, 285, 885],
+      "topExtension": 60,
+      "bottomExtension": 70,
+      "handSeed": [90, 980],
+      "handBox": [0, 780, 330, 1110]
+    },
+    {
+      "name": "arm_r",
+      "hand": "hand_r",
+      "hole": "sleeve_hole_r",
+      "axisBox": [745, 735, 880, 885],
+      "topExtension": 60,
+      "bottomExtension": 70,
+      "handSeed": [930, 980],
+      "handBox": [700, 780, 1024, 1110]
+    }
+  ],
+  "legs": [
+    { "name": "leg_l", "axisBox": [340, 1140, 480, 1275], "topExtension": 50, "footBox": [150, 1235, 512, 1536] },
+    { "name": "leg_r", "axisBox": [560, 1140, 690, 1275], "topExtension": 50, "footBox": [512, 1235, 900, 1536] }
+  ],
+  "drawOrder": ["leg_l", "leg_r", "sleeve_hole_l", "sleeve_hole_r", "arm_l", "arm_r", "body", "hand_l", "hand_r"]
+}
