@@ -13,7 +13,7 @@ handoff, not a certification. Product review belongs to the next Fable stage.
 
 | Item | Visible control(s) | Exercised by |
 |---|---|---|
-| RV-009 animation import with an explicit mapping | **Import anims…** (`import-anims`): file, per-object mapping selects (bone/attachment/constraint/image, "skip"), dry-run report of unmatched objects and dropped keys, Import (one undo step) | `tests/e2e/motion-reuse.e2e.test.ts`; `tests/unit/motion-reuse.test.ts` |
+| RV-009 animation import with an explicit mapping | **Import anims…** (`import-anims`): file, per-object mapping selects (bone/attachment/constraint/image, each with "(skip — do not import)"), a report of unmatched objects and dropped keys shown before Import, Import (one undo step) | e2e (`tests/e2e/motion-reuse.e2e.test.ts`) drives the **bone** selects, the unmatched report, Cancel, Import and its undo. The attachment/constraint/image mapping and the dropped-key lines are tested at model level only (`tests/unit/motion-reuse.test.ts`); no browser test changes those selects or reads a "Dropped:" line |
 | RV-009 durable key clipboard | Copy / Paste keys (timeline). The copy is stored in IndexedDB with object names, restored after a reload, pasted by name into another project, and what does not fit is reported | same files |
 | RV-009 saved clip sequences | **Sequences…** (`sequences-open`): new/rename/delete, ordered steps with repeat counts, the stored mix durations (shared with Mix…), loop, preview, project frame, ZIP/APNG/GIF export | same files; CLI parity in `tests/cli/cli.test.ts` |
 | RV-009 CLI | `rigsmith set-sequence`, `rigsmith sequence` (docs/cli.md) | `tests/cli/cli.test.ts`: the ZIP is byte-identical to the dialog export |
@@ -123,6 +123,22 @@ handoff, not a certification. Product review belongs to the next Fable stage.
   - profiles
 
   Raw output is git-ignored, in `.hermes/evidence/roadmap/final-f73ca06/`.
+- a3d5ce0 changed only docs and STATUS. Unit tests were re-run on it: 240/240
+  (`.hermes/evidence/roadmap/unit-a3d5ce0.txt`).
+- Wiz originals:
+  - All 201 hashes recorded before the use-case milestone were re-checked with
+    `shasum -c` after this work. All match.
+  - The same directories hold exactly the same 201 files
+    (`.hermes/evidence/roadmap/wiz-assets-sha-check-a3d5ce0.txt`).
+  - This work only added the output directories `rv009-output`, `rv010-output` and
+    `rv012-guide-output` under `.hermes/assets/wiz/`.
+- Order of work:
+  - RV-010 and RV-012 share one commit, f73ca06, so git history does not show the order.
+  - The file times do. The RV-010 evidence (`.hermes/evidence/usecase/rv010*`) was
+    written 15:32–15:40 local time.
+  - `src/model/onboarding.ts` and `src/ui/guideDialog.ts` were created at 15:43 and
+    15:45.
+  - The guide's Wiz run followed at 16:01.
 - The earlier smoke run failed only the test-id audit. The guide's ids were passed through
   a `btn()` helper that the static scan did not read. The scan was extended to read them;
   the allow-list was not used to hide them.
