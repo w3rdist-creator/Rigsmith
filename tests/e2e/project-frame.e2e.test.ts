@@ -143,6 +143,16 @@ describe('RV-003: project delivery frame', () => {
     assert.equal(await page.getByTestId('mix-frame').inputValue(), 'project', 'a project frame is the default canvas');
     assert.match(await page.getByTestId('mix-summary').innerText(), new RegExp(`${frame.width}×${frame.height} px · transparent · project frame`));
     const mix = frames(await download(() => page.getByTestId('mix-export').click(), 'mix-frame.zip'));
+    // The Canvas select switches the mix back to fitting the blended poses.
+    await page.getByTestId('mix-frame').selectOption('fit');
+    const summaryFit = await page.getByTestId('mix-summary').innerText();
+    assert.ok(!/project frame/.test(summaryFit), `fit summary: ${summaryFit}`);
+    const mixFit = frames(await download(() => page.getByTestId('mix-export').click(), 'mix-fit.zip'));
+    assert.equal(mixFit.meta.frame, 'fit');
+    assert.match(summaryFit, new RegExp(`${mixFit.meta.width}×${mixFit.meta.height} px`));
+    // Here the blended poses span the fit-to-all frame, so only the mode (and no larger size) is checked.
+    assert.ok(mixFit.meta.width <= frame.width && mixFit.meta.height <= frame.height, 'fit canvas encloses only the mix poses');
+    await page.getByTestId('mix-frame').selectOption('project');
     await page.getByTestId('mix-close').click();
     assert.equal(mix.meta.frame, 'project');
     for (const png of mix.pngs) assert.deepEqual([png.width, png.height], [frame.width, frame.height]);

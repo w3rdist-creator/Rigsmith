@@ -1,4 +1,4 @@
-// Wiz v3 acceptance (use-case review RV-001 a–f): opens the separately saved UI-built
+// Wiz v3 acceptance (use-case review RV-001 a–f, plus RV-003 and RV-007 on Wiz): opens the separately saved UI-built
 // project (.hermes/assets/wiz/v3-output/wiz-v3.rig.json, made by scripts/roadmap/wiz-v3.ts),
 // exports its loops and the idle → greeting mix through the dialogs in this session, and
 // measures them. Image-space landmarks (face rect, arm centre line, jacket hem) are mapped
@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { BrowserContext, Page } from 'playwright-core';
-import { launchIsolated, pickPort, probe, startPreview } from '../e2e/harness.ts';
+import { launchIsolated, pickPort, probe, readIdb, startPreview } from '../e2e/harness.ts';
 import type { Decoded } from '../support/png-decode.ts';
 import { decodePng } from '../support/png-decode.ts';
 import type { M } from '../support/reference-composite.ts';
@@ -192,6 +192,8 @@ describe('Wiz v3 (UI-built articulated, meshed rig) — RV-001', () => {
       assert.deepEqual([x.meta.frame, x.meta.origin, x.meta.width, x.meta.height, x.meta.scale], ['project', { x: p.frame.x, y: p.frame.y }, p.frame.width, p.frame.height, 1]);
     }
     assert.deepEqual([idleX.pngs.length, greetX.pngs.length, mixX.pngs.length], [90, 72, 103]);
+    // RV-003 on Wiz: the mix starts on idle-v3's first frame, pixel for pixel.
+    assert.ok(Buffer.from(mixX.pngs[0].data).equals(Buffer.from(idleX.pngs[0].data)), 'mix frame 0 is pixel-identical to idle-v3 frame 0');
     idleE = await editorWorlds('idle-v3', 90);
     greetE = await editorWorlds('greeting-v3', 72);
     // The editor's solved worlds equal the independent reference IK at every frame.
@@ -333,6 +335,29 @@ describe('Wiz v3 (UI-built articulated, meshed rig) — RV-001', () => {
     }
     metrics.f = report;
     writeFileSync(path.join(OUT, 'reference-diff.txt'), report.join('\n') + '\n');
+  });
+
+  it('RV-007 on Wiz: with v3 loaded, Save to browser, an edit and its autosave all succeed (IndexedDB)', async () => {
+    const errors0 = await page.getByTestId('error-toast').count();
+    await page.getByTestId('save-browser').click();
+    await page.waitForFunction(() => /Saved to this browser/.test(document.querySelector('[data-testid="status"]')?.textContent ?? ''), null, { timeout: 10000 });
+    const saved = await readIdb(page, 'browser-save');
+    assert.equal(JSON.parse(saved.project).name, p.name);
+    assert.deepEqual(JSON.parse(saved.project).images, p.images, 'the stored copy holds the full art');
+    // Esc (key selection, then the bone selected by the head test) shows the project fields.
+    await page.getByRole('heading', { name: 'Inspector' }).click();
+    for (let i = 0; i < 3 && !(await page.getByTestId('project-name').count()); i++) await page.keyboard.press('Escape');
+    const field = page.getByTestId('project-name');
+    await field.fill(`${p.name} (edited)`);
+    await page.evaluate(() => ((window as any).__t0 = performance.now()));
+    await field.press('Enter');
+    await page.waitForFunction(() => /Autosaved/.test(document.querySelector('[data-testid="autosave-status"]')?.textContent ?? ''), null, { timeout: 5000 });
+    const ms = await page.evaluate(() => performance.now() - (window as any).__t0);
+    assert.ok(ms <= 2000, `autosaved ${Math.round(ms)} ms after the edit`);
+    assert.equal(JSON.parse((await readIdb(page, 'autosave')).project).name, `${p.name} (edited)`);
+    assert.equal(await page.getByTestId('autosave-status').getAttribute('data-state'), 'ok');
+    assert.equal(await page.getByTestId('error-toast').count(), errors0, 'no storage error');
+    metrics.rv007 = { storedCharacters: saved.project.length, autosaveMs: Math.round(ms) };
   });
 
   it('raised no uncaught page errors', () => {
