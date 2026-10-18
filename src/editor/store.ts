@@ -1,27 +1,47 @@
 // Editor state container. All project mutations go through mutate() or a gesture so
 // undo/redo captures them; view/time/selection changes are deliberately not undoable.
-import { playbackTime, samplePose, snapToFrame } from '../model/animation.ts';
+import { playbackTime, snapToFrame } from '../model/animation.ts';
+import type { Frame } from '../model/evaluate.ts';
+import { evaluate } from '../model/evaluate.ts';
 import { History } from '../model/history.ts';
+import type { KeyClipboard, KeyRef } from '../model/keys.ts';
+import { parseLane, sameRef, validRefs } from '../model/keys.ts';
 import type { Mat } from '../model/math.ts';
 import type { EditMode } from '../model/ops.ts';
 import { animationById } from '../model/ops.ts';
-import { computeWorld } from '../model/skeleton.ts';
-import type { Animation, Channel, LocalPose, Project } from '../model/types.ts';
+import type { Animation, LocalPose, Project } from '../model/types.ts';
 import { cloneProject, emptyProject } from '../model/types.ts';
 
 export type Selection = { kind: 'bone'; id: string } | { kind: 'attachment'; id: string } | null;
 export type Tool = 'move' | 'rotate' | 'scale' | 'create';
-export interface KeySelection {
-  boneId: string;
-  channel: Channel;
-  time: number;
-}
+export type KeySelection = KeyRef;
 export type ChangeReason = 'project' | 'selection' | 'time' | 'view' | 'mode' | 'load';
+
+/** Onion skin / ghost frames: editor view state (not undoable, not saved in the project). */
+export interface OnionSettings {
+  enabled: boolean;
+  before: number;
+  after: number;
+  /** Frames between ghosts. */
+  step: number;
+}
 
 export class Editor {
   project: Project = emptyProject();
   selection: Selection = null;
+  /** Primary selected key (drives the curve editor and interpolation control). */
   keySel: KeySelection | null = null;
+  /** All selected keys (includes keySel). */
+  keySels: KeySelection[] = [];
+  clipboard: KeyClipboard | null = null;
+  onion: OnionSettings = { enabled: false, before: 2, after: 2, step: 2 };
+  /** Active skin for display/export (view state). */
+  skinId: string | null = null;
+  /**
+   * In-progress drags outside the canvas (timeline keys, curve handles) register a
+   * canceller here; Esc calls them. Each returns true if it cancelled something.
+   */
+  readonly cancelHooks = new Set<() => boolean>();
   mode: EditMode = 'setup';
   tool: Tool = 'move';
   animId: string | null = null;
@@ -42,6 +62,7 @@ export class Editor {
   }
 
   emit(reason: ChangeReason): void {
+    this.revision++;
     for (const fn of this.listeners) fn(reason);
   }
 
@@ -137,6 +158,8 @@ export class Editor {
     this.history.clear();
     this.selection = null;
     this.keySel = null;
+    this.keySels = [];
+    this.skinId = null;
     this.animId = opts.animId === undefined ? (project.animations[0]?.id ?? null) : opts.animId;
     this.mode = opts.mode ?? 'setup';
     this.time = 0;
@@ -151,12 +174,10 @@ export class Editor {
     if (this.selection?.kind === 'attachment' && !p.attachments.some((a) => a.id === this.selection!.id)) this.selection = null;
     if (this.animId && !p.animations.some((a) => a.id === this.animId)) this.animId = p.animations[0]?.id ?? null;
     if (!this.animId && this.mode === 'animate') this.mode = 'setup';
-    if (this.keySel) {
-      const anim = this.anim();
-      const keys = anim?.tracks[this.keySel.boneId]?.[this.keySel.channel];
-      if (!keys || !keys.some((k) => Math.abs(k.time - this.keySel!.time) < 1e-6)) this.keySel = null;
-    }
     const anim = this.anim();
+    this.keySels = anim ? validRefs(anim, this.keySels) : [];
+    if (this.keySel && !this.keySels.some((r) => sameRef(r, this.keySel!))) this.keySel = this.keySels[0] ?? null;
+    if (this.skinId && !p.skins?.some((s) => s.id === this.skinId)) this.skinId = null;
     if (anim && this.time > anim.duration) this.time = anim.duration;
   }
 
@@ -164,18 +185,57 @@ export class Editor {
 
   select(sel: Selection): void {
     this.selection = sel;
-    if (!sel || sel.kind !== 'bone' || (this.keySel && this.keySel.boneId !== sel.id)) this.keySel = null;
+    // Keep selected keys that belong to the newly selected item; drop the rest.
+    const owner = (r: KeyRef) => {
+      const info = parseLane(r.lane);
+      if (!info || info.kind === 'draw' || info.kind === 'constraint') return null;
+      return { kind: info.kind === 'bone' ? 'bone' : 'attachment', id: info.id };
+    };
+    this.keySels = sel ? this.keySels.filter((r) => {
+      const o = owner(r);
+      return !o || (o.kind === sel.kind && o.id === sel.id);
+    }) : [];
+    if (this.keySel && !this.keySels.some((r) => sameRef(r, this.keySel!))) this.keySel = this.keySels[0] ?? null;
     this.emit('selection');
   }
 
+  /** Selects exactly one key (or none), jumping the playhead to it. */
   selectKey(k: KeySelection | null): void {
     this.keySel = k;
+    this.keySels = k ? [k] : [];
     if (k) {
-      this.selection = { kind: 'bone', id: k.boneId };
+      const info = parseLane(k.lane);
+      if (info?.kind === 'bone') this.selection = { kind: 'bone', id: info.id };
+      else if (info?.kind === 'slot') this.selection = { kind: 'attachment', id: info.id };
       this.setTime(k.time);
       if (this.mode !== 'animate') this.setMode('animate');
     }
     this.emit('selection');
+  }
+
+  /** Replaces the multi-key selection (primary = `primary` or the first ref). */
+  setKeySelection(refs: KeySelection[], primary?: KeySelection | null): void {
+    const anim = this.anim();
+    this.keySels = anim ? validRefs(anim, refs) : [];
+    this.keySel = primary && this.keySels.some((r) => sameRef(r, primary)) ? primary : (this.keySels[0] ?? null);
+    if (this.keySels.length && this.mode !== 'animate') this.setMode('animate');
+    this.emit('selection');
+  }
+
+  /** Adds or removes one key from the selection (Shift/Ctrl-click). */
+  toggleKeyInSelection(k: KeySelection): void {
+    const has = this.keySels.some((r) => sameRef(r, k));
+    this.setKeySelection(has ? this.keySels.filter((r) => !sameRef(r, k)) : [...this.keySels, k], has ? this.keySel : k);
+  }
+
+  isKeySelected(k: KeySelection): boolean {
+    return this.keySels.some((r) => sameRef(r, k));
+  }
+
+  /** Esc: cancels the active non-canvas drag, if any. */
+  cancelActiveDrag(): boolean {
+    for (const fn of this.cancelHooks) if (fn()) return true;
+    return false;
   }
 
   setMode(mode: EditMode): void {
@@ -195,6 +255,7 @@ export class Editor {
     this.stop();
     this.animId = id;
     this.keySel = null;
+    this.keySels = [];
     this.time = 0;
     if (!id) this.mode = 'setup';
     this.emit('mode');
@@ -253,14 +314,31 @@ export class Editor {
     return animationById(this.project, this.animId);
   }
 
-  /** Pose displayed on the canvas: animated in animate mode, setup pose otherwise. */
+  /** Animation shown on the canvas: the current one in animate mode, none in setup. */
+  shownAnim(): Animation | null {
+    return this.mode === 'animate' ? this.anim() : null;
+  }
+
+  /** Fully evaluated frame displayed on the canvas (constraints, slots, meshes, skin). */
+  frame(): Frame {
+    const key = `${this.mode}|${this.animId}|${this.time}|${this.skinId}|${this.revision}`;
+    if (this.frameCache?.key === key && this.frameCache.project === this.project) return this.frameCache.frame;
+    const frame = evaluate(this.project, this.shownAnim(), this.time, { skinId: this.skinId });
+    this.frameCache = { key, project: this.project, frame };
+    return frame;
+  }
+
+  private frameCache: { key: string; project: Project; frame: Frame } | null = null;
+  /** Bumped on every emit so cached frames never outlive a mutation. */
+  private revision = 0;
+
+  /** Local pose displayed on the canvas (after constraints). */
   pose(): Map<string, LocalPose> {
-    const anim = this.mode === 'animate' ? this.anim() : null;
-    return samplePose(this.project.bones, anim, this.time);
+    return this.frame().pose;
   }
 
   world(): Map<string, Mat> {
-    return computeWorld(this.project.bones, this.pose());
+    return this.frame().world;
   }
 
   selectedBoneId(): string | null {

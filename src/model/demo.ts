@@ -1,7 +1,7 @@
 // Built-in demo: "Tock", an original wind-up tin courier. Art is generated at runtime
 // (src/ui/demoArt.ts); this module only defines the rig, attachments and animations.
 import type { Animation, Attachment, Bone, ImageAsset, Interp, Key, Project } from './types.ts';
-import { FORMAT_ID, FORMAT_VERSION } from './types.ts';
+import { FORMAT_ID } from './types.ts';
 
 export interface DemoPart {
   id: string;
@@ -117,7 +117,7 @@ export function demoAnimations(): Animation[] {
 export function buildDemoProject(images: ImageAsset[]): Project {
   return {
     format: FORMAT_ID,
-    version: FORMAT_VERSION,
+    version: 1,
     name: 'Tock the tin courier (demo)',
     bones: demoBones(),
     images,

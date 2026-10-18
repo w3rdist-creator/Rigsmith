@@ -1,0 +1,865 @@
+{
+ "format": "rigsmith.project",
+ "version": 1,
+ "name": "Legacy v1 fixture (written by the pre-roadmap serializer at 3774188)",
+ "bones": [
+  {
+   "id": "b_root",
+   "name": "root",
+   "parentId": null,
+   "x": 0,
+   "y": 0,
+   "rotation": 0,
+   "scaleX": 1,
+   "scaleY": 1,
+   "length": 24,
+   "color": "#f2c14e"
+  },
+  {
+   "id": "b_torso",
+   "name": "torso",
+   "parentId": "b_root",
+   "x": 0,
+   "y": -6,
+   "rotation": -90,
+   "scaleX": 1,
+   "scaleY": 1,
+   "length": 84,
+   "color": "#f78154"
+  },
+  {
+   "id": "b_head",
+   "name": "head",
+   "parentId": "b_torso",
+   "x": 84,
+   "y": 0,
+   "rotation": 0,
+   "scaleX": 1,
+   "scaleY": 1,
+   "length": 52,
+   "color": "#f78154"
+  },
+  {
+   "id": "b_key",
+   "name": "windup-key",
+   "parentId": "b_torso",
+   "x": 50,
+   "y": -34,
+   "rotation": 270,
+   "scaleX": 1,
+   "scaleY": 1,
+   "length": 26,
+   "color": "#b4c5e4"
+  },
+  {
+   "id": "b_arm_back",
+   "name": "arm-back",
+   "parentId": "b_torso",
+   "x": 72,
+   "y": 6,
+   "rotation": 180,
+   "scaleX": 1,
+   "scaleY": 1,
+   "length": 46,
+   "color": "#5fad56"
+  },
+  {
+   "id": "b_fore_back",
+   "name": "forearm-back",
+   "parentId": "b_arm_back",
+   "x": 46,
+   "y": 0,
+   "rotation": -12,
+   "scaleX": 1,
+   "scaleY": 1,
+   "length": 44,
+   "color": "#5fad56"
+  },
+  {
+   "id": "b_thigh_back",
+   "name": "thigh-back",
+   "parentId": "b_root",
+   "x": -5,
+   "y": 4,
+   "rotation": 90,
+   "scaleX": 1,
+   "scaleY": 1,
+   "length": 46,
+   "color": "#4d9078"
+  },
+  {
+   "id": "b_shin_back",
+   "name": "shin-back",
+   "parentId": "b_thigh_back",
+   "x": 46,
+   "y": 0,
+   "rotation": 0,
+   "scaleX": 1,
+   "scaleY": 1,
+   "length": 48,
+   "color": "#4d9078"
+  },
+  {
+   "id": "b_thigh_front",
+   "name": "thigh-front",
+   "parentId": "b_root",
+   "x": 5,
+   "y": 4,
+   "rotation": 90,
+   "scaleX": 1,
+   "scaleY": 1,
+   "length": 46,
+   "color": "#3c91e6"
+  },
+  {
+   "id": "b_shin_front",
+   "name": "shin-front",
+   "parentId": "b_thigh_front",
+   "x": 46,
+   "y": 0,
+   "rotation": 0,
+   "scaleX": 1,
+   "scaleY": 1,
+   "length": 48,
+   "color": "#3c91e6"
+  },
+  {
+   "id": "b_arm_front",
+   "name": "arm-front",
+   "parentId": "b_torso",
+   "x": 72,
+   "y": -6,
+   "rotation": 180,
+   "scaleX": 1,
+   "scaleY": 1,
+   "length": 46,
+   "color": "#3c91e6"
+  },
+  {
+   "id": "b_fore_front",
+   "name": "forearm-front",
+   "parentId": "b_arm_front",
+   "x": 46,
+   "y": 0,
+   "rotation": -12,
+   "scaleX": 1,
+   "scaleY": 1,
+   "length": 44,
+   "color": "#3c91e6"
+  }
+ ],
+ "images": [
+  {
+   "id": "img_torso",
+   "name": "tock-torso.png",
+   "mime": "image/png",
+   "width": 74,
+   "height": 92,
+   "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+  },
+  {
+   "id": "img_head",
+   "name": "tock-head.png",
+   "mime": "image/png",
+   "width": 70,
+   "height": 60,
+   "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+  },
+  {
+   "id": "img_upperarm",
+   "name": "tock-upper-arm.png",
+   "mime": "image/png",
+   "width": 20,
+   "height": 50,
+   "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+  },
+  {
+   "id": "img_forearm",
+   "name": "tock-forearm.png",
+   "mime": "image/png",
+   "width": 22,
+   "height": 50,
+   "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+  },
+  {
+   "id": "img_thigh",
+   "name": "tock-thigh.png",
+   "mime": "image/png",
+   "width": 24,
+   "height": 50,
+   "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+  },
+  {
+   "id": "img_shin",
+   "name": "tock-shin.png",
+   "mime": "image/png",
+   "width": 30,
+   "height": 56,
+   "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+  },
+  {
+   "id": "img_key",
+   "name": "tock-windup-key.png",
+   "mime": "image/png",
+   "width": 40,
+   "height": 26,
+   "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+  }
+ ],
+ "attachments": [
+  {
+   "id": "att_arm_back",
+   "name": "arm_back",
+   "boneId": "b_arm_back",
+   "imageId": "img_upperarm",
+   "x": 23,
+   "y": 0,
+   "rotation": -90,
+   "scaleX": 1,
+   "scaleY": 1,
+   "opacity": 1
+  },
+  {
+   "id": "att_fore_back",
+   "name": "fore_back",
+   "boneId": "b_fore_back",
+   "imageId": "img_forearm",
+   "x": 22,
+   "y": 0,
+   "rotation": -90,
+   "scaleX": 1,
+   "scaleY": 1,
+   "opacity": 1
+  },
+  {
+   "id": "att_thigh_back",
+   "name": "thigh_back",
+   "boneId": "b_thigh_back",
+   "imageId": "img_thigh",
+   "x": 23,
+   "y": 0,
+   "rotation": -90,
+   "scaleX": 1,
+   "scaleY": 1,
+   "opacity": 1
+  },
+  {
+   "id": "att_shin_back",
+   "name": "shin_back",
+   "boneId": "b_shin_back",
+   "imageId": "img_shin",
+   "x": 24,
+   "y": 4,
+   "rotation": -90,
+   "scaleX": 1,
+   "scaleY": 1,
+   "opacity": 1
+  },
+  {
+   "id": "att_key",
+   "name": "key",
+   "boneId": "b_key",
+   "imageId": "img_key",
+   "x": 18,
+   "y": 0,
+   "rotation": 0,
+   "scaleX": 1,
+   "scaleY": 1,
+   "opacity": 1
+  },
+  {
+   "id": "att_torso",
+   "name": "torso",
+   "boneId": "b_torso",
+   "imageId": "img_torso",
+   "x": 42,
+   "y": 0,
+   "rotation": 90,
+   "scaleX": 1,
+   "scaleY": 1,
+   "opacity": 1
+  },
+  {
+   "id": "att_head",
+   "name": "head",
+   "boneId": "b_head",
+   "imageId": "img_head",
+   "x": 26,
+   "y": 0,
+   "rotation": 90,
+   "scaleX": 1,
+   "scaleY": 1,
+   "opacity": 1
+  },
+  {
+   "id": "att_thigh_front",
+   "name": "thigh_front",
+   "boneId": "b_thigh_front",
+   "imageId": "img_thigh",
+   "x": 23,
+   "y": 0,
+   "rotation": -90,
+   "scaleX": 1,
+   "scaleY": 1,
+   "opacity": 1
+  },
+  {
+   "id": "att_shin_front",
+   "name": "shin_front",
+   "boneId": "b_shin_front",
+   "imageId": "img_shin",
+   "x": 24,
+   "y": 4,
+   "rotation": -90,
+   "scaleX": 1,
+   "scaleY": 1,
+   "opacity": 1
+  },
+  {
+   "id": "att_arm_front",
+   "name": "arm_front",
+   "boneId": "b_arm_front",
+   "imageId": "img_upperarm",
+   "x": 23,
+   "y": 0,
+   "rotation": -90,
+   "scaleX": 1,
+   "scaleY": 1,
+   "opacity": 1
+  },
+  {
+   "id": "att_fore_front",
+   "name": "fore_front",
+   "boneId": "b_fore_front",
+   "imageId": "img_forearm",
+   "x": 22,
+   "y": 0,
+   "rotation": -90,
+   "scaleX": 1,
+   "scaleY": 1,
+   "opacity": 1
+  }
+ ],
+ "animations": [
+  {
+   "id": "anim_walk",
+   "name": "walk",
+   "duration": 1,
+   "fps": 30,
+   "loop": true,
+   "tracks": {
+    "b_root": {
+     "translate": [
+      {
+       "time": 0,
+       "value": [
+        0,
+        0
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.25,
+       "value": [
+        0,
+        -7
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.5,
+       "value": [
+        0,
+        0
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.75,
+       "value": [
+        0,
+        -7
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1,
+       "value": [
+        0,
+        0
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "rotate": [],
+     "scale": []
+    },
+    "b_torso": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        -86
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.5,
+       "value": [
+        -94
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1,
+       "value": [
+        -86
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "scale": []
+    },
+    "b_head": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        -5
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.5,
+       "value": [
+        5
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1,
+       "value": [
+        -5
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "scale": []
+    },
+    "b_key": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        270
+       ],
+       "interp": "linear"
+      },
+      {
+       "time": 1,
+       "value": [
+        630
+       ],
+       "interp": "linear"
+      }
+     ],
+     "scale": []
+    },
+    "b_thigh_front": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        62
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.5,
+       "value": [
+        118
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1,
+       "value": [
+        62
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "scale": []
+    },
+    "b_shin_front": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        4
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.25,
+       "value": [
+        8
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.5,
+       "value": [
+        2
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.75,
+       "value": [
+        48
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1,
+       "value": [
+        4
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "scale": []
+    },
+    "b_thigh_back": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        118
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.5,
+       "value": [
+        62
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1,
+       "value": [
+        118
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "scale": []
+    },
+    "b_shin_back": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        2
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.25,
+       "value": [
+        48
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.5,
+       "value": [
+        4
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.75,
+       "value": [
+        8
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1,
+       "value": [
+        2
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "scale": []
+    },
+    "b_arm_front": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        210
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.5,
+       "value": [
+        150
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1,
+       "value": [
+        210
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "scale": []
+    },
+    "b_fore_front": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        -10
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.5,
+       "value": [
+        -40
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1,
+       "value": [
+        -10
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "scale": []
+    },
+    "b_arm_back": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        150
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.5,
+       "value": [
+        210
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1,
+       "value": [
+        150
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "scale": []
+    },
+    "b_fore_back": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        -40
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.5,
+       "value": [
+        -10
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1,
+       "value": [
+        -40
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "scale": []
+    }
+   }
+  },
+  {
+   "id": "anim_wave",
+   "name": "wave",
+   "duration": 1.6,
+   "fps": 30,
+   "loop": true,
+   "tracks": {
+    "b_arm_front": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        20
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1.6,
+       "value": [
+        20
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "scale": []
+    },
+    "b_fore_front": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        -60
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.4,
+       "value": [
+        -20
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.8,
+       "value": [
+        -60
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1.2,
+       "value": [
+        -20
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1.6,
+       "value": [
+        -60
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "scale": []
+    },
+    "b_head": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        0
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.8,
+       "value": [
+        8
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1.6,
+       "value": [
+        0
+       ],
+       "interp": "smooth"
+      }
+     ],
+     "scale": []
+    },
+    "b_torso": {
+     "translate": [],
+     "rotate": [],
+     "scale": [
+      {
+       "time": 0,
+       "value": [
+        1,
+        1
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 0.8,
+       "value": [
+        1.04,
+        0.97
+       ],
+       "interp": "smooth"
+      },
+      {
+       "time": 1.6,
+       "value": [
+        1,
+        1
+       ],
+       "interp": "smooth"
+      }
+     ]
+    },
+    "b_key": {
+     "translate": [],
+     "rotate": [
+      {
+       "time": 0,
+       "value": [
+        270
+       ],
+       "interp": "linear"
+      },
+      {
+       "time": 1.6,
+       "value": [
+        450
+       ],
+       "interp": "linear"
+      }
+     ],
+     "scale": []
+    }
+   }
+  }
+ ]
+}

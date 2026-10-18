@@ -1,4 +1,5 @@
 import { App } from './ui/app.ts';
+import { Autosave } from './ui/autosave.ts';
 import { h } from './ui/dom.ts';
 import { renderImages, renderInspector, renderSkeleton } from './ui/panels.ts';
 import { Timeline } from './ui/timeline.ts';
@@ -14,6 +15,8 @@ const openHelp = () => helpDialog.showModal();
 
 app.mount($('stage-canvas') as HTMLCanvasElement, $('status-msg'), $('toasts'));
 new Timeline(app, $('timeline'));
+app.autosave = new Autosave(app, $('autosave-status'));
+app.autosave.checkForRecovery($('banners'));
 
 const toolbar = $('toolbar');
 const skeleton = $('skeleton-panel');
@@ -73,6 +76,10 @@ Object.defineProperty(window, '__rigsmith', {
       animName: app.ed.anim()?.name ?? null,
       selection: app.ed.selection ? { ...app.ed.selection } : null,
       keySel: app.ed.keySel ? { ...app.ed.keySel } : null,
+      keySels: app.ed.keySels.map((k) => ({ ...k })),
+      onion: { ...app.ed.onion },
+      skinId: app.ed.skinId,
+      autosavePending: app.autosave?.pending ?? false,
       undo: app.ed.history.size.undo,
       redo: app.ed.history.size.redo,
       dirty: app.ed.dirty,

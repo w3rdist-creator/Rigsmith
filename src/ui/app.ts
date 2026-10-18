@@ -1,16 +1,23 @@
 // Application wiring: actions shared by the toolbar, panels, timeline and shortcuts.
 import { Editor } from '../editor/store.ts';
 import type { Tool } from '../editor/store.ts';
-import { findKeyIndex, keysBeyondEnd, removeKey, snapToFrame } from '../model/animation.ts';
+import { findKeyIndex, keysBeyondEnd, removeKey, setInterp, snapToFrame } from '../model/animation.ts';
+import { CURVE_PRESETS } from '../model/curve.ts';
+import type { KeyRef } from '../model/keys.ts';
+import { allLanes, boneLane, closeLoopSeam, copyKeys, deleteKeys, findKey, laneKeys, pasteKeys, sameRef, shiftKeys } from '../model/keys.ts';
 import { buildDemoProject } from '../model/demo.ts';
 import { exportRuntime } from '../model/exportRuntime.ts';
 import { parseProject, serializeProject } from '../model/format.ts';
 import { apply, invert } from '../model/math.ts';
 import { keyChannels, makeBone, uniqueName } from '../model/ops.ts';
 import { CycleError, attachmentWorld, boneTip, deleteBone, reparentBone } from '../model/skeleton.ts';
-import type { Animation, Channel, Project } from '../model/types.ts';
+import type { Animation, Channel, Curve, Key, Project } from '../model/types.ts';
 import { CHANNELS, emptyProject, newId } from '../model/types.ts';
+import { frameBounds } from '../model/evaluate.ts';
+import { drawFrame } from '../render/draw.ts';
+import type { Autosave } from './autosave.ts';
 import { buildDemoImages } from './demoArt.ts';
+import { ExportDialog } from './exportDialog.ts';
 import { h } from './dom.ts';
 import { ImageCache, importImageFile } from './images.ts';
 import { Viewport, isTyping } from './viewport.ts';
@@ -21,6 +28,8 @@ export class App {
   readonly ed = new Editor();
   readonly images = new ImageCache();
   viewport!: Viewport;
+  autosave: Autosave | null = null;
+  exportDialog!: ExportDialog;
   private statusEl!: HTMLElement;
   private toastEl!: HTMLElement;
   private statusTimer = 0;
@@ -32,6 +41,7 @@ export class App {
     this.toastEl = toastEl;
     this.viewport = new Viewport(canvas, this.ed, this.images);
     this.viewport.onStatus = (m) => this.status(m);
+    this.exportDialog = new ExportDialog(this);
     document.body.append(this.fileInput, this.imageInput);
     this.fileInput.addEventListener('change', () => {
       const f = this.fileInput.files?.[0];
@@ -156,6 +166,7 @@ export class App {
   saveDownload(): void {
     download(new Blob([serializeProject(this.ed.project)], { type: 'application/json' }), `${this.fileBaseName()}.rig.json`);
     this.ed.dirty = false;
+    this.autosave?.clearAfterExplicitSave();
     this.ed.emit('view');
     this.status('Project downloaded (images embedded).');
   }
@@ -164,6 +175,7 @@ export class App {
     try {
       localStorage.setItem(STORAGE_KEY, serializeProject(this.ed.project));
       this.ed.dirty = false;
+      this.autosave?.clearAfterExplicitSave();
       this.ed.emit('view');
       this.status('Saved to this browser’s local storage.');
     } catch (e) {
@@ -201,30 +213,21 @@ export class App {
 
   /** Renders the current pose without editor chrome to a transparent PNG cropped to the art. */
   exportPngFrame(): void {
-    const p = this.ed.project;
-    const world = this.ed.world();
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const a of p.attachments) {
-      const im = p.images.find((i) => i.id === a.imageId);
-      if (!im) continue;
-      const m = attachmentWorld(a, world);
-      for (const [x, y] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-        const q = apply(m, { x: (x * im.width) / 2, y: (y * im.height) / 2 });
-        minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x);
-        minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
-      }
-    }
-    if (!Number.isFinite(minX)) return this.error('Nothing to render', ['Attach at least one image first.']);
+    const frame = this.ed.frame();
+    const b = frameBounds(frame);
+    if (!b) return this.error('Nothing to render', ['Attach at least one image first.']);
     const pad = 8;
-    const w = Math.ceil(maxX - minX + pad * 2), hh = Math.ceil(maxY - minY + pad * 2);
+    const minX = b.minX, minY = b.minY;
+    const w = Math.ceil(b.maxX - minX + pad * 2), hh = Math.ceil(b.maxY - minY + pad * 2);
     const c = document.createElement('canvas');
     c.width = w;
     c.height = hh;
-    this.viewport.render(c.getContext('2d')!, w, hh, 1, false, { zoom: 1, x: -minX + pad, y: -minY + pad });
+    const g = c.getContext('2d')!;
+    drawFrame(g, frame, (im) => this.images.get(im), { a: 1, b: 0, c: 0, d: 1, tx: -minX + pad, ty: -minY + pad });
     c.toBlob((blob) => {
       if (!blob) return this.error('PNG export failed');
-      const frame = this.ed.anim() && this.ed.mode === 'animate' ? `-f${Math.round(this.ed.time * this.ed.anim()!.fps)}` : '-setup';
-      download(blob, `${this.fileBaseName()}${frame}.png`);
+      const fr = this.ed.anim() && this.ed.mode === 'animate' ? `-f${Math.round(this.ed.time * this.ed.anim()!.fps)}` : '-setup';
+      download(blob, `${this.fileBaseName()}${fr}.png`);
       this.status(`Exported ${w}×${hh} PNG frame.`);
     }, 'image/png');
   }
@@ -316,7 +319,7 @@ export class App {
 
   deleteSelection(): void {
     const ed = this.ed;
-    if (ed.keySel && ed.mode === 'animate') return this.deleteSelectedKey();
+    if (ed.keySels.length && ed.mode === 'animate') return this.deleteSelectedKey();
     const sel = ed.selection;
     if (!sel) return;
     if (sel.kind === 'bone') {
@@ -384,7 +387,7 @@ export class App {
     if (!ed.animId) return this.status('Create an animation first (+ in the timeline).');
     if (ed.mode !== 'animate') ed.setMode('animate');
     ed.mutate('Set key', (p) => keyChannels(p, ed.animId!, ed.time, boneId, channels));
-    ed.selectKey({ boneId, channel: channels[0], time: snapToFrame(ed.time, ed.anim()!.fps) });
+    ed.selectKey({ lane: boneLane(boneId, channels[0]), time: snapToFrame(ed.time, ed.anim()!.fps) });
   }
 
   /** Toggles a single channel key at the current frame. */
@@ -406,15 +409,130 @@ export class App {
 
   deleteSelectedKey(): void {
     const ed = this.ed;
-    const k = ed.keySel;
+    const refs = ed.keySels.slice();
     const anim = ed.anim();
-    if (!k || !anim) return;
-    ed.mutate('Delete key', (p) => {
+    if (!refs.length || !anim) return;
+    ed.mutate(refs.length > 1 ? `Delete ${refs.length} keys` : 'Delete key', (p) => {
       const a = p.animations.find((x) => x.id === anim.id);
-      const keys = a?.tracks[k.boneId]?.[k.channel];
-      if (keys) removeKey(keys, k.time);
+      if (a) deleteKeys(a, refs);
     });
     ed.selectKey(null);
+  }
+
+  // ---- Multi-key editing ------------------------------------------------------------
+
+  /** The primary selected key object (any lane type). */
+  primaryKey(): { time: number } | undefined {
+    const anim = this.ed.anim();
+    return anim && this.ed.keySel ? findKey(anim, this.ed.keySel) : undefined;
+  }
+
+  private mutateAnim(label: string, fn: (a: Animation) => void): void {
+    const id = this.ed.animId;
+    if (!id) return;
+    this.ed.mutate(label, (p) => {
+      const a = p.animations.find((x) => x.id === id);
+      if (a) fn(a);
+    });
+  }
+
+  /** Selected keys that carry an interpolation (not image/draw-order/visibility keys). */
+  private curveKeys(a: Animation): Key[] {
+    const out: Key[] = [];
+    for (const r of this.ed.keySels) {
+      if (/:(visible)$/.test(r.lane)) continue;
+      const k = findKey(a, r);
+      if (k && 'interp' in k) out.push(k as Key);
+    }
+    return out;
+  }
+
+  setInterpForSelection(interp: Key['interp']): void {
+    const n = this.ed.keySels.length;
+    this.mutateAnim(n > 1 ? `Interpolation of ${n} keys` : 'Change interpolation', (a) => {
+      for (const k of this.curveKeys(a)) setInterp(k, interp);
+    });
+  }
+
+  /** Writes a curve onto every selected curve-capable key (used inside gestures too). */
+  applyCurveTo(p: Project, curve: Curve): void {
+    const a = p.animations.find((x) => x.id === this.ed.animId);
+    if (a) for (const k of this.curveKeys(a)) setInterp(k, 'bezier', curve);
+  }
+
+  setCurveForSelection(curve: Curve, label: string): void {
+    this.ed.mutate(label, (p) => this.applyCurveTo(p, curve));
+  }
+
+  applyCurvePreset(name: string): void {
+    if (name === 'step') return this.setInterpForSelection('step');
+    const c = CURVE_PRESETS[name];
+    if (c) this.setCurveForSelection(c, `Curve preset ${name}`);
+    this.status(`Applied “${name}” easing to ${this.ed.keySels.length} key(s).`);
+  }
+
+  nudgeKeys(frames: number): void {
+    const ed = this.ed;
+    const anim = ed.anim();
+    if (!anim || !ed.keySels.length) return;
+    const refs = ed.keySels.slice();
+    const primary = ed.keySel;
+    let moved: KeyRef[] = [];
+    ed.mutate(refs.length > 1 ? `Nudge ${refs.length} keys` : 'Nudge key', (p) => {
+      const a = p.animations.find((x) => x.id === anim.id)!;
+      moved = shiftKeys(a, refs, frames / anim.fps);
+    });
+    const idx = primary ? refs.findIndex((r) => sameRef(r, primary)) : 0;
+    ed.setKeySelection(moved, moved[idx]);
+    if (ed.keySel) ed.setTime(ed.keySel.time);
+  }
+
+  copySelectedKeys(): void {
+    const anim = this.ed.anim();
+    if (!anim) return;
+    const clip = copyKeys(anim, this.ed.keySels);
+    if (!clip) return this.status('Select keys to copy.');
+    this.ed.clipboard = clip;
+    this.ed.emit('selection');
+    this.status(`Copied ${clip.items.length} key(s). Move the playhead (and select another bone to retarget) and Paste.`);
+  }
+
+  pasteKeysAtPlayhead(): void {
+    const ed = this.ed;
+    const anim = ed.anim();
+    const clip = ed.clipboard;
+    if (!anim || !clip) return this.status('Nothing to paste. Copy keys first.');
+    const t = snapToFrame(ed.time, anim.fps);
+    let result = { refs: [] as KeyRef[], skipped: 0 };
+    ed.mutate(`Paste ${clip.items.length} key(s)`, (p) => {
+      const a = p.animations.find((x) => x.id === anim.id)!;
+      result = pasteKeys(a, clip, t, ed.selectedBoneId());
+    });
+    ed.setKeySelection(result.refs);
+    this.status(`Pasted ${result.refs.length} key(s) at frame ${Math.round(t * anim.fps)}${result.skipped ? `; ${result.skipped} would land past the end and were skipped` : ''}.`);
+  }
+
+  closeLoop(): void {
+    const ed = this.ed;
+    const anim = ed.anim();
+    if (!anim) return;
+    const lanes = ed.keySels.length ? [...new Set(ed.keySels.map((r) => r.lane))] : allLanes(anim);
+    if (!lanes.length) return this.status('No keyed lanes to close.');
+    let changed: string[] = [];
+    ed.mutate('Close loop seam', (p) => {
+      const a = p.animations.find((x) => x.id === anim.id)!;
+      changed = closeLoopSeam(a, lanes);
+    });
+    this.status(`Loop seam closed on ${changed.length} lane(s): each lane’s first key copied to frame ${Math.round(anim.duration * anim.fps)}.`);
+  }
+
+  selectAllKeys(): void {
+    const anim = this.ed.anim();
+    if (!anim) return;
+    const refs: KeyRef[] = [];
+    for (const lane of allLanes(anim)) for (const k of laneKeys(anim, lane) ?? []) refs.push({ lane, time: k.time });
+    this.ed.setKeySelection(refs);
+    this.status(`Selected all ${refs.length} keys.`);
   }
 
   stepFrame(dir: number): void {
@@ -454,6 +572,21 @@ export class App {
       if (ed.redo()) this.status(ed.lastUndoRedo);
       return;
     }
+    if (mod && e.key.toLowerCase() === 'c' && ed.keySels.length) {
+      e.preventDefault();
+      this.copySelectedKeys();
+      return;
+    }
+    if (mod && e.key.toLowerCase() === 'v' && ed.clipboard) {
+      e.preventDefault();
+      this.pasteKeysAtPlayhead();
+      return;
+    }
+    if (mod && e.key.toLowerCase() === 'a' && ed.anim()) {
+      e.preventDefault();
+      this.selectAllKeys();
+      return;
+    }
     if (mod || e.altKey) return;
     // Leave Space/Tab to native behaviour on focused buttons/links (activation, focus order).
     const tag = (e.target as HTMLElement | null)?.tagName;
@@ -484,8 +617,16 @@ export class App {
         this.deleteSelection();
         break;
       case 'Escape':
+        if (ed.cancelActiveDrag()) break;
         if (this.viewport.isDragging) this.viewport.cancelDrag();
+        else if (ed.keySels.length) ed.setKeySelection([]);
         else ed.select(null);
+        break;
+      case '[':
+        this.nudgeKeys(-1);
+        break;
+      case ']':
+        this.nudgeKeys(1);
         break;
       case 'f':
       case 'F':

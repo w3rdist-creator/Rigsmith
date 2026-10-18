@@ -30,13 +30,14 @@
           <p class="dim">Drop PNG/JPEG/WebP/GIF files or a <code>.rig.json</code> project anywhere on the canvas.</p>
         </div>
         <div id="toasts" class="toasts" aria-live="assertive"></div>
+        <div id="banners" class="banners"></div>
       </section>
       <aside class="side right" aria-label="Inspector">
         <section id="inspector-panel" class="panel grow" data-testid="inspector"></section>
       </aside>
     </main>
     <section id="timeline" class="timeline" aria-label="Timeline" data-testid="timeline"></section>
-    <footer class="statusbar"><span id="status-msg" data-testid="status" aria-live="polite"></span></footer>
+    <footer class="statusbar"><span id="status-msg" data-testid="status" aria-live="polite"></span><span id="autosave-status" class="autosave-status" data-testid="autosave-status" aria-live="polite"></span></footer>
     <dialog id="help-dialog" class="help" data-testid="help-dialog">
       <h2>Controls</h2>
       <table><tbody></tbody></table>

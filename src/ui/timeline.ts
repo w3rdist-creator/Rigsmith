@@ -1,12 +1,30 @@
-// Timeline: animation settings, transport, scrubbing and per-channel key lanes.
-import { findKeyIndex, frameCount, keysBeyondEnd, moveKey, snapToFrame } from '../model/animation.ts';
+// Timeline: animation settings, transport, scrubbing, key lanes (bone channels, slot,
+// constraint and draw-order lanes), multi-key selection, group retime, copy/paste,
+// nudge, loop seam, and the curve editor.
+import { frameCount, keysBeyondEnd, snapToFrame } from '../model/animation.ts';
+import type { KeyRef } from '../model/keys.ts';
+import { DRAW_LANE, boneLane, constraintLane, laneKeys, refsInRange, sameRef, shiftKeys, slotLane } from '../model/keys.ts';
 import { topoOrder } from '../model/skeleton.ts';
-import type { Channel, Interp } from '../model/types.ts';
+import type { Animation, Interp, Key } from '../model/types.ts';
 import { CHANNELS, INTERPS } from '../model/types.ts';
 import type { App } from './app.ts';
+import { CurveEditor } from './curveEditor.ts';
 import { append, clear, fmt, h } from './dom.ts';
 
-const CH_LABEL: Record<Channel, string> = { translate: 'translate', rotate: 'rotate', scale: 'scale' };
+const CH_LABEL: Record<string, string> = { translate: 'translate', rotate: 'rotate', scale: 'scale', visible: 'visible', opacity: 'opacity', image: 'image', deform: 'deform', mix: 'mix', position: 'position' };
+
+interface Row {
+  lane: string;
+  owner: string;
+  ch: string;
+  selected: boolean;
+  onLabel?: () => void;
+}
+
+type Drag =
+  | { kind: 'keys'; anchorFrame: number; lastDelta: number; refs: KeyRef[]; primary: KeyRef; base: Animation; animIndex: number; moved: boolean; pointerId: number }
+  | { kind: 'marquee'; x0: number; y0: number; additive: boolean; box: HTMLElement; pointerId: number }
+  | { kind: 'scrub'; pointerId: number };
 
 export class Timeline {
   private root: HTMLElement;
@@ -15,17 +33,24 @@ export class Timeline {
   private readout: HTMLElement | null = null;
   private playBtn: HTMLButtonElement | null = null;
   private lanes: HTMLElement | null = null;
-  private keyDrag: { boneId: string; channel: Channel; time: number; moved: boolean; el: HTMLElement } | null = null;
-  /** True while a scrub or key drag owns pointer capture; rebuilding the DOM then would drop it. */
-  private interacting = false;
+  private laneEls = new Map<string, HTMLElement>();
+  private rows: Row[] = [];
+  private drag: Drag | null = null;
+  readonly curve: CurveEditor;
+  /** True while a drag owns pointer capture; rebuilding the DOM then would drop it. */
+  interacting = false;
 
   constructor(app: App, root: HTMLElement) {
     this.app = app;
     this.root = root;
+    this.curve = new CurveEditor(app, this);
     app.ed.subscribe((r) => {
-      if (r === 'time' || r === 'view' || this.interacting) this.updateTime();
-      else this.render();
+      if (r === 'time' || r === 'view' || this.interacting) {
+        this.updateTime();
+        if (this.interacting && this.drag?.kind === 'keys') this.drawKeys();
+      } else this.render();
     });
+    app.ed.cancelHooks.add(() => this.cancelDrag());
     this.render();
   }
 
@@ -46,12 +71,37 @@ export class Timeline {
     this.root.classList.toggle('playing', ed.playing);
   }
 
+  private buildRows(anim: Animation): Row[] {
+    const ed = this.app.ed;
+    const p = ed.project;
+    const selBone = ed.selectedBoneId();
+    const selAtt = ed.selection?.kind === 'attachment' ? ed.selection.id : null;
+    const rows: Row[] = [];
+    for (const b of topoOrder(p.bones)) {
+      const tr = anim.tracks[b.id];
+      for (const ch of CHANNELS)
+        if ((tr && tr[ch].length) || b.id === selBone) rows.push({ lane: boneLane(b.id, ch), owner: b.name, ch, selected: b.id === selBone, onLabel: () => ed.select({ kind: 'bone', id: b.id }) });
+    }
+    for (const a of p.attachments) {
+      const st = anim.slots?.[a.id];
+      const chans = (['visible', 'opacity', 'image', 'deform'] as const).filter((ch) => st?.[ch]?.length || (a.id === selAtt && ch !== 'deform') || (a.id === selAtt && ch === 'deform' && a.mesh));
+      for (const ch of chans) rows.push({ lane: slotLane(a.id, ch), owner: a.name, ch, selected: a.id === selAtt, onLabel: () => ed.select({ kind: 'attachment', id: a.id }) });
+    }
+    for (const c of [...(p.ik ?? []), ...(p.pathConstraints ?? [])]) {
+      const ct = anim.constraints?.[c.id];
+      for (const ch of ['mix', 'position'] as const) if (ct?.[ch]?.length) rows.push({ lane: constraintLane(c.id, ch), owner: c.name, ch, selected: false });
+    }
+    if (anim.drawOrder?.length) rows.push({ lane: DRAW_LANE, owner: 'draw order', ch: 'order', selected: false });
+    return rows;
+  }
+
   render(): void {
     const { app } = this;
     const ed = app.ed;
     const p = ed.project;
     const anim = ed.anim();
     clear(this.root);
+    this.laneEls.clear();
     this.root.classList.toggle('setup-mode', ed.mode === 'setup');
 
     const animSel = h('select', { 'data-testid': 'anim-select', 'aria-label': 'Animation' }, ...p.animations.map((a) => h('option', { value: a.id }, a.name)));
@@ -90,17 +140,12 @@ export class Timeline {
     this.playBtn = h('button', { class: 'transport play', 'data-testid': 'play', title: 'Play / pause (Space)', 'aria-label': 'Play', onclick: () => ed.togglePlay() }, '▶ Play');
     this.readout = h('span', { class: 'readout', 'data-testid': 'time-readout' });
 
-    const ks = ed.keySel;
-    const selKey = ks ? anim.tracks[ks.boneId]?.[ks.channel]?.find((k) => Math.abs(k.time - ks.time) < 1e-6) : undefined;
-    const interpSel = h('select', { 'data-testid': 'key-interp', 'aria-label': 'Interpolation of selected key', disabled: !selKey }, ...INTERPS.map((i) => h('option', { value: i }, i)));
-    if (selKey) interpSel.value = selKey.interp;
-    interpSel.addEventListener('change', () => {
-      if (!ks) return;
-      app.updateAnimation('Change interpolation', (a) => {
-        const k = a.tracks[ks.boneId]?.[ks.channel]?.find((x) => Math.abs(x.time - ks.time) < 1e-6);
-        if (k) k.interp = interpSel.value as Interp;
-      });
-    });
+    const selKey = app.primaryKey();
+    const curveCapable = selKey && 'interp' in selKey;
+    const interpSel = h('select', { 'data-testid': 'key-interp', 'aria-label': 'Interpolation of selected keys', disabled: !curveCapable }, ...INTERPS.map((i) => h('option', { value: i }, i)));
+    if (curveCapable) interpSel.value = (selKey as Key).interp;
+    interpSel.addEventListener('change', () => app.setInterpForSelection(interpSel.value as Interp));
+    const nSel = ed.keySels.length;
 
     const beyond = keysBeyondEnd(anim);
     append(
@@ -118,18 +163,18 @@ export class Timeline {
       h('span', { class: 'sep' }),
       h('button', { class: 'mini accent', 'data-testid': 'key-selected', title: 'Key all channels of the selected bone at this frame (K)', disabled: !ed.selectedBoneId(), onclick: () => app.keySelected() }, '◆ Key bone'),
       h('label', { class: 'inline' }, 'Interp', interpSel),
-      h('button', { class: 'mini', 'data-testid': 'delete-key', disabled: !selKey, title: 'Delete selected key (Del)', onclick: () => app.deleteSelectedKey() }, 'Delete key'),
+      h('button', { class: 'mini', 'data-testid': 'delete-key', disabled: !nSel, title: 'Delete selected keys (Del)', onclick: () => app.deleteSelectedKey() }, nSel > 1 ? `Delete ${nSel} keys` : 'Delete key'),
+      h('span', { class: 'sep' }),
+      h('span', { class: 'dim', 'data-testid': 'key-sel-count' }, nSel ? `${nSel} key${nSel > 1 ? 's' : ''} selected` : 'no keys selected'),
+      h('button', { class: 'mini', 'data-testid': 'nudge-left', disabled: !nSel, title: 'Nudge selected keys one frame earlier ([)', 'aria-label': 'Nudge keys left', onclick: () => app.nudgeKeys(-1) }, '◂1f'),
+      h('button', { class: 'mini', 'data-testid': 'nudge-right', disabled: !nSel, title: 'Nudge selected keys one frame later (])', 'aria-label': 'Nudge keys right', onclick: () => app.nudgeKeys(1) }, '1f▸'),
+      h('button', { class: 'mini', 'data-testid': 'copy-keys', disabled: !nSel, title: 'Copy selected keys (Ctrl/⌘+C)', onclick: () => app.copySelectedKeys() }, 'Copy'),
+      h('button', { class: 'mini', 'data-testid': 'paste-keys', disabled: !ed.clipboard, title: 'Paste keys at the playhead (Ctrl/⌘+V); onto the selected bone if the keys came from one other bone', onclick: () => app.pasteKeysAtPlayhead() }, 'Paste'),
+      h('button', { class: 'mini', 'data-testid': 'loop-seam', title: 'Close the loop: copy each lane’s first key to the end (selected lanes, or all)', onclick: () => app.closeLoop() }, '⟲ Close loop'),
       beyond ? h('span', { class: 'warn', title: 'Keys after the end are kept but not played.' }, `${beyond} key(s) past end`) : null,
     );
 
-    // Lanes: every keyed bone/channel, plus all channels of the selected bone.
-    const selBone = ed.selectedBoneId();
-    const rows: { boneId: string; boneName: string; ch: Channel }[] = [];
-    for (const b of topoOrder(p.bones)) {
-      const tr = anim.tracks[b.id];
-      for (const ch of CHANNELS) if ((tr && tr[ch].length) || b.id === selBone) rows.push({ boneId: b.id, boneName: b.name, ch });
-    }
-
+    this.rows = this.buildRows(anim);
     const frames = frameCount(anim);
     const ruler = h('div', { class: 'tl-ruler', 'data-testid': 'timeline-ruler' });
     const tickEvery = frames <= 30 ? 1 : frames <= 120 ? 5 : 10;
@@ -140,61 +185,66 @@ export class Timeline {
     const labels = h('div', { class: 'tl-labels' }, h('div', { class: 'tl-label head' }, ed.mode === 'setup' ? 'Setup mode' : 'Frame'));
     const lanes = h('div', { class: 'tl-lanes', 'data-testid': 'timeline-lanes' }, ruler);
     this.lanes = lanes;
-    const t = snapToFrame(ed.time, anim.fps);
-    for (const r of rows) {
-      const keys = anim.tracks[r.boneId]?.[r.ch] ?? [];
+    for (const r of this.rows) {
       labels.append(
-        h('div', { class: `tl-label${r.boneId === selBone ? ' sel' : ''}`, title: `${r.boneName} · ${r.ch}` },
-          h('button', { class: 'linklike', onclick: () => ed.select({ kind: 'bone', id: r.boneId }) }, r.boneName),
-          h('span', { class: `ch ch-${r.ch}` }, CH_LABEL[r.ch]),
+        h('div', { class: `tl-label${r.selected ? ' sel' : ''}`, title: `${r.owner} · ${r.ch}` },
+          r.onLabel ? h('button', { class: 'linklike', onclick: r.onLabel }, r.owner) : h('span', {}, r.owner),
+          h('span', { class: `ch ch-${r.ch}` }, CH_LABEL[r.ch] ?? r.ch),
         ),
       );
-      const lane = h('div', { class: `tl-lane${r.boneId === selBone ? ' sel' : ''}` });
-      for (const k of keys) {
-        const isSel = !!ks && ks.boneId === r.boneId && ks.channel === r.ch && Math.abs(ks.time - k.time) < 1e-6;
-        const frame = Math.round(k.time * anim.fps);
-        const d = h('button', {
-          class: `key ch-${r.ch}${isSel ? ' selected' : ''}${Math.abs(k.time - t) < 1e-6 ? ' current' : ''}${k.time > anim.duration + 1e-6 ? ' beyond' : ''}`,
-          style: `left:${Math.min(100, (k.time / anim.duration) * 100)}%`,
-          title: `${r.boneName} ${r.ch} @ frame ${frame}: ${k.value.map((v) => fmt(v)).join(', ')} (${k.interp})`,
-          'aria-label': `${r.boneName} ${r.ch} key at frame ${frame}`,
-          'data-testid': `key-${r.boneName}-${r.ch}-${frame}`,
-        });
-        d.addEventListener('pointerdown', (e) => {
-          e.stopPropagation();
-          this.interacting = true;
-          this.keyDrag = { boneId: r.boneId, channel: r.ch, time: k.time, moved: false, el: d };
-          d.setPointerCapture(e.pointerId);
-          ed.stop();
-          ed.selectKey({ boneId: r.boneId, channel: r.ch, time: k.time });
-          d.classList.add('selected');
-        });
-        d.addEventListener('pointermove', (e) => this.onKeyDrag(e));
-        d.addEventListener('pointerup', () => {
-          const moved = this.keyDrag?.moved;
-          this.keyDrag = null;
-          this.interacting = false;
-          if (moved) ed.endGesture('Move key');
-          this.render();
-        });
-        lane.append(d);
-      }
+      const lane = h('div', { class: `tl-lane${r.selected ? ' sel' : ''}`, 'data-lane': r.lane });
+      this.laneEls.set(r.lane, lane);
       lanes.append(lane);
     }
-    if (!rows.length) {
+    if (!this.rows.length) {
       labels.append(h('div', { class: 'tl-label dim' }, '—'));
-      lanes.append(h('div', { class: 'tl-lane hint-lane' }, 'Select a bone to see its channels. Pose it in Animate mode (or press K) to add keys.'));
+      lanes.append(h('div', { class: 'tl-lane hint-lane' }, 'Select a bone to see its channels. Pose it in Animate mode (or press K) to add keys. Shift-drag here to box-select keys.'));
     }
     this.playhead = h('div', { class: 'playhead', 'data-testid': 'playhead' });
     lanes.append(this.playhead);
-    this.attachScrub(lanes);
+    this.attachPointer(lanes);
+    this.drawKeys();
 
     const body = h('div', { class: 'tl-body' }, labels, lanes);
-    this.root.append(controls, body);
-    // Keep the selected bone's lanes in view.
+    const main = h('div', { class: 'tl-main' }, body, this.curve.render());
+    this.root.append(controls, main);
     const selLabel = labels.querySelector<HTMLElement>('.tl-label.sel');
     if (selLabel) body.scrollTop = Math.max(0, selLabel.offsetTop - 24 - 22);
     this.updateTime();
+  }
+
+  /** (Re)draws the key diamonds inside the existing lane elements. */
+  private drawKeys(): void {
+    const ed = this.app.ed;
+    const anim = ed.anim();
+    if (!anim) return;
+    const t = snapToFrame(ed.time, anim.fps);
+    for (const r of this.rows) {
+      const lane = this.laneEls.get(r.lane);
+      if (!lane) continue;
+      for (const el of [...lane.querySelectorAll('.key')]) el.remove();
+      const keys = laneKeys(anim, r.lane) ?? [];
+      for (const k of keys) {
+        const ref = { lane: r.lane, time: k.time };
+        const isSel = ed.isKeySelected(ref);
+        const isPrimary = !!ed.keySel && sameRef(ed.keySel, ref);
+        const frame = Math.round(k.time * anim.fps);
+        const value = 'value' in k ? (k as Key).value.map((v) => fmt(v)).join(', ') : 'imageId' in k ? String((k as { imageId: string }).imageId) : 'order';
+        const interp = 'interp' in k ? ` (${(k as Key).interp})` : '';
+        lane.append(
+          h('button', {
+            class: `key ch-${r.ch}${isSel ? ' selected' : ''}${isPrimary ? ' primary' : ''}${Math.abs(k.time - t) < 1e-6 ? ' current' : ''}${k.time > anim.duration + 1e-6 ? ' beyond' : ''}`,
+            style: `left:${Math.min(100, (k.time / anim.duration) * 100)}%`,
+            title: `${r.owner} ${r.ch} @ frame ${frame}: ${value}${interp}`,
+            'aria-label': `${r.owner} ${r.ch} key at frame ${frame}`,
+            'aria-pressed': isSel ? 'true' : 'false',
+            'data-testid': `key-${r.owner}-${r.ch}-${frame}`,
+            'data-lane': r.lane,
+            'data-time': String(k.time),
+          }),
+        );
+      }
+    }
   }
 
   private timeAt(clientX: number): number {
@@ -205,50 +255,153 @@ export class Timeline {
     return snapToFrame(frac * anim.duration, anim.fps);
   }
 
-  private onKeyDrag(e: PointerEvent): void {
-    const kd = this.keyDrag;
+  private attachPointer(lanes: HTMLElement): void {
     const ed = this.app.ed;
-    const anim = ed.anim();
-    if (!kd || !anim) return;
-    const nt = this.timeAt(e.clientX);
-    if (Math.abs(nt - kd.time) < 1e-6) return;
-    const keys = anim.tracks[kd.boneId]?.[kd.channel];
-    if (!keys || findKeyIndex(keys, nt) >= 0) return; // don't drop onto another key
-    if (!kd.moved) ed.beginGesture();
-    kd.moved = true;
-    const from = kd.time;
-    ed.gestureMutate((p) => {
-      const a = p.animations.find((x) => x.id === anim.id)!;
-      moveKey(a.tracks[kd.boneId][kd.channel], from, nt);
-    });
-    kd.time = nt;
-    kd.el.style.left = `${Math.min(100, (nt / anim.duration) * 100)}%`;
-    ed.keySel = { boneId: kd.boneId, channel: kd.channel, time: nt };
-    ed.setTime(nt);
-  }
-
-  private attachScrub(lanes: HTMLElement): void {
-    const ed = this.app.ed;
-    let scrubbing = false;
     lanes.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
-      scrubbing = true;
+      const anim = ed.anim();
+      if (!anim) return;
+      const keyEl = (e.target as HTMLElement).closest<HTMLElement>('.key');
+      // Mark the interaction first: emits below must not rebuild (and detach) these lanes.
       this.interacting = true;
-      lanes.setPointerCapture(e.pointerId);
       ed.stop();
+      if (keyEl) {
+        e.preventDefault();
+        const ref: KeyRef = { lane: keyEl.dataset.lane!, time: Number(keyEl.dataset.time) };
+        if (e.shiftKey || e.ctrlKey || e.metaKey) {
+          this.interacting = false;
+          ed.toggleKeyInSelection(ref);
+          return;
+        }
+        lanes.setPointerCapture(e.pointerId);
+        if (!ed.isKeySelected(ref)) ed.selectKey(ref);
+        else {
+          ed.keySel = ref;
+          ed.setTime(ref.time);
+        }
+        this.drag = {
+          kind: 'keys',
+          anchorFrame: Math.round(ref.time * anim.fps),
+          lastDelta: 0,
+          refs: ed.keySels.slice(),
+          primary: ref,
+          base: structuredClone(anim),
+          animIndex: ed.project.animations.indexOf(anim),
+          moved: false,
+          pointerId: e.pointerId,
+        };
+        this.drawKeys();
+        return;
+      }
+      if ((e.target as HTMLElement).closest('.tl-ruler') === null && e.shiftKey) {
+        const r = lanes.getBoundingClientRect();
+        const box = h('div', { class: 'marquee', 'data-testid': 'key-marquee' });
+        lanes.append(box);
+        lanes.setPointerCapture(e.pointerId);
+        this.drag = { kind: 'marquee', x0: e.clientX - r.left, y0: e.clientY - r.top, additive: e.ctrlKey || e.metaKey, box, pointerId: e.pointerId };
+        this.updateMarquee(e);
+        return;
+      }
+      lanes.setPointerCapture(e.pointerId);
+      this.drag = { kind: 'scrub', pointerId: e.pointerId };
       if (ed.mode !== 'animate') ed.setMode('animate');
-      if (ed.keySel) ed.selectKey(null);
+      if (ed.keySels.length) ed.selectKey(null);
       ed.setTime(this.timeAt(e.clientX));
     });
     lanes.addEventListener('pointermove', (e) => {
-      if (scrubbing) ed.setTime(this.timeAt(e.clientX));
+      const d = this.drag;
+      if (!d) return;
+      if (d.kind === 'scrub') ed.setTime(this.timeAt(e.clientX));
+      else if (d.kind === 'marquee') this.updateMarquee(e);
+      else this.moveKeys(d, e);
     });
-    lanes.addEventListener('pointerup', () => {
-      if (!scrubbing) return;
-      scrubbing = false;
+    const finish = (e: PointerEvent) => {
+      const d = this.drag;
+      if (!d) return;
+      this.drag = null;
       this.interacting = false;
-      // Rebuild so key highlights and the inspector reflect the final frame.
-      ed.emit('selection');
+      if (lanes.hasPointerCapture(e.pointerId)) lanes.releasePointerCapture(e.pointerId);
+      if (d.kind === 'scrub') {
+        // Rebuild so key highlights and the inspector reflect the final frame.
+        ed.emit('selection');
+      } else if (d.kind === 'marquee') {
+        this.finishMarquee(d, e);
+      } else {
+        if (d.moved) ed.endGesture(d.refs.length > 1 ? `Move ${d.refs.length} keys` : 'Move key');
+        // A click (no drag) on a key inside a multi-selection selects just that key.
+        else if (d.refs.length > 1) ed.selectKey(d.primary);
+        this.render();
+      }
+    };
+    lanes.addEventListener('pointerup', finish);
+    lanes.addEventListener('pointercancel', () => this.cancelDrag());
+  }
+
+  private moveKeys(d: Extract<Drag, { kind: 'keys' }>, e: PointerEvent): void {
+    const ed = this.app.ed;
+    const anim = ed.anim();
+    if (!anim) return;
+    const delta = Math.round(this.timeAt(e.clientX) * anim.fps) - d.anchorFrame;
+    if (delta === d.lastDelta) return;
+    d.lastDelta = delta;
+    if (!d.moved) ed.beginGesture();
+    d.moved = true;
+    let moved: KeyRef[] = [];
+    // Recompute from the drag's start state every time: keys passed over reappear.
+    ed.gestureMutate((p) => {
+      const a = structuredClone(d.base);
+      moved = shiftKeys(a, d.refs, delta / anim.fps);
+      p.animations[d.animIndex] = a;
     });
+    const idx = d.refs.findIndex((r) => sameRef(r, d.primary));
+    ed.keySels = moved;
+    ed.keySel = moved[idx] ?? moved[0] ?? null;
+    if (ed.keySel) ed.setTime(ed.keySel.time);
+    this.drawKeys();
+  }
+
+  private updateMarquee(e: PointerEvent): void {
+    const d = this.drag;
+    if (d?.kind !== 'marquee' || !this.lanes) return;
+    const r = this.lanes.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    Object.assign(d.box.style, { left: `${Math.min(x, d.x0)}px`, top: `${Math.min(y, d.y0)}px`, width: `${Math.abs(x - d.x0)}px`, height: `${Math.abs(y - d.y0)}px` });
+  }
+
+  private finishMarquee(d: Extract<Drag, { kind: 'marquee' }>, e: PointerEvent): void {
+    const ed = this.app.ed;
+    const anim = ed.anim();
+    d.box.remove();
+    if (!anim || !this.lanes) return;
+    const r = this.lanes.getBoundingClientRect();
+    const x0 = Math.min(d.x0, e.clientX - r.left), x1 = Math.max(d.x0, e.clientX - r.left);
+    const y0 = Math.min(d.y0, e.clientY - r.top) + r.top, y1 = Math.max(d.y0, e.clientY - r.top) + r.top;
+    const lanes = [...this.laneEls.entries()].filter(([, el]) => {
+      const b = el.getBoundingClientRect();
+      return b.bottom >= y0 && b.top <= y1;
+    }).map(([lane]) => lane);
+    const t0 = (x0 / r.width) * anim.duration, t1 = (x1 / r.width) * anim.duration;
+    const hits = refsInRange(anim, lanes, t0, t1);
+    ed.setKeySelection(d.additive ? [...ed.keySels, ...hits] : hits);
+    this.app.status(hits.length ? `Selected ${ed.keySels.length} key(s).` : 'No keys in the box.');
+  }
+
+  /** Esc during a timeline drag restores the state from before it. */
+  cancelDrag(): boolean {
+    const d = this.drag;
+    if (!d) return false;
+    this.drag = null;
+    this.interacting = false;
+    const ed = this.app.ed;
+    if (this.lanes?.hasPointerCapture(d.pointerId)) this.lanes.releasePointerCapture(d.pointerId);
+    if (d.kind === 'marquee') d.box.remove();
+    if (d.kind === 'keys') {
+      if (d.moved) ed.cancelGesture();
+      ed.setKeySelection(d.refs, d.primary);
+      ed.setTime(d.primary.time);
+      this.app.status('Key drag cancelled.');
+    }
+    this.render();
+    return true;
   }
 }

@@ -1,7 +1,13 @@
-// Rigsmith project format, version 1. See docs/architecture.md#project-format.
+// Rigsmith project format. Version 1 is the original slice; version 2 is a strict
+// superset (curves, slot/draw-order keys, constraints, cutout provenance, meshes,
+// skins, mixes). Every v2 field is optional and absent when unused, so a project that
+// uses no v2 feature is written — byte for byte — as version 1. See
+// docs/architecture.md#project-format.
 
 export const FORMAT_ID = 'rigsmith.project';
-export const FORMAT_VERSION = 1;
+/** Newest version this editor reads and writes. */
+export const FORMAT_VERSION = 2;
+export type FormatVersion = 1 | 2;
 
 export interface Bone {
   id: string;
@@ -19,6 +25,21 @@ export interface Bone {
   color: string;
 }
 
+/** How a derived image was produced from another one (v2, cutout tools). */
+export interface DerivedImage {
+  kind: 'cutout' | 'remainder' | 'patch' | 'extension';
+  /** Image the pixels came from (never modified). */
+  sourceId: string;
+  /** Top-left of this image inside the source, in source pixels. */
+  offsetX: number;
+  offsetY: number;
+  /** Mask polygon in source pixels [x0,y0,x1,y1,…] (cutout/remainder/patch). */
+  polygon?: number[];
+  /** Pixels that were synthesized rather than copied (extension/patch). */
+  synthesized: number;
+  note?: string;
+}
+
 export interface ImageAsset {
   id: string;
   name: string;
@@ -27,6 +48,22 @@ export interface ImageAsset {
   height: number;
   /** base64 data: URL — the image bytes travel inside the project file. */
   dataUrl: string;
+  derived?: DerivedImage;
+}
+
+/** Per-vertex bone influences (normalized so weights sum to 1). */
+export type VertexWeights = { bone: string; w: number }[];
+
+/** Textured triangle mesh on an image attachment (v2). */
+export interface Mesh {
+  /** Vertex positions in image pixel space [x0,y0,x1,y1,…]; also the texture coordinates. */
+  points: number[];
+  /** Triangles as vertex index triples. */
+  triangles: number[];
+  /** The first `hull` vertices, in order, form the outline polygon. */
+  hull: number;
+  /** Optional skinning: one influence list per vertex. Absent = rigid on the attachment's bone. */
+  weights?: VertexWeights[];
 }
 
 export interface Attachment {
@@ -42,10 +79,16 @@ export interface Attachment {
   scaleX: number;
   scaleY: number;
   opacity: number;
+  /** v2: hidden in the setup pose (visibility keys can show it). */
+  hidden?: boolean;
+  /** v2: textured mesh instead of a flat quad. */
+  mesh?: Mesh;
 }
 
-export type Interp = 'linear' | 'step' | 'smooth';
-export const INTERPS: readonly Interp[] = ['linear', 'step', 'smooth'];
+export type Interp = 'linear' | 'step' | 'smooth' | 'bezier';
+export const INTERPS: readonly Interp[] = ['linear', 'step', 'smooth', 'bezier'];
+/** Cubic Bezier easing handles [x1, y1, x2, y2]; x in [0, 1], y unbounded (overshoot). */
+export type Curve = [number, number, number, number];
 
 export type Channel = 'translate' | 'rotate' | 'scale';
 export const CHANNELS: readonly Channel[] = ['translate', 'rotate', 'scale'];
@@ -59,12 +102,45 @@ export interface Key {
   value: number[];
   /** Interpolation used from this key to the next one. */
   interp: Interp;
+  /** v2: present iff interp === 'bezier'. */
+  curve?: Curve;
 }
 
 export interface BoneTrack {
   translate: Key[];
   rotate: Key[];
   scale: Key[];
+}
+
+/** v2: image key — the attachment shows `imageId` from this time on (always stepped). */
+export interface ImageKey {
+  time: number;
+  imageId: string;
+}
+
+/** v2: draw-order key — attachment ids back→front from this time on (stepped). */
+export interface DrawOrderKey {
+  time: number;
+  order: string[];
+}
+
+/** v2: animated attachment ("slot") properties. */
+export interface SlotTrack {
+  /** value [1] shown / [0] hidden; always stepped. */
+  visible?: Key[];
+  /** value [opacity 0..1]. */
+  opacity?: Key[];
+  image?: ImageKey[];
+  /** Mesh deform: value = per-vertex offsets [dx0,dy0,…] in image pixels. */
+  deform?: Key[];
+}
+
+/** v2: animated constraint properties. */
+export interface ConstraintTrack {
+  /** value [mix 0..1]. */
+  mix?: Key[];
+  /** Path constraints: value [position 0..1 along the path]. */
+  position?: Key[];
 }
 
 export interface Animation {
@@ -76,17 +152,89 @@ export interface Animation {
   loop: boolean;
   /** Keyed by bone id. */
   tracks: Record<string, BoneTrack>;
+  /** v2: keyed by attachment id. */
+  slots?: Record<string, SlotTrack>;
+  /** v2 */
+  drawOrder?: DrawOrderKey[];
+  /** v2: keyed by IK or path constraint id. */
+  constraints?: Record<string, ConstraintTrack>;
+}
+
+/** v2: one- or two-bone IK. bones = [bone] or [parent, child]; target is any other bone. */
+export interface IkConstraint {
+  id: string;
+  name: string;
+  bones: string[];
+  target: string;
+  mix: number;
+  /** Bend direction of a two-bone chain (+1 = clockwise elbow on screen). */
+  bendPositive: boolean;
+}
+
+/** v2: a cubic Bezier path. Handles are relative to their node. */
+export interface PathNode {
+  x: number;
+  y: number;
+  inX: number;
+  inY: number;
+  outX: number;
+  outY: number;
+}
+
+export interface PathShape {
+  id: string;
+  name: string;
+  /** Path coordinates are in this bone's space (null = world). */
+  boneId: string | null;
+  closed: boolean;
+  nodes: PathNode[];
+}
+
+/** v2: places bones along a path, spaced by arc length. */
+export interface PathConstraint {
+  id: string;
+  name: string;
+  pathId: string;
+  bones: string[];
+  /** 0..1 fraction of the path length where the first bone sits. */
+  position: number;
+  /** Arc-length distance between consecutive bones, world px. */
+  spacing: number;
+  /** 0..1: how much bones adopt the path position/tangent. */
+  mix: number;
+  /** Rotate bones to the path tangent (plus this offset, degrees). */
+  rotate: boolean;
+  rotateOffset: number;
+}
+
+/** v2: an attachment set. Entries replace an attachment's image while the skin is active. */
+export interface Skin {
+  id: string;
+  name: string;
+  entries: { attachmentId: string; imageId: string }[];
+}
+
+/** v2: default crossfade duration between two animations. */
+export interface MixRule {
+  from: string;
+  to: string;
+  duration: number;
 }
 
 export interface Project {
   format: typeof FORMAT_ID;
-  version: typeof FORMAT_VERSION;
+  version: FormatVersion;
   name: string;
   bones: Bone[];
   images: ImageAsset[];
   /** Array order is draw order (first = back). */
   attachments: Attachment[];
   animations: Animation[];
+  ik?: IkConstraint[];
+  paths?: PathShape[];
+  pathConstraints?: PathConstraint[];
+  skins?: Skin[];
+  mixes?: MixRule[];
 }
 
 export interface LocalPose {
@@ -98,7 +246,7 @@ export interface LocalPose {
 }
 
 export function emptyProject(name = 'Untitled rig'): Project {
-  return { format: FORMAT_ID, version: FORMAT_VERSION, name, bones: [], images: [], attachments: [], animations: [] };
+  return { format: FORMAT_ID, version: 1, name, bones: [], images: [], attachments: [], animations: [] };
 }
 
 export function emptyTrack(): BoneTrack {
@@ -113,33 +261,12 @@ export function newId(prefix: string): string {
 }
 
 /**
- * Deep clone of the mutable parts of a project. Image assets are immutable once
- * imported, so they are shared by reference (keeps undo snapshots cheap).
+ * Deep clone of the mutable parts of a project (undo snapshots). Image assets are
+ * immutable once imported, so they are shared by reference (keeps snapshots cheap);
+ * everything else — including every v2 nested field — is cloned generically.
  */
 export function cloneProject(p: Project): Project {
-  return {
-    format: p.format,
-    version: p.version,
-    name: p.name,
-    bones: p.bones.map((b) => ({ ...b })),
-    images: p.images.slice(),
-    attachments: p.attachments.map((a) => ({ ...a })),
-    animations: p.animations.map((an) => ({
-      ...an,
-      tracks: Object.fromEntries(
-        Object.entries(an.tracks).map(([k, t]) => [
-          k,
-          {
-            translate: t.translate.map(cloneKey),
-            rotate: t.rotate.map(cloneKey),
-            scale: t.scale.map(cloneKey),
-          },
-        ]),
-      ),
-    })),
-  };
-}
-
-function cloneKey(k: Key): Key {
-  return { time: k.time, value: k.value.slice(), interp: k.interp };
+  const { images, ...rest } = p;
+  const copy = structuredClone(rest) as Omit<Project, 'images'>;
+  return { ...copy, images: images.slice() };
 }

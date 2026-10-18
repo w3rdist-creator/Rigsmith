@@ -1,11 +1,14 @@
 // Canvas viewport: rendering, hit testing, pan/zoom and the pose/create tools.
 import type { Editor } from '../editor/store.ts';
+import type { AttachmentFrame, Frame } from '../model/evaluate.ts';
+import { attachmentPoints, evaluate } from '../model/evaluate.ts';
 import type { Mat, Vec } from '../model/math.ts';
-import { angleOf, apply, determinant, invert, multiply, wrapDegrees } from '../model/math.ts';
+import { angleOf, apply, determinant, invert, wrapDegrees } from '../model/math.ts';
 import { applyPoseEdit, makeBone, uniqueName } from '../model/ops.ts';
 import { attachmentWorld, boneTip, parentWorld, toLocal, topoOrder } from '../model/skeleton.ts';
-import type { Attachment, Bone, Project } from '../model/types.ts';
+import type { Bone, Project } from '../model/types.ts';
 import { newId } from '../model/types.ts';
+import { drawFrame } from '../render/draw.ts';
 import type { ImageCache } from './images.ts';
 
 export interface View {
@@ -119,12 +122,7 @@ export class Viewport {
       if (!m) continue;
       pts.push({ x: m.tx, y: m.ty }, boneTip(b, m));
     }
-    for (const a of this.ed.project.attachments) {
-      const im = this.ed.project.images.find((i) => i.id === a.imageId);
-      if (!im) continue;
-      const m = attachmentWorld(a, world);
-      for (const [x, y] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) pts.push(apply(m, { x: (x * im.width) / 2, y: (y * im.height) / 2 }));
-    }
+    for (const f of this.ed.frame().attachments) pts.push(...attachmentPoints(f));
     if (!pts.length) {
       this.view = { x: this.cssW / 2, y: this.cssH / 2, zoom: 1 };
     } else {
@@ -159,19 +157,20 @@ export class Viewport {
       }
       if (best) return { kind: 'bone', id: best.id };
     }
-    for (let i = p.attachments.length - 1; i >= 0; i--) {
-      if (this.insideAttachment(p.attachments[i].id, sx, sy, world)) return { kind: 'attachment', id: p.attachments[i].id };
+    const drawn = this.ed.frame().attachments;
+    for (let i = drawn.length - 1; i >= 0; i--) {
+      if (drawn[i].visible && this.insideAttachment(drawn[i].att.id, sx, sy, world)) return { kind: 'attachment', id: drawn[i].att.id };
     }
     return null;
   }
 
-  private insideAttachment(id: string, sx: number, sy: number, world: Map<string, Mat>): boolean {
-    const p = this.ed.project;
-    const a = p.attachments.find((x) => x.id === id);
-    const im = a && p.images.find((x) => x.id === a.imageId);
-    if (!a || !im) return false;
-    const q = apply(invert(multiply(this.viewMatrix(), attachmentWorld(a, world))), { x: sx, y: sy });
-    return Math.abs(q.x) <= im.width / 2 && Math.abs(q.y) <= im.height / 2;
+  private insideAttachment(id: string, sx: number, sy: number, _world: Map<string, Mat>): boolean {
+    const f = this.ed.frame().attachments.find((x) => x.att.id === id);
+    if (!f?.image) return false;
+    const w = this.toWorld(sx, sy);
+    if (f.vertices && f.att.mesh) return insideMesh(f.vertices, f.att.mesh.triangles, w);
+    const q = apply(invert(f.world), w);
+    return Math.abs(q.x) <= f.image.width / 2 && Math.abs(q.y) <= f.image.height / 2;
   }
 
   // ---- Pointer handling ------------------------------------------------------------
@@ -416,8 +415,8 @@ export class Viewport {
     this.render(this.g, this.canvas.width, this.canvas.height, window.devicePixelRatio || 1, true);
   }
 
-  /** Draws the scene. `editorChrome` = grid, bones and selection overlays. */
-  render(g: CanvasRenderingContext2D, pxW: number, pxH: number, dpr: number, editorChrome: boolean, viewOverride?: View): void {
+  /** Draws the scene. `editorChrome` = grid, onion skins, bones and selection overlays. */
+  render(g: CanvasRenderingContext2D, pxW: number, pxH: number, dpr: number, editorChrome: boolean, viewOverride?: View, frameOverride?: Frame): void {
     const ed = this.ed;
     const p = ed.project;
     const view = viewOverride ?? this.view;
@@ -428,46 +427,88 @@ export class Viewport {
       g.fillStyle = ed.mode === 'animate' ? '#1c1a22' : '#17191f';
       g.fillRect(0, 0, pxW, pxH);
       this.drawGrid(g, pxW, pxH, dpr, view);
+      this.drawOnion(g, pxW, pxH, vm);
     }
-    const world = ed.world();
-    // Attachments in draw order.
-    for (const a of p.attachments) {
-      const im = p.images.find((x) => x.id === a.imageId);
-      if (!im) continue;
-      const m = multiply(vm, attachmentWorld(a, world));
-      g.setTransform(m.a, m.b, m.c, m.d, m.tx, m.ty);
-      g.globalAlpha = a.opacity;
-      const el = this.images.get(im);
-      if (el) g.drawImage(el, -im.width / 2, -im.height / 2, im.width, im.height);
-      else {
-        g.fillStyle = 'rgba(255,80,80,0.4)';
-        g.fillRect(-im.width / 2, -im.height / 2, im.width, im.height);
-      }
-      g.globalAlpha = 1;
-    }
+    const frame = frameOverride ?? ed.frame();
+    const world = frame.world;
+    drawFrame(g, frame, (im) => this.images.get(im), vm, { missingPlaceholder: editorChrome });
     if (!editorChrome) return;
     // Attachment selection/hover outlines.
-    for (const a of p.attachments) {
+    for (const f of frame.attachments) {
+      const a = f.att;
       const isSel = ed.selection?.kind === 'attachment' && ed.selection.id === a.id;
       const isHover = this.hover?.kind === 'attachment' && this.hover.id === a.id;
       if (!isSel && !isHover) continue;
-      const im = p.images.find((x) => x.id === a.imageId);
-      if (!im) continue;
-      this.outlineAttachment(g, vm, world, a, im.width, im.height, isSel ? '#ffd166' : 'rgba(255,209,102,0.5)');
+      this.outlineAttachment(g, vm, f, isSel ? '#ffd166' : 'rgba(255,209,102,0.5)');
     }
     if (ed.showBones) this.drawBones(g, p, world, vm, dpr);
   }
 
-  private outlineAttachment(g: CanvasRenderingContext2D, vm: Mat, world: Map<string, Mat>, a: Attachment, w: number, h: number, color: string): void {
-    const m = multiply(vm, attachmentWorld(a, world));
-    const pts = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]].map(([x, y]) => apply(m, { x, y }));
+  /** Onion skin: translucent tinted ghosts of neighbouring frames (view state only). */
+  private drawOnion(g: CanvasRenderingContext2D, pxW: number, pxH: number, vm: Mat): void {
+    const ed = this.ed;
+    const o = ed.onion;
+    const anim = ed.shownAnim();
+    if (!o.enabled || !anim || ed.playing) return;
+    const frameNow = Math.round(ed.time * anim.fps);
+    const last = Math.round(anim.duration * anim.fps);
+    const ghosts: { frame: number; color: string; alpha: number }[] = [];
+    for (let i = o.before; i >= 1; i--) ghosts.push({ frame: frameNow - i * o.step, color: '#ff5d73', alpha: 0.45 * (1 - (i - 1) / Math.max(1, o.before)) });
+    for (let i = o.after; i >= 1; i--) ghosts.push({ frame: frameNow + i * o.step, color: '#3ddc97', alpha: 0.45 * (1 - (i - 1) / Math.max(1, o.after)) });
+    if (!ghosts.length) return;
+    const off = this.ghostCanvas(pxW, pxH);
+    const og = off.getContext('2d')!;
+    for (const gh of ghosts) {
+      let f = gh.frame;
+      if (anim.loop) f = ((f % last) + last) % last;
+      else if (f < 0 || f > last) continue;
+      const frame = evaluate(ed.project, anim, Math.min(anim.duration, f / anim.fps), { skinId: ed.skinId });
+      og.setTransform(1, 0, 0, 1, 0, 0);
+      og.globalCompositeOperation = 'source-over';
+      og.clearRect(0, 0, pxW, pxH);
+      drawFrame(og, frame, (im) => this.images.get(im), vm);
+      og.setTransform(1, 0, 0, 1, 0, 0);
+      og.globalCompositeOperation = 'source-atop';
+      og.globalAlpha = 0.65;
+      og.fillStyle = gh.color;
+      og.fillRect(0, 0, pxW, pxH);
+      og.globalAlpha = 1;
+      og.globalCompositeOperation = 'source-over';
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.globalAlpha = gh.alpha;
+      g.drawImage(off, 0, 0);
+      g.globalAlpha = 1;
+    }
+  }
+
+  private ghost: HTMLCanvasElement | null = null;
+  private ghostCanvas(w: number, h: number): HTMLCanvasElement {
+    if (!this.ghost) this.ghost = document.createElement('canvas');
+    if (this.ghost.width !== w || this.ghost.height !== h) {
+      this.ghost.width = w;
+      this.ghost.height = h;
+    }
+    return this.ghost;
+  }
+
+  private outlineAttachment(g: CanvasRenderingContext2D, vm: Mat, f: AttachmentFrame, color: string): void {
     g.setTransform(1, 0, 0, 1, 0, 0);
-    g.beginPath();
-    pts.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y)));
-    g.closePath();
     g.setLineDash([6, 4]);
     g.lineWidth = 1.5;
     g.strokeStyle = color;
+    g.beginPath();
+    if (f.vertices && f.att.mesh) {
+      const m = f.att.mesh;
+      for (let i = 0; i < m.hull; i++) {
+        const q = apply(vm, { x: f.vertices[2 * i], y: f.vertices[2 * i + 1] });
+        if (i) g.lineTo(q.x, q.y);
+        else g.moveTo(q.x, q.y);
+      }
+    } else {
+      const pts = attachmentPoints(f).map((q) => apply(vm, q));
+      pts.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y)));
+    }
+    g.closePath();
     g.stroke();
     g.setLineDash([]);
   }
@@ -562,6 +603,19 @@ export class Viewport {
     g.strokeStyle = '#111';
     g.stroke();
   }
+}
+
+function insideMesh(v: readonly number[], tris: readonly number[], p: Vec): boolean {
+  for (let t = 0; t < tris.length; t += 3) {
+    const [a, b, c] = [tris[t], tris[t + 1], tris[t + 2]].map((i) => ({ x: v[2 * i], y: v[2 * i + 1] }));
+    const d1 = (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y);
+    const d2 = (p.x - c.x) * (b.y - c.y) - (b.x - c.x) * (p.y - c.y);
+    const d3 = (p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y);
+    const neg = d1 < 0 || d2 < 0 || d3 < 0;
+    const pos = d1 > 0 || d2 > 0 || d3 > 0;
+    if (!(neg && pos)) return true;
+  }
+  return false;
 }
 
 function distToSegment(p: Vec, a: Vec, b: Vec): number {

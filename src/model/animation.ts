@@ -1,19 +1,13 @@
+import { ease } from './curve.ts';
 import { lerp } from './math.ts';
-import type { Animation, Bone, BoneTrack, Channel, Interp, Key, LocalPose } from './types.ts';
+import type { Animation, Bone, BoneTrack, Channel, Curve, Interp, Key, LocalPose } from './types.ts';
 import { emptyTrack } from './types.ts';
 
 /** Two key times closer than this are the same key. */
 export const TIME_EPSILON = 1e-6;
 
-export function easeFor(interp: Interp, t: number): number {
-  switch (interp) {
-    case 'step':
-      return 0;
-    case 'smooth':
-      return t * t * (3 - 2 * t);
-    default:
-      return t;
-  }
+export function easeFor(interp: Interp, t: number, curve?: Curve): number {
+  return ease(interp, t, curve);
 }
 
 /**
@@ -39,7 +33,7 @@ export function sampleKeys(keys: readonly Key[], t: number, fallback: readonly n
   const k0 = keys[lo];
   const k1 = keys[hi];
   const span = k1.time - k0.time;
-  const alpha = span > 0 ? easeFor(k0.interp, (t - k0.time) / span) : 0;
+  const alpha = span > 0 ? easeFor(k0.interp, (t - k0.time) / span, k0.curve) : 0;
   return k0.value.map((v, i) => lerp(v, k1.value[i] ?? v, alpha));
 }
 
@@ -76,26 +70,39 @@ export function ensureTrack(anim: Animation, boneId: string): BoneTrack {
   return track;
 }
 
-export function findKeyIndex(keys: readonly Key[], time: number): number {
+export function findKeyIndex(keys: readonly { time: number }[], time: number): number {
   return keys.findIndex((k) => Math.abs(k.time - time) < TIME_EPSILON);
 }
 
 /** Inserts or replaces a key, keeping the list sorted. Returns the stored key. */
-export function setKey(keys: Key[], time: number, value: number[], interp?: Interp): Key {
+export function setKey(keys: Key[], time: number, value: number[], interp?: Interp, curve?: Curve): Key {
   const idx = findKeyIndex(keys, time);
   if (idx >= 0) {
     keys[idx].value = value.slice();
-    if (interp) keys[idx].interp = interp;
+    if (interp) setInterp(keys[idx], interp, curve);
     return keys[idx];
   }
-  const key: Key = { time, value: value.slice(), interp: interp ?? 'linear' };
-  let insertAt = keys.findIndex((k) => k.time > time);
-  if (insertAt < 0) insertAt = keys.length;
-  keys.splice(insertAt, 0, key);
+  const key: Key = { time, value: value.slice(), interp: 'linear' };
+  if (interp) setInterp(key, interp, curve);
+  insertSorted(keys, key);
   return key;
 }
 
-export function removeKey(keys: Key[], time: number): boolean {
+/** Sets a key's interpolation; `curve` is kept only for bezier keys. */
+export function setInterp(key: Key, interp: Interp, curve?: Curve): void {
+  key.interp = interp;
+  if (interp === 'bezier') key.curve = (curve ?? key.curve ?? [1 / 3, 1 / 3, 2 / 3, 2 / 3]).slice() as Curve;
+  else delete key.curve;
+}
+
+/** Inserts a key object (any keyed type with a time) keeping the list sorted by time. */
+export function insertSorted<K extends { time: number }>(keys: K[], key: K): void {
+  let insertAt = keys.findIndex((k) => k.time > key.time);
+  if (insertAt < 0) insertAt = keys.length;
+  keys.splice(insertAt, 0, key);
+}
+
+export function removeKey(keys: { time: number }[], time: number): boolean {
   const idx = findKeyIndex(keys, time);
   if (idx < 0) return false;
   keys.splice(idx, 1);
@@ -103,12 +110,13 @@ export function removeKey(keys: Key[], time: number): boolean {
 }
 
 /** Moves a key to a new time; replaces any key already at the destination. */
-export function moveKey(keys: Key[], fromTime: number, toTime: number): boolean {
+export function moveKey<K extends { time: number }>(keys: K[], fromTime: number, toTime: number): boolean {
   const idx = findKeyIndex(keys, fromTime);
   if (idx < 0) return false;
   const [key] = keys.splice(idx, 1);
   removeKey(keys, toTime);
-  setKey(keys, toTime, key.value, key.interp);
+  key.time = toTime;
+  insertSorted(keys, key);
   return true;
 }
 
@@ -131,11 +139,13 @@ export function playbackTime(anim: Animation, elapsed: number): { time: number; 
 /** Number of keys that fall after the animation's end (kept, but not played). */
 export function keysBeyondEnd(anim: Animation): number {
   let n = 0;
-  for (const t of Object.values(anim.tracks)) {
-    for (const keys of [t.translate, t.rotate, t.scale]) {
-      for (const k of keys) if (k.time > anim.duration + TIME_EPSILON) n++;
-    }
-  }
+  const count = (keys: readonly { time: number }[] | undefined) => {
+    for (const k of keys ?? []) if (k.time > anim.duration + TIME_EPSILON) n++;
+  };
+  for (const t of Object.values(anim.tracks)) for (const keys of [t.translate, t.rotate, t.scale]) count(keys);
+  for (const s of Object.values(anim.slots ?? {})) for (const keys of [s.visible, s.opacity, s.image, s.deform]) count(keys);
+  for (const c of Object.values(anim.constraints ?? {})) for (const keys of [c.mix, c.position]) count(keys);
+  count(anim.drawOrder);
   return n;
 }
 

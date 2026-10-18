@@ -1,5 +1,29 @@
-import { findCycles } from './skeleton.ts';
-import type { Animation, Attachment, Bone, BoneTrack, ImageAsset, Key, Project } from './types.ts';
+import { findCycles, isAncestorOrSelf } from './skeleton.ts';
+import type {
+  Animation,
+  Attachment,
+  Bone,
+  BoneTrack,
+  ConstraintTrack,
+  Curve,
+  DerivedImage,
+  DrawOrderKey,
+  FormatVersion,
+  IkConstraint,
+  ImageAsset,
+  ImageKey,
+  Interp,
+  Key,
+  Mesh,
+  MixRule,
+  PathConstraint,
+  PathNode,
+  PathShape,
+  Project,
+  Skin,
+  SlotTrack,
+  VertexWeights,
+} from './types.ts';
 import { CHANNEL_ARITY, CHANNELS, FORMAT_ID, FORMAT_VERSION, INTERPS } from './types.ts';
 
 export type ParseResult = { ok: true; project: Project; warnings: string[] } | { ok: false; errors: string[] };
@@ -8,22 +32,112 @@ const ALLOWED_IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'
 const DATA_URL_RE = /^data:(image\/(?:png|jpeg|webp|gif));base64,[A-Za-z0-9+/]+=*$/;
 const MAX_ERRORS = 25;
 
-export function serializeProject(project: Project): string {
+// ---- Writing --------------------------------------------------------------------
+
+/**
+ * Lists the v2 features a project uses. Empty ⇒ the project is representable as v1 and
+ * is written as v1 (so legacy files re-save byte-identically and stay readable by the
+ * original slice). Non-empty ⇒ written as v2, which a v1-only reader rejects.
+ */
+export function v2Features(p: Project): string[] {
+  const f = new Set<string>();
+  if (p.ik?.length) f.add('IK constraints');
+  if (p.paths?.length || p.pathConstraints?.length) f.add('paths');
+  if (p.skins?.length) f.add('skins');
+  if (p.mixes?.length) f.add('animation mixes');
+  for (const im of p.images) if (im.derived) f.add('derived images');
+  for (const a of p.attachments) {
+    if (a.hidden) f.add('hidden attachments');
+    if (a.mesh) f.add('meshes');
+  }
+  for (const an of p.animations) {
+    for (const tr of Object.values(an.tracks)) for (const ch of CHANNELS) for (const k of tr[ch]) if (k.interp === 'bezier') f.add('bezier curves');
+    if (an.slots && Object.values(an.slots).some((s) => s.visible?.length || s.opacity?.length || s.image?.length || s.deform?.length)) f.add('slot keys');
+    if (an.drawOrder?.length) f.add('draw-order keys');
+    if (an.constraints && Object.values(an.constraints).some((c) => c.mix?.length || c.position?.length)) f.add('constraint keys');
+  }
+  return [...f];
+}
+
+export function requiredVersion(p: Project): FormatVersion {
+  return v2Features(p).length ? 2 : 1;
+}
+
+const nonEmpty = <T>(xs: T[] | undefined): T[] | undefined => (xs && xs.length ? xs : undefined);
+
+function writeKey(k: Key): Key {
+  const out: Key = { time: k.time, value: k.value, interp: k.interp };
+  if (k.interp === 'bezier' && k.curve) out.curve = k.curve;
+  return out;
+}
+
+function writeAnimation(an: Animation): Animation {
+  const tracks: Record<string, BoneTrack> = {};
+  for (const [id, tr] of Object.entries(an.tracks)) tracks[id] = { translate: tr.translate.map(writeKey), rotate: tr.rotate.map(writeKey), scale: tr.scale.map(writeKey) };
+  const out: Animation = { id: an.id, name: an.name, duration: an.duration, fps: an.fps, loop: an.loop, tracks };
+  const slots: Record<string, SlotTrack> = {};
+  for (const [id, s] of Object.entries(an.slots ?? {})) {
+    const t: SlotTrack = {};
+    if (s.visible?.length) t.visible = s.visible.map(writeKey);
+    if (s.opacity?.length) t.opacity = s.opacity.map(writeKey);
+    if (s.image?.length) t.image = s.image;
+    if (s.deform?.length) t.deform = s.deform.map(writeKey);
+    if (Object.keys(t).length) slots[id] = t;
+  }
+  if (Object.keys(slots).length) out.slots = slots;
+  if (an.drawOrder?.length) out.drawOrder = an.drawOrder;
+  const cons: Record<string, ConstraintTrack> = {};
+  for (const [id, c] of Object.entries(an.constraints ?? {})) {
+    const t: ConstraintTrack = {};
+    if (c.mix?.length) t.mix = c.mix.map(writeKey);
+    if (c.position?.length) t.position = c.position.map(writeKey);
+    if (Object.keys(t).length) cons[id] = t;
+  }
+  if (Object.keys(cons).length) out.constraints = cons;
+  return out;
+}
+
+/** Canonical project object as written to disk (lowest version that represents it). */
+export function toFileObject(project: Project): Project {
   const out: Project = {
     format: FORMAT_ID,
-    version: FORMAT_VERSION,
+    version: requiredVersion(project),
     name: project.name,
     bones: project.bones,
     images: project.images,
-    attachments: project.attachments,
-    animations: project.animations,
+    attachments: project.attachments.map((a) => {
+      const { hidden, mesh, ...base } = a;
+      const o: Attachment = { ...base };
+      if (hidden) o.hidden = true;
+      if (mesh) o.mesh = mesh;
+      return o;
+    }),
+    animations: project.animations.map(writeAnimation),
   };
-  return JSON.stringify(out, null, 1);
+  const ik = nonEmpty(project.ik);
+  if (ik) out.ik = ik;
+  const paths = nonEmpty(project.paths);
+  if (paths) out.paths = paths;
+  const pcs = nonEmpty(project.pathConstraints);
+  if (pcs) out.pathConstraints = pcs;
+  const skins = nonEmpty(project.skins);
+  if (skins) out.skins = skins;
+  const mixes = nonEmpty(project.mixes);
+  if (mixes) out.mixes = mixes;
+  return out;
 }
+
+export function serializeProject(project: Project): string {
+  return JSON.stringify(toFileObject(project), null, 1);
+}
+
+// ---- Reading --------------------------------------------------------------------
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
+
+const isFiniteNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 class Checker {
   errors: string[] = [];
@@ -42,9 +156,18 @@ class Checker {
   num(o: Record<string, unknown>, k: string, where: string, fallback?: number): number {
     const v = o[k];
     if (v === undefined && fallback !== undefined) return fallback;
-    if (typeof v !== 'number' || !Number.isFinite(v)) {
+    if (!isFiniteNum(v)) {
       this.fail(`${where}.${k} must be a finite number`);
       return 0;
+    }
+    return v;
+  }
+  bool(o: Record<string, unknown>, k: string, where: string, fallback: boolean): boolean {
+    const v = o[k];
+    if (v === undefined) return fallback;
+    if (typeof v !== 'boolean') {
+      this.fail(`${where}.${k} must be true or false`);
+      return fallback;
     }
     return v;
   }
@@ -55,6 +178,17 @@ class Checker {
       return [];
     }
     return v;
+  }
+  optArr(o: Record<string, unknown>, k: string, where: string): unknown[] | undefined {
+    if (o[k] === undefined) return undefined;
+    return this.arr(o, k, where);
+  }
+  numbers(v: unknown, where: string, len?: number): number[] {
+    if (!Array.isArray(v) || !v.every(isFiniteNum) || (len !== undefined && v.length !== len)) {
+      this.fail(`${where} must be ${len ?? 'a list of'} finite number(s)`);
+      return [];
+    }
+    return v.slice();
   }
 }
 
@@ -69,6 +203,56 @@ export function parseProject(text: string): ParseResult {
   return validateProject(raw);
 }
 
+/** Validates a key list (sorted, arity, interpolation). Shared by every keyed channel. */
+function readKeys(c: Checker, list: unknown, where: string, arity: number | ((k: number[]) => string | null), version: number): Key[] {
+  const out: Key[] = [];
+  if (list === undefined) return out;
+  if (!Array.isArray(list)) {
+    c.fail(`${where} must be an array`);
+    return out;
+  }
+  let prev = -Infinity;
+  list.forEach((k, ki) => {
+    const kw = `${where}[${ki}]`;
+    if (!isObj(k)) return c.fail(`${kw} must be an object`);
+    const time = c.num(k, 'time', kw);
+    if (time < 0) c.fail(`${kw}.time must not be negative`);
+    if (time <= prev) c.fail(`${kw} keys must be sorted by strictly increasing time`);
+    prev = time;
+    const value = Array.isArray(k.value) ? k.value : [];
+    const nums = value.every(isFiniteNum);
+    if (typeof arity === 'number') {
+      if (value.length !== arity || !nums) c.fail(`${kw}.value must be ${arity} finite number(s)`);
+    } else {
+      const msg = nums ? arity(value as number[]) : 'must be finite numbers';
+      if (msg) c.fail(`${kw}.value ${msg}`);
+    }
+    const interp = (k.interp ?? 'linear') as Interp;
+    if (!INTERPS.includes(interp)) c.fail(`${kw}.interp "${String(interp)}" is not supported`);
+    const key: Key = { time, value: value.slice() as number[], interp };
+    if (interp === 'bezier') {
+      if (version < 2) c.fail(`${kw}.interp "bezier" requires project version 2`);
+      const cv = k.curve;
+      if (!Array.isArray(cv) || cv.length !== 4 || !cv.every(isFiniteNum)) c.fail(`${kw}.curve must be [x1, y1, x2, y2] finite numbers`);
+      else if (cv[0] < 0 || cv[0] > 1 || cv[2] < 0 || cv[2] > 1) c.fail(`${kw}.curve x handles must lie in [0, 1] (time must not run backwards)`);
+      else key.curve = cv.slice() as Curve;
+    } else if (k.curve !== undefined) {
+      c.fail(`${kw}.curve is only allowed on bezier keys`);
+    }
+    out.push(key);
+  });
+  return out;
+}
+
+function sortedTimes(c: Checker, list: { time: number }[], where: string): void {
+  let prev = -Infinity;
+  list.forEach((k, i) => {
+    if (k.time < 0) c.fail(`${where}[${i}].time must not be negative`);
+    if (k.time <= prev) c.fail(`${where}[${i}] keys must be sorted by strictly increasing time`);
+    prev = k.time;
+  });
+}
+
 export function validateProject(raw: unknown): ParseResult {
   const c = new Checker();
   if (!isObj(raw)) return { ok: false, errors: ['Project file must be a JSON object.'] };
@@ -79,13 +263,18 @@ export function validateProject(raw: unknown): ParseResult {
   if (raw.version > FORMAT_VERSION) {
     return { ok: false, errors: [`Project version ${raw.version} is newer than this editor supports (${FORMAT_VERSION}).`] };
   }
-  if (raw.version !== FORMAT_VERSION) return { ok: false, errors: [`Unsupported project version ${raw.version}.`] };
+  if (raw.version !== 1 && raw.version !== 2) return { ok: false, errors: [`Unsupported project version ${raw.version}.`] };
+  const version = raw.version as FormatVersion;
+  const v2only = (what: string, where: string) => {
+    if (version < 2) c.fail(`${where}: ${what} requires project version 2`);
+  };
 
   const name = typeof raw.name === 'string' ? raw.name : 'Untitled rig';
 
   // Images
   const images: ImageAsset[] = [];
   const imageIds = new Set<string>();
+  const imageDims = new Map<string, [number, number]>();
   c.arr(raw, 'images', 'project').forEach((im, i) => {
     const w = `images[${i}]`;
     if (!isObj(im)) return c.fail(`${w} must be an object`);
@@ -100,8 +289,32 @@ export function validateProject(raw: unknown): ParseResult {
     const width = c.num(im, 'width', w);
     const height = c.num(im, 'height', w);
     if (width <= 0 || height <= 0) c.fail(`${w} must have positive width/height`);
-    images.push({ id, name: c.str(im, 'name', w), mime, width, height, dataUrl });
+    imageDims.set(id, [width, height]);
+    const asset: ImageAsset = { id, name: c.str(im, 'name', w), mime, width, height, dataUrl };
+    if (im.derived !== undefined) {
+      v2only('derived image provenance', w);
+      const d = im.derived;
+      if (!isObj(d)) c.fail(`${w}.derived must be an object`);
+      else {
+        const kind = d.kind as DerivedImage['kind'];
+        if (!['cutout', 'remainder', 'patch', 'extension'].includes(kind)) c.fail(`${w}.derived.kind "${String(kind)}" is not supported`);
+        const der: DerivedImage = {
+          kind,
+          sourceId: c.str(d, 'sourceId', `${w}.derived`),
+          offsetX: c.num(d, 'offsetX', `${w}.derived`),
+          offsetY: c.num(d, 'offsetY', `${w}.derived`),
+          synthesized: c.num(d, 'synthesized', `${w}.derived`, 0),
+        };
+        if (d.polygon !== undefined) der.polygon = c.numbers(d.polygon, `${w}.derived.polygon`);
+        if (typeof d.note === 'string') der.note = d.note;
+        asset.derived = der;
+      }
+    }
+    images.push(asset);
   });
+  for (const im of images) {
+    if (im.derived && !imageIds.has(im.derived.sourceId)) c.warnings.push(`Derived image "${im.name}" refers to a source image that is no longer in the project.`);
+  }
 
   // Bones
   const bones: Bone[] = [];
@@ -132,10 +345,12 @@ export function validateProject(raw: unknown): ParseResult {
   }
   const cyc = findCycles(bones);
   if (cyc.length) c.fail(`Bone hierarchy contains a cycle (${cyc.slice(0, 5).join(', ')})`);
+  const acyclic = cyc.length === 0;
 
   // Attachments
   const attachments: Attachment[] = [];
   const attIds = new Set<string>();
+  const meshVerts = new Map<string, number>();
   c.arr(raw, 'attachments', 'project').forEach((a, i) => {
     const w = `attachments[${i}]`;
     if (!isObj(a)) return c.fail(`${w} must be an object`);
@@ -147,7 +362,7 @@ export function validateProject(raw: unknown): ParseResult {
     const imageId = c.str(a, 'imageId', w);
     if (!imageIds.has(imageId)) c.fail(`${w} references missing image "${imageId}"`);
     const opacity = c.num(a, 'opacity', w, 1);
-    attachments.push({
+    const att: Attachment = {
       id,
       name: c.str(a, 'name', w),
       boneId,
@@ -158,6 +373,95 @@ export function validateProject(raw: unknown): ParseResult {
       scaleX: c.num(a, 'scaleX', w, 1),
       scaleY: c.num(a, 'scaleY', w, 1),
       opacity: Math.min(1, Math.max(0, opacity)),
+    };
+    if (a.hidden !== undefined) {
+      v2only('hidden', w);
+      if (c.bool(a, 'hidden', w, false)) att.hidden = true;
+    }
+    if (a.mesh !== undefined) {
+      v2only('mesh', w);
+      const mesh = readMesh(c, a.mesh, `${w}.mesh`, boneIds, imageDims.get(imageId));
+      if (mesh) {
+        att.mesh = mesh;
+        meshVerts.set(id, mesh.points.length / 2);
+      }
+    }
+    attachments.push(att);
+  });
+
+  // Constraints
+  const constraintIds = new Set<string>();
+  const ik: IkConstraint[] = [];
+  const ikRaw = c.optArr(raw, 'ik', 'project');
+  if (ikRaw) v2only('ik', 'project');
+  ikRaw?.forEach((k, i) => {
+    const w = `ik[${i}]`;
+    if (!isObj(k)) return c.fail(`${w} must be an object`);
+    const id = c.str(k, 'id', w);
+    if (constraintIds.has(id)) c.fail(`${w}.id "${id}" is duplicated`);
+    constraintIds.add(id);
+    const chain = Array.isArray(k.bones) ? k.bones.filter((x): x is string => typeof x === 'string') : [];
+    if (chain.length < 1 || chain.length > 2 || chain.length !== (k.bones as unknown[]).length) c.fail(`${w}.bones must list 1 or 2 bone ids`);
+    for (const b of chain) if (!boneIds.has(b)) c.fail(`${w} references missing bone "${b}"`);
+    if (chain.length === 2 && bones.find((b) => b.id === chain[1])?.parentId !== chain[0]) c.fail(`${w}: the second bone must be a child of the first`);
+    const target = c.str(k, 'target', w);
+    if (!boneIds.has(target)) c.fail(`${w} references missing target bone "${target}"`);
+    else if (acyclic && chain.some((b) => isAncestorOrSelf(bones, b, target))) c.fail(`${w}: the target must not be (a child of) a constrained bone`);
+    const mix = c.num(k, 'mix', w, 1);
+    if (mix < 0 || mix > 1) c.fail(`${w}.mix must be between 0 and 1`);
+    ik.push({ id, name: c.str(k, 'name', w), bones: chain, target, mix, bendPositive: c.bool(k, 'bendPositive', w, true) });
+  });
+
+  const paths: PathShape[] = [];
+  const pathIds = new Set<string>();
+  const pathsRaw = c.optArr(raw, 'paths', 'project');
+  if (pathsRaw) v2only('paths', 'project');
+  pathsRaw?.forEach((pr, i) => {
+    const w = `paths[${i}]`;
+    if (!isObj(pr)) return c.fail(`${w} must be an object`);
+    const id = c.str(pr, 'id', w);
+    if (pathIds.has(id)) c.fail(`${w}.id "${id}" is duplicated`);
+    pathIds.add(id);
+    const boneId = pr.boneId === null || pr.boneId === undefined ? null : c.str(pr, 'boneId', w);
+    if (boneId !== null && !boneIds.has(boneId)) c.fail(`${w} references missing bone "${boneId}"`);
+    const nodes: PathNode[] = [];
+    c.arr(pr, 'nodes', w).forEach((n, ni) => {
+      const nw = `${w}.nodes[${ni}]`;
+      if (!isObj(n)) return c.fail(`${nw} must be an object`);
+      nodes.push({ x: c.num(n, 'x', nw), y: c.num(n, 'y', nw), inX: c.num(n, 'inX', nw, 0), inY: c.num(n, 'inY', nw, 0), outX: c.num(n, 'outX', nw, 0), outY: c.num(n, 'outY', nw, 0) });
+    });
+    if (nodes.length < 2) c.fail(`${w} needs at least 2 nodes`);
+    paths.push({ id, name: c.str(pr, 'name', w), boneId, closed: c.bool(pr, 'closed', w, false), nodes });
+  });
+
+  const pathConstraints: PathConstraint[] = [];
+  const pcRaw = c.optArr(raw, 'pathConstraints', 'project');
+  if (pcRaw) v2only('pathConstraints', 'project');
+  pcRaw?.forEach((pc, i) => {
+    const w = `pathConstraints[${i}]`;
+    if (!isObj(pc)) return c.fail(`${w} must be an object`);
+    const id = c.str(pc, 'id', w);
+    if (constraintIds.has(id)) c.fail(`${w}.id "${id}" is duplicated`);
+    constraintIds.add(id);
+    const pathId = c.str(pc, 'pathId', w);
+    if (!pathIds.has(pathId)) c.fail(`${w} references missing path "${pathId}"`);
+    const list = Array.isArray(pc.bones) ? pc.bones.filter((x): x is string => typeof x === 'string') : [];
+    if (!list.length) c.fail(`${w}.bones must list at least one bone id`);
+    for (const b of list) if (!boneIds.has(b)) c.fail(`${w} references missing bone "${b}"`);
+    const owner = paths.find((p) => p.id === pathId)?.boneId;
+    if (owner && acyclic && list.some((b) => isAncestorOrSelf(bones, b, owner))) c.fail(`${w}: a constrained bone must not carry its own path`);
+    const mix = c.num(pc, 'mix', w, 1);
+    if (mix < 0 || mix > 1) c.fail(`${w}.mix must be between 0 and 1`);
+    pathConstraints.push({
+      id,
+      name: c.str(pc, 'name', w),
+      pathId,
+      bones: list,
+      position: c.num(pc, 'position', w, 0),
+      spacing: c.num(pc, 'spacing', w, 0),
+      mix,
+      rotate: c.bool(pc, 'rotate', w, true),
+      rotateOffset: c.num(pc, 'rotateOffset', w, 0),
     });
   });
 
@@ -189,42 +493,204 @@ export function validateProject(raw: unknown): ParseResult {
         }
         const track: BoneTrack = { translate: [], rotate: [], scale: [] };
         for (const ch of CHANNELS) {
-          const list = tr[ch] === undefined ? [] : tr[ch];
-          if (!Array.isArray(list)) {
+          if (tr[ch] !== undefined && !Array.isArray(tr[ch])) {
             c.fail(`${tw}.${ch} must be an array`);
             continue;
           }
-          let prev = -Infinity;
-          list.forEach((k, ki) => {
-            const kw = `${tw}.${ch}[${ki}]`;
-            if (!isObj(k)) return c.fail(`${kw} must be an object`);
-            const time = c.num(k, 'time', kw);
-            if (time < 0) c.fail(`${kw}.time must not be negative`);
-            if (time <= prev) c.fail(`${kw} keys must be sorted by strictly increasing time`);
-            prev = time;
-            const value = Array.isArray(k.value) ? k.value : [];
-            if (value.length !== CHANNEL_ARITY[ch] || !value.every((v) => typeof v === 'number' && Number.isFinite(v))) {
-              c.fail(`${kw}.value must be ${CHANNEL_ARITY[ch]} finite number(s)`);
-            }
-            const interp = k.interp ?? 'linear';
-            if (!INTERPS.includes(interp as Key['interp'])) c.fail(`${kw}.interp "${String(interp)}" is not supported`);
-            track[ch].push({ time, value: value.slice() as number[], interp: interp as Key['interp'] });
-          });
+          track[ch] = readKeys(c, tr[ch], `${tw}.${ch}`, CHANNEL_ARITY[ch], version);
         }
         tracks[boneId] = track;
       }
     }
-    animations.push({ id, name: c.str(an, 'name', w), duration, fps, loop: an.loop !== false, tracks });
+    const anim: Animation = { id, name: c.str(an, 'name', w), duration, fps, loop: an.loop !== false, tracks };
+
+    if (an.slots !== undefined) {
+      v2only('slots', w);
+      if (!isObj(an.slots)) c.fail(`${w}.slots must be an object`);
+      else {
+        const slots: Record<string, SlotTrack> = {};
+        for (const [attId, sr] of Object.entries(an.slots)) {
+          const sw = `${w}.slots["${attId}"]`;
+          if (!attIds.has(attId)) {
+            c.fail(`${sw} references missing attachment`);
+            continue;
+          }
+          if (!isObj(sr)) {
+            c.fail(`${sw} must be an object`);
+            continue;
+          }
+          const st: SlotTrack = {};
+          if (sr.visible !== undefined) st.visible = readKeys(c, sr.visible, `${sw}.visible`, (v) => (v.length === 1 && (v[0] === 0 || v[0] === 1) ? null : 'must be [0] or [1]'), version);
+          if (sr.opacity !== undefined) st.opacity = readKeys(c, sr.opacity, `${sw}.opacity`, (v) => (v.length === 1 && v[0] >= 0 && v[0] <= 1 ? null : 'must be one number from 0 to 1'), version);
+          if (sr.image !== undefined) {
+            const list: ImageKey[] = [];
+            if (!Array.isArray(sr.image)) c.fail(`${sw}.image must be an array`);
+            else
+              sr.image.forEach((k, ki) => {
+                const kw = `${sw}.image[${ki}]`;
+                if (!isObj(k)) return c.fail(`${kw} must be an object`);
+                const imageId = c.str(k, 'imageId', kw);
+                if (!imageIds.has(imageId)) c.fail(`${kw} references missing image "${imageId}"`);
+                list.push({ time: c.num(k, 'time', kw), imageId });
+              });
+            sortedTimes(c, list, `${sw}.image`);
+            st.image = list;
+          }
+          if (sr.deform !== undefined) {
+            const n = meshVerts.get(attId);
+            if (n === undefined) c.fail(`${sw}.deform needs the attachment to have a mesh`);
+            st.deform = readKeys(c, sr.deform, `${sw}.deform`, (v) => (n !== undefined && v.length === 2 * n ? null : `must hold ${2 * (n ?? 0)} offsets (2 per mesh vertex)`), version);
+          }
+          slots[attId] = st;
+        }
+        anim.slots = slots;
+      }
+    }
+    if (an.drawOrder !== undefined) {
+      v2only('drawOrder', w);
+      const list: DrawOrderKey[] = [];
+      if (!Array.isArray(an.drawOrder)) c.fail(`${w}.drawOrder must be an array`);
+      else
+        an.drawOrder.forEach((k, ki) => {
+          const kw = `${w}.drawOrder[${ki}]`;
+          if (!isObj(k)) return c.fail(`${kw} must be an object`);
+          const order = Array.isArray(k.order) ? k.order.filter((x): x is string => typeof x === 'string') : [];
+          const set = new Set(order);
+          if (order.length !== attIds.size || set.size !== order.length || order.some((x) => !attIds.has(x))) c.fail(`${kw}.order must list every attachment id exactly once`);
+          list.push({ time: c.num(k, 'time', kw), order });
+        });
+      sortedTimes(c, list, `${w}.drawOrder`);
+      anim.drawOrder = list;
+    }
+    if (an.constraints !== undefined) {
+      v2only('constraint keys', w);
+      if (!isObj(an.constraints)) c.fail(`${w}.constraints must be an object`);
+      else {
+        const cons: Record<string, ConstraintTrack> = {};
+        for (const [cid, cr] of Object.entries(an.constraints)) {
+          const cw = `${w}.constraints["${cid}"]`;
+          if (!constraintIds.has(cid)) {
+            c.fail(`${cw} references a missing constraint`);
+            continue;
+          }
+          if (!isObj(cr)) {
+            c.fail(`${cw} must be an object`);
+            continue;
+          }
+          const ct: ConstraintTrack = {};
+          if (cr.mix !== undefined) ct.mix = readKeys(c, cr.mix, `${cw}.mix`, (v) => (v.length === 1 && v[0] >= 0 && v[0] <= 1 ? null : 'must be one number from 0 to 1'), version);
+          if (cr.position !== undefined) ct.position = readKeys(c, cr.position, `${cw}.position`, 1, version);
+          cons[cid] = ct;
+        }
+        anim.constraints = cons;
+      }
+    }
+    animations.push(anim);
+  });
+
+  const skins: Skin[] = [];
+  const skinsRaw = c.optArr(raw, 'skins', 'project');
+  if (skinsRaw) v2only('skins', 'project');
+  const skinIds = new Set<string>();
+  skinsRaw?.forEach((s, i) => {
+    const w = `skins[${i}]`;
+    if (!isObj(s)) return c.fail(`${w} must be an object`);
+    const id = c.str(s, 'id', w);
+    if (skinIds.has(id)) c.fail(`${w}.id "${id}" is duplicated`);
+    skinIds.add(id);
+    const entries: Skin['entries'] = [];
+    const seen = new Set<string>();
+    c.arr(s, 'entries', w).forEach((e, ei) => {
+      const ew = `${w}.entries[${ei}]`;
+      if (!isObj(e)) return c.fail(`${ew} must be an object`);
+      const attachmentId = c.str(e, 'attachmentId', ew);
+      const imageId = c.str(e, 'imageId', ew);
+      if (!attIds.has(attachmentId)) c.fail(`${ew} references missing attachment "${attachmentId}"`);
+      if (!imageIds.has(imageId)) c.fail(`${ew} references missing image "${imageId}"`);
+      if (seen.has(attachmentId)) c.fail(`${ew}: attachment "${attachmentId}" appears twice in one skin`);
+      seen.add(attachmentId);
+      entries.push({ attachmentId, imageId });
+    });
+    skins.push({ id, name: c.str(s, 'name', w), entries });
+  });
+
+  const mixes: MixRule[] = [];
+  const mixRaw = c.optArr(raw, 'mixes', 'project');
+  if (mixRaw) v2only('mixes', 'project');
+  mixRaw?.forEach((m, i) => {
+    const w = `mixes[${i}]`;
+    if (!isObj(m)) return c.fail(`${w} must be an object`);
+    const from = c.str(m, 'from', w);
+    const to = c.str(m, 'to', w);
+    if (!animIds.has(from) || !animIds.has(to)) c.fail(`${w} references a missing animation`);
+    const duration = c.num(m, 'duration', w);
+    if (duration < 0 || duration > 10) c.fail(`${w}.duration must be between 0 and 10 seconds`);
+    mixes.push({ from, to, duration });
   });
 
   const used = new Set(attachments.map((a) => a.imageId));
+  for (const s of skins) for (const e of s.entries) used.add(e.imageId);
+  for (const an of animations) for (const st of Object.values(an.slots ?? {})) for (const k of st.image ?? []) used.add(k.imageId);
+  for (const im of images) if (im.derived) used.add(im.derived.sourceId);
   const unused = images.filter((im) => !used.has(im.id)).length;
   if (unused) c.warnings.push(`${unused} image(s) are not attached to anything.`);
 
   if (c.errors.length) return { ok: false, errors: c.errors };
-  return {
-    ok: true,
-    warnings: c.warnings,
-    project: { format: FORMAT_ID, version: FORMAT_VERSION, name, bones, images, attachments, animations },
-  };
+  const project: Project = { format: FORMAT_ID, version, name, bones, images, attachments, animations };
+  if (ikRaw) project.ik = ik;
+  if (pathsRaw) project.paths = paths;
+  if (pcRaw) project.pathConstraints = pathConstraints;
+  if (skinsRaw) project.skins = skins;
+  if (mixRaw) project.mixes = mixes;
+  return { ok: true, warnings: c.warnings, project };
+}
+
+function readMesh(c: Checker, raw: unknown, w: string, boneIds: Set<string>, dims: [number, number] | undefined): Mesh | null {
+  if (!isObj(raw)) {
+    c.fail(`${w} must be an object`);
+    return null;
+  }
+  const points = c.numbers(raw.points, `${w}.points`);
+  const n = points.length / 2;
+  if (points.length % 2 || n < 3) c.fail(`${w}.points must hold at least 3 x,y pairs`);
+  if (dims) {
+    for (let i = 0; i < n; i++) {
+      const x = points[2 * i], y = points[2 * i + 1];
+      if (x < -0.5 || y < -0.5 || x > dims[0] + 0.5 || y > dims[1] + 0.5) {
+        c.fail(`${w}.points[${i}] lies outside the image`);
+        break;
+      }
+    }
+  }
+  const triangles = c.numbers(raw.triangles, `${w}.triangles`);
+  if (!triangles.length || triangles.length % 3 || !triangles.every((t) => Number.isInteger(t) && t >= 0 && t < n)) c.fail(`${w}.triangles must be index triples into points`);
+  const hull = c.num(raw, 'hull', w);
+  if (!Number.isInteger(hull) || hull < 3 || hull > n) c.fail(`${w}.hull must be an integer from 3 to the vertex count`);
+  const mesh: Mesh = { points, triangles, hull };
+  if (raw.weights !== undefined) {
+    if (!Array.isArray(raw.weights) || raw.weights.length !== n) {
+      c.fail(`${w}.weights must have one entry per vertex`);
+      return mesh;
+    }
+    const weights: VertexWeights[] = [];
+    raw.weights.forEach((vw, vi) => {
+      const ww = `${w}.weights[${vi}]`;
+      if (!Array.isArray(vw) || !vw.length) return c.fail(`${ww} must list at least one bone influence`);
+      const list: VertexWeights = [];
+      let sum = 0;
+      for (const inf of vw) {
+        if (!isObj(inf) || typeof inf.bone !== 'string' || !isFiniteNum(inf.w) || inf.w < 0) {
+          c.fail(`${ww} entries must be { bone, w ≥ 0 }`);
+          return;
+        }
+        if (!boneIds.has(inf.bone)) c.fail(`${ww} references missing bone "${inf.bone}"`);
+        list.push({ bone: inf.bone, w: inf.w });
+        sum += inf.w;
+      }
+      if (Math.abs(sum - 1) > 1e-3) c.fail(`${ww} weights must sum to 1 (got ${sum.toFixed(4)})`);
+      weights.push(list);
+    });
+    mesh.weights = weights;
+  }
+  return mesh;
 }

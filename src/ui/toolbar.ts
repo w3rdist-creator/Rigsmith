@@ -30,6 +30,7 @@ export function renderToolbar(app: App, root: HTMLElement, onHelp: () => void): 
     h('div', { class: 'tb-group', role: 'group', 'aria-label': 'Export' },
       h('button', { 'data-testid': 'export-runtime', title: 'Export animation data (rigsmith.runtime JSON)', onclick: () => app.exportRuntimeJson() }, 'Export data'),
       h('button', { 'data-testid': 'export-png', title: 'Export the current frame as a transparent PNG', onclick: () => app.exportPngFrame() }, 'Export PNG'),
+      h('button', { 'data-testid': 'export-sequence', title: 'Export an animation as a transparent PNG sequence (ZIP)', onclick: () => app.exportDialog.open() }, 'Export sequence…'),
     ),
     h('div', { class: 'tb-group', role: 'group', 'aria-label': 'History' },
       h('button', { 'data-testid': 'undo', disabled: !ed.history.canUndo(), title: undoLabel ? `Undo ${undoLabel} (Ctrl/⌘+Z)` : 'Nothing to undo', onclick: () => ed.undo() && app.status(ed.lastUndoRedo) }, '↶ Undo'),
@@ -47,10 +48,34 @@ export function renderToolbar(app: App, root: HTMLElement, onHelp: () => void): 
     h('div', { class: 'tb-group', role: 'group', 'aria-label': 'View' },
       h('button', { 'data-testid': 'frame-all', title: 'Frame everything (F or double-click canvas)', onclick: () => app.viewport.frameAll() }, 'Fit'),
       h('label', { class: 'inline', title: 'Show bones (H)' }, h('input', { type: 'checkbox', checked: ed.showBones, 'data-testid': 'show-bones', onchange: (e: Event) => { ed.showBones = (e.target as HTMLInputElement).checked; ed.emit('view'); } }), 'Bones'),
+      onionControls(app),
     ),
     h('div', { class: 'tb-spacer' }),
     h('button', { class: 'accent', 'data-testid': 'load-demo', title: 'Open the built-in Tock demo rig', onclick: () => void app.loadDemo() }, 'Demo'),
     h('button', { 'data-testid': 'help', 'aria-label': 'Keyboard and mouse controls', title: 'Controls', onclick: onHelp }, '?'),
+  );
+}
+
+/** Onion skin controls (view state: not undoable, not saved in the project). */
+function onionControls(app: App): HTMLElement {
+  const { ed } = app;
+  const o = ed.onion;
+  const num = (testId: string, label: string, value: number, min: number, max: number, set: (v: number) => void) => {
+    const input = h('input', { type: 'number', min, max, step: 1, value: String(value), class: 'w-tiny', 'data-testid': testId, 'aria-label': label, title: label, disabled: !o.enabled });
+    input.addEventListener('change', () => {
+      const v = Math.round(Number(input.value));
+      if (!(v >= min && v <= max)) return void (input.value = String(value));
+      set(v);
+      ed.emit('view');
+    });
+    return input;
+  };
+  return h('span', { class: 'onion', role: 'group', 'aria-label': 'Onion skin' },
+    h('label', { class: 'inline', title: 'Onion skin: show ghosts of earlier (red) and later (green) frames' },
+      h('input', { type: 'checkbox', checked: o.enabled, 'data-testid': 'onion-toggle', onchange: (e: Event) => { o.enabled = (e.target as HTMLInputElement).checked; ed.emit('view'); } }), 'Onion'),
+    num('onion-before', 'Ghosts before', o.before, 0, 8, (v) => void (o.before = v)),
+    num('onion-after', 'Ghosts after', o.after, 0, 8, (v) => void (o.after = v)),
+    num('onion-step', 'Frames between ghosts', o.step, 1, 30, (v) => void (o.step = v)),
   );
 }
 
@@ -65,10 +90,13 @@ export const HELP_ROWS: [string, string][] = [
   ['Space', 'Play / pause'],
   [', / .  ·  Home / End', 'Previous / next frame · first / last frame'],
   ['K', 'Key all channels of the selected bone'],
-  ['Click / drag in the timeline', 'Scrub (snaps to frames); drag a ◆ to retime it'],
+  ['Click / drag in the timeline', 'Scrub (snaps to frames); drag a ◆ to retime it (all selected keys move together)'],
+  ['Shift/Ctrl-click ◆ · Shift-drag lanes · Ctrl/⌘+A', 'Add/remove a key from the selection · box-select keys · select all keys'],
+  ['[ / ]  ·  Ctrl/⌘+C / V', 'Nudge selected keys one frame · copy / paste keys at the playhead'],
+  ['Curve panel', 'Drag the round handles (Shift snaps); presets include overshoot and anticipate'],
   ['Delete / Backspace', 'Delete the selected key, bone or image attachment'],
   ['Ctrl/⌘+Z · Ctrl/⌘+Shift+Z or Ctrl+Y', 'Undo · Redo'],
   ['Ctrl/⌘+S · Ctrl/⌘+O', 'Save (download) · Open project'],
   ['Shift while rotating / scaling', 'Snap to 15° / scale X only'],
-  ['H · Esc', 'Toggle bones · deselect or cancel drag'],
+  ['H · Esc', 'Toggle bones · cancel the current drag (canvas, keys, curve handle) or deselect'],
 ];
