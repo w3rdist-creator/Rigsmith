@@ -17,10 +17,10 @@
 // layer 0 on top, so layers are written front to back. Position is split (p.s = true)
 // so x and y ease independently exactly like Rigsmith's per-component interpolation.
 import { lastExportFrame } from './sequence.ts';
-import { sequenceGeometry } from './sequence.ts';
+import { frameWarnings, requestGeometry } from './sequence.ts';
 import type { Bounds } from './evaluate.ts';
 import { evaluate, frameBounds } from './evaluate.ts';
-import type { Animation, Curve, Key, Project } from './types.ts';
+import type { Animation, Curve, Key, Project, ProjectFrame } from './types.ts';
 
 export interface LottieDiagnostic {
   level: 'error' | 'note';
@@ -77,7 +77,8 @@ function prop1(keys: readonly Key[] | undefined, fps: number, value: (k: Key) =>
   return p;
 }
 
-export function exportLottie(project: Project, animName: string, skinName: string | null): LottieResult {
+/** `frame`: fixed composition (world rect at scale 1, art outside it clipped); default fits the animation. */
+export function exportLottie(project: Project, animName: string, skinName: string | null, frame: ProjectFrame | null = null): LottieResult {
   const anim = project.animations.find((a) => a.name === animName);
   if (!anim) return { ok: false, errors: [`No animation named “${animName}”.`], diagnostics: [] };
   let skinId: string | null = null;
@@ -96,7 +97,8 @@ export function exportLottie(project: Project, animName: string, skinName: strin
   let b: Bounds | null = null;
   for (const fr of frames) b = frameBounds(fr, b);
   if (!b) return { ok: false, errors: ['Nothing visible to export.'], diagnostics };
-  const geo = sequenceGeometry(b, 1, 4);
+  const geo = requestGeometry(b, 1, 4, frame);
+  for (const w of frameWarnings(b, frame, `“${anim.name}”`)) diagnostics.push({ level: 'note', feature: 'project frame', item: anim.name, message: w });
 
   let ind = 1;
   const base = (nm: string, ks: Record<string, unknown>, parent?: number) => ({ ddd: 0, ind: ind++, nm, sr: 1, ks, ao: 0, ip: 0, op, st: 0, bm: 0, ...(parent ? { parent } : {}) });

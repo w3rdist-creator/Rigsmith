@@ -584,6 +584,7 @@ export class Viewport {
     const world = frame.world;
     drawFrame(g, frame, (im) => this.images.get(im), vm, { missingPlaceholder: editorChrome });
     if (!editorChrome) return;
+    if (p.frame) this.drawProjectFrame(g, vm, dpr, p.frame);
     // Attachment selection/hover outlines.
     for (const f of frame.attachments) {
       const a = f.att;
@@ -598,6 +599,21 @@ export class Viewport {
       this.drawBones(g, p, world, vm, dpr);
       this.drawIk(g, p, world, vm, dpr);
     }
+  }
+
+  /** The fixed delivery frame: dashed outline plus its pixel size (exports clip to it). */
+  private drawProjectFrame(g: CanvasRenderingContext2D, vm: Mat, dpr: number, f: { x: number; y: number; width: number; height: number }): void {
+    const a = apply(vm, { x: f.x, y: f.y });
+    const b = apply(vm, { x: f.x + f.width, y: f.y + f.height });
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.setLineDash([6 * dpr, 4 * dpr]);
+    g.lineWidth = 1.5 * dpr;
+    g.strokeStyle = 'rgba(122,215,255,0.85)';
+    g.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    g.setLineDash([]);
+    g.font = `${11 * dpr}px system-ui, sans-serif`;
+    g.fillStyle = 'rgba(122,215,255,0.95)';
+    g.fillText(`frame ${Math.round(f.width)}×${Math.round(f.height)}`, a.x + 4 * dpr, a.y - 5 * dpr);
   }
 
   private drawPaths(g: CanvasRenderingContext2D, p: Project, world: Map<string, Mat>, vm: Mat, dpr: number): void {

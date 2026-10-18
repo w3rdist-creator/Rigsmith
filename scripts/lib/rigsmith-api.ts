@@ -189,6 +189,8 @@ export interface SequenceResult {
   meta: { width: number; height: number; fps: number; animation: string; frames: { file: string; time: number; frame: number }[] } & Record<string, unknown>;
   /** PNG frames in order, with their ZIP paths. */
   files: { name: string; data: Uint8Array }[];
+  /** Non-blocking notices, e.g. art clipped by a fixed frame. */
+  warnings: string[];
 }
 
 export interface Renderer {
@@ -243,7 +245,7 @@ export async function withRenderer<T>(fn: (r: Renderer) => Promise<T>, opts: { p
           o.onProgress?.(i + 1, prep.frames);
         }
         if (pageErrors.length) throw new ApiError('Renderer error', pageErrors, EXIT.failed);
-        return { meta: prep.meta, files };
+        return { meta: prep.meta, files, warnings: prep.warnings ?? [] };
       },
     };
     return await fn(renderer);

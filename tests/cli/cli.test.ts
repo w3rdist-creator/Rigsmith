@@ -249,6 +249,51 @@ describe('rendering (headless Chrome for Testing via render.html)', () => {
     const ps = spawnSync('pgrep', ['-f', 'browser-profiles/cli([^-]|$)'], { encoding: 'utf8' });
     assert.equal(ps.stdout.trim(), '', 'the CLI browser is closed');
   });
+
+  it('frame (RV-003): --frame project / x,y,w,h / --frame-from match the editor project-frame export; clips with a warning', async () => {
+    // The editor sets a fitted project frame (visible control); the CLI renders with the same rect.
+    await page.getByTestId('frame-fit').click();
+    const frame = await page.evaluate(() => (window as any).__rigsmith.project().frame);
+    assert.ok(frame && frame.width > 0, 'the editor stored a frame');
+    const rect = `${frame.x},${frame.y},${frame.width},${frame.height}`;
+    const framed = path.join(OUT, 'framed.rig.json');
+    const base = parseProject(readFileSync(RIG, 'utf8'));
+    assert.ok(base.ok);
+    writeFileSync(framed, serializeProject({ ...base.project, frame }));
+    const zips: Record<string, string> = {};
+    for (const [label, file, extra] of [['project', framed, ['--frame', 'project']], ['rect', RIG, ['--frame', rect]], ['from', RIG, ['--frame-from', framed]]] as const) {
+      const out = path.join(OUT, `cli-frame-${label}.zip`);
+      const r = cli('render', file, '--anim', 'wave', ...extra, '--out', out);
+      assert.equal(r.code, 0, JSON.stringify(r.json));
+      assert.deepEqual([r.json.width, r.json.height, r.json.frame], [frame.width, frame.height, 'project'], label);
+      zips[label] = sha(out);
+    }
+    await page.getByTestId('export-sequence').click();
+    await page.getByTestId('seq-anim').selectOption({ label: 'wave' });
+    await page.getByTestId('seq-skin').selectOption({ label: '(no skin)' });
+    assert.equal(await page.getByTestId('seq-frame').inputValue(), 'project', 'the dialog defaults to the project frame');
+    const editor = await editorDownload('seq-export', 'ui-frame.zip');
+    report.push(`frame ${rect}: cli project ${zips.project} rect ${zips.rect} from ${zips.from} editor ${sha(editor)}`);
+    assert.deepEqual([zips.rect, zips.from, sha(editor)], [zips.project, zips.project, zips.project], 'all four are byte-identical');
+    const mix = cli('mix', framed, '--from', 'wave', '--to', 'rest', '--at', '0.5', '--frame', 'project', '--out', path.join(OUT, 'cli-frame-mix.zip'));
+    assert.equal(mix.code, 0, JSON.stringify(mix.json));
+    assert.deepEqual([mix.json.width, mix.json.height, mix.json.warnings], [frame.width, frame.height, []]);
+    // A frame too small for the art: same size, clipped, a warning on stderr and in the JSON.
+    const small = cli('render', RIG, '--anim', 'wave', '--frame', `${frame.x},${frame.y},40,40`, '--out', path.join(OUT, 'cli-frame-small.zip'));
+    assert.equal(small.code, 0);
+    assert.deepEqual([small.json.width, small.json.height], [40, 40]);
+    assert.match(small.json.warnings.join(' '), /extends outside the project frame .* is clipped; the frame size is kept/);
+    assert.match(small.stderr, /warning: Art of/);
+    // Errors: both flags (usage, exit 2); --frame project without a frame (exit 1); bad rect (exit 2).
+    assert.equal(cli('render', framed, '--anim', 'wave', '--frame', 'project', '--frame-from', framed, '--out', path.join(OUT, 'e3.zip')).code, 2);
+    const none = cli('render', RIG, '--anim', 'wave', '--frame', 'project', '--out', path.join(OUT, 'e3.zip'));
+    assert.equal(none.code, 1);
+    assert.match(none.json.errors.join(' '), /has no frame/);
+    assert.equal(cli('render', RIG, '--anim', 'wave', '--frame', '1,2,3', '--out', path.join(OUT, 'e3.zip')).code, 2);
+    assert.equal(cli('render', RIG, '--anim', 'wave', '--frame-from', RIG, '--out', path.join(OUT, 'e3.zip')).code, 1);
+    assert.ok(!existsSync(path.join(OUT, 'e3.zip')));
+    await page.getByTestId('frame-clear').click();
+  });
 });
 
 describe('media: WebM (VP9 alpha) / MP4 (H.264) via the local ffmpeg; decoded by ffmpeg, compared with the PNG sequence', { skip: !hasFfmpeg() && 'ffmpeg is not installed' }, () => {

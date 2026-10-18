@@ -268,3 +268,7 @@ body.player-page { display: block; height: auto; min-height: 100vh; overflow: au
 .player { max-width: 900px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
 .player h1 { font-size: 16px; margin: 0; }
 .player-canvas { max-width: 100%; }
+
+/* Delivery frame (RV-003) */
+.frame-section { margin-top: 10px; display: grid; gap: 6px; }
+.frame-warning { color: #ffcf7a; margin: 0; align-self: center; font-size: 12px; }

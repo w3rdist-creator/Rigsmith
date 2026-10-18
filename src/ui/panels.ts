@@ -8,6 +8,7 @@ import { append, clear, h, numberField } from './dom.ts';
 import { setAttachmentImage } from '../model/meshOps.ts';
 import { meshSection } from './meshPanels.ts';
 import { skinSection } from './skinPanels.ts';
+import { frameSection } from './framePanel.ts';
 import { attachmentSlotSection, boneRigSection, renderConstraintInspector, renderPathInspector } from './rigPanels.ts';
 
 export function renderSkeleton(app: App, root: HTMLElement): void {
@@ -129,6 +130,7 @@ export function renderInspector(app: App, root: HTMLElement): void {
         h('dt', {}, 'Attachments'), h('dd', {}, String(p.attachments.length)),
         h('dt', {}, 'Animations'), h('dd', {}, String(p.animations.length)),
       ),
+      frameSection(app),
       h('p', { class: 'empty' }, 'Select a bone or image on the canvas or in the Skeleton list to edit it.'),
     );
     return;

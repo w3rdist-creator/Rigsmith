@@ -4,7 +4,7 @@
 // animation includes frame N (its final pose). Holds may legitimately make the first
 // and last pictures identical — the policy is about sample times, not pixels.
 import type { Bounds } from './evaluate.ts';
-import type { Animation } from './types.ts';
+import type { Animation, Project, ProjectFrame } from './types.ts';
 
 export interface SequenceRequest {
   fps: number;
@@ -12,6 +12,8 @@ export interface SequenceRequest {
   end: number;
   scale: number;
   padding: number;
+  /** Fixed canvas (usually the project frame); absent/null = fit the animation (+ padding). */
+  frame?: ProjectFrame | null;
 }
 
 export interface SequencePlan {
@@ -80,6 +82,48 @@ export function sequenceGeometry(b: Bounds, scale: number, padding: number): Seq
     originY: minY,
     scale,
   };
+}
+
+/** The fixed canvas of a project frame at `scale` (padding does not apply). */
+export function frameGeometry(frame: ProjectFrame, scale: number): SequenceGeometry {
+  return { width: Math.max(1, Math.round(frame.width * scale)), height: Math.max(1, Math.round(frame.height * scale)), originX: frame.x, originY: frame.y, scale };
+}
+
+/** Canvas for a request: the fixed frame when given, else the union bounds + padding. */
+export function requestGeometry(b: Bounds, scale: number, padding: number, frame?: ProjectFrame | null): SequenceGeometry {
+  return frame ? frameGeometry(frame, scale) : sequenceGeometry(b, scale, padding);
+}
+
+/** World units by which the art's union bounds leave the frame on each side (0 = inside). */
+export function frameOverflow(b: Bounds, frame: ProjectFrame): { left: number; top: number; right: number; bottom: number } {
+  const e = 1e-6;
+  const out = (v: number) => (v > e ? v : 0);
+  return { left: out(frame.x - b.minX), top: out(frame.y - b.minY), right: out(b.maxX - (frame.x + frame.width)), bottom: out(b.maxY - (frame.y + frame.height)) };
+}
+
+/** A visible warning when art leaves the fixed frame (it is clipped; the size is kept). */
+export function frameWarnings(b: Bounds, frame: ProjectFrame | null | undefined, what: string): string[] {
+  if (!frame) return [];
+  const o = frameOverflow(b, frame);
+  const sides = (['left', 'top', 'right', 'bottom'] as const).filter((k) => o[k] > 0).map((k) => `${k} ${Math.ceil(o[k])}`);
+  return sides.length ? [`Art of ${what} extends outside the project frame (${sides.join(', ')} world units) and is clipped; the frame size is kept.`] : [];
+}
+
+/** Rounded-out union of every animation's poses (sampled at each animation's fps) plus padding. */
+export function fitFrameToAnimations(project: Project, sample: (anim: Animation, t: number) => Bounds | null, padding = 4): ProjectFrame | null {
+  let b: Bounds | null = null;
+  const grow = (x: Bounds | null) => {
+    if (!x) return;
+    b = b ? { minX: Math.min(b.minX, x.minX), minY: Math.min(b.minY, x.minY), maxX: Math.max(b.maxX, x.maxX), maxY: Math.max(b.maxY, x.maxY) } : { ...x };
+  };
+  for (const anim of project.animations) {
+    const n = Math.max(1, Math.round(anim.duration * anim.fps));
+    for (let f = 0; f <= n; f++) grow(sample(anim, Math.min(anim.duration, f / anim.fps)));
+  }
+  if (!b) return null;
+  const u = b as Bounds;
+  const x = Math.floor(u.minX - padding), y = Math.floor(u.minY - padding);
+  return { x, y, width: Math.ceil(u.maxX + padding) - x, height: Math.ceil(u.maxY + padding) - y };
 }
 
 export function checkCapacity(geo: SequenceGeometry, frames: number): string[] {

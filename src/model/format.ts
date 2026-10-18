@@ -20,11 +20,12 @@ import type {
   PathNode,
   PathShape,
   Project,
+  ProjectFrame,
   Skin,
   SlotTrack,
   VertexWeights,
 } from './types.ts';
-import { CHANNEL_ARITY, CHANNELS, FORMAT_ID, FORMAT_VERSION, INTERPS } from './types.ts';
+import { CHANNEL_ARITY, CHANNELS, FORMAT_ID, FORMAT_VERSION, FRAME_MAX_SIDE, INTERPS } from './types.ts';
 
 export type ParseResult = { ok: true; project: Project; warnings: string[] } | { ok: false; errors: string[] };
 
@@ -45,6 +46,7 @@ export function v2Features(p: Project): string[] {
   if (p.paths?.length || p.pathConstraints?.length) f.add('paths');
   if (p.skins?.length) f.add('skins');
   if (p.mixes?.length) f.add('animation mixes');
+  if (p.frame) f.add('project frame');
   for (const im of p.images) if (im.derived) f.add('derived images');
   for (const a of p.attachments) {
     if (a.hidden) f.add('hidden attachments');
@@ -124,6 +126,7 @@ export function toFileObject(project: Project): Project {
   if (skins) out.skins = skins;
   const mixes = nonEmpty(project.mixes);
   if (mixes) out.mixes = mixes;
+  if (project.frame) out.frame = { x: project.frame.x, y: project.frame.y, width: project.frame.width, height: project.frame.height };
   return out;
 }
 
@@ -634,6 +637,17 @@ export function validateProject(raw: unknown): ParseResult {
     mixes.push({ from, to, duration });
   });
 
+  let frame: ProjectFrame | undefined;
+  if (raw.frame !== undefined) {
+    v2only('frame', 'project');
+    const fr = raw.frame;
+    if (!isObj(fr)) c.fail('frame must be an object');
+    else {
+      frame = { x: c.num(fr, 'x', 'frame'), y: c.num(fr, 'y', 'frame'), width: c.num(fr, 'width', 'frame'), height: c.num(fr, 'height', 'frame') };
+      if (!(frame.width >= 1 && frame.width <= FRAME_MAX_SIDE) || !(frame.height >= 1 && frame.height <= FRAME_MAX_SIDE)) c.fail(`frame width and height must be between 1 and ${FRAME_MAX_SIDE} world units`);
+    }
+  }
+
   const used = new Set(attachments.map((a) => a.imageId));
   for (const s of skins) for (const e of s.entries) used.add(e.imageId);
   for (const an of animations) for (const st of Object.values(an.slots ?? {})) for (const k of st.image ?? []) used.add(k.imageId);
@@ -648,6 +662,7 @@ export function validateProject(raw: unknown): ParseResult {
   if (pcRaw) project.pathConstraints = pathConstraints;
   if (skinsRaw) project.skins = skins;
   if (mixRaw) project.mixes = mixes;
+  if (frame) project.frame = frame;
   return { ok: true, warnings: c.warnings, project };
 }
 

@@ -7,6 +7,7 @@ import { Cancelled, encodeSequenceZip, prepareMixSequence, renderSequenceFrame, 
 import type { SequenceSetup } from '../render/sequence.ts';
 import type { App } from './app.ts';
 import { download } from './app.ts';
+import { frameSelect, frameWarning } from './exportDialog.ts';
 import { clear, h } from './dom.ts';
 
 const fmt = (v: number) => String(Math.round(v * 1000) / 1000);
@@ -29,6 +30,7 @@ export class MixDialog {
   private playing = 0;
   private running = false;
   private cancelled = false;
+  private frameMode: 'project' | 'fit' = 'fit';
 
   constructor(app: App) {
     this.app = app;
@@ -57,6 +59,7 @@ export class MixDialog {
     this.fps = cur?.fps ?? 30;
     this.index = 0;
     this.interrupt = false;
+    this.frameMode = p.frame ? 'project' : 'fit';
     this.render();
     this.dlg.showModal();
   }
@@ -103,7 +106,12 @@ export class MixDialog {
     };
 
     const plan = this.plan();
-    const prepared = prepareMixSequence(p, plan, this.fps, ed.skinId);
+    const frame = this.frameMode === 'project' && p.frame ? p.frame : null;
+    const prepared = prepareMixSequence(p, plan, this.fps, ed.skinId, 1, 4, frame);
+    const frameSel = frameSelect('mix-frame', p, this.frameMode, (m) => {
+      this.frameMode = m;
+      this.render();
+    });
     const setup = prepared.ok ? prepared.setup : null;
     if (setup) this.index = Math.min(this.index, setup.frames.length - 1);
 
@@ -185,6 +193,7 @@ export class MixDialog {
         num('mix-duration', `Mix ${name(this.from)} → ${name(this.to)} (s)`, mixDuration(p, this.from, this.to), 0.05, (v) => ed.mutate('Set mix duration', (q) => setMixRule(q, this.from, this.to, v))),
         num('mix-fps', 'Preview FPS', this.fps, 1, (v) => void (this.fps = Math.round(v))),
         h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Channels not keyed'), missingSel),
+        h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Canvas'), frameSel),
       ),
       h('div', { class: 'export-grid' },
         h('label', { class: 'inline' }, interruptIn, 'Interrupt with'),
@@ -196,7 +205,8 @@ export class MixDialog {
         num('mix-interrupt-duration', 'mix (s)', this.interruptMix, 0.05, (v) => void (this.interruptMix = Math.min(10, v)), !this.interrupt),
       ),
       h('p', { class: 'hint' }, 'Each entry blends from the live pose before it; an interruption starts from the current blended pose, so nothing jumps. IK and paths are solved after blending; visibility, image and draw order switch at 50%.'),
-      prepared.ok ? h('p', { class: 'hint', 'data-testid': 'mix-summary' }, `${setup!.frames.length} frames · ${setup!.geometry.width}×${setup!.geometry.height} px · transparent`) : h('ul', { class: 'errors', role: 'alert', 'data-testid': 'mix-errors' }, ...prepared.errors.map((e) => h('li', {}, e))),
+      prepared.ok ? h('p', { class: 'hint', 'data-testid': 'mix-summary' }, `${setup!.frames.length} frames · ${setup!.geometry.width}×${setup!.geometry.height} px · transparent${frame ? ' · project frame' : ''}`) : h('ul', { class: 'errors', role: 'alert', 'data-testid': 'mix-errors' }, ...prepared.errors.map((e) => h('li', {}, e))),
+      frameWarning('mix-frame-warning', setup?.warnings ?? []),
       h('div', { class: 'mix-stage' }, canvas),
       h('div', { class: 'export-actions' }, playBtn, slider, label, weights),
       h('div', { class: 'group-label' }, 'Stored mix durations'),
@@ -239,7 +249,7 @@ export class MixDialog {
     btn.disabled = true;
     const p = this.app.ed.project;
     const canvas = document.createElement('canvas');
-    const req = { fps: this.fps, start: 0, end: setup.plan.lastFrame, scale: 1, padding: 4 };
+    const req = { fps: this.fps, start: 0, end: setup.plan.lastFrame, scale: 1, padding: 4, frame: this.frameMode === 'project' ? (p.frame ?? null) : null };
     try {
       const zip = await encodeSequenceZip(
         p, setup, req, (im) => this.app.images.get(im), canvas,

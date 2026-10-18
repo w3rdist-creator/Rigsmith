@@ -245,6 +245,23 @@ export interface Project {
   pathConstraints?: PathConstraint[];
   skins?: Skin[];
   mixes?: MixRule[];
+  /** Fixed delivery frame for exports (v2; absent = each export fits its animation). */
+  frame?: ProjectFrame;
+}
+
+/**
+ * A fixed export canvas in world units: the rectangle from (x, y) (its top-left world
+ * point, which maps to pixel 0,0) spanning width × height. Exports that use it render
+ * width·scale × height·scale pixels and clip art outside it.
+ */
+/** Largest project-frame side in world units (exports also cap pixels per side). */
+export const FRAME_MAX_SIDE = 8192;
+
+export interface ProjectFrame {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface LocalPose {

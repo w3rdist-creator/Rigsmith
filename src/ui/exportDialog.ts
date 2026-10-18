@@ -24,6 +24,8 @@ export class ExportDialog {
   private animId: string | null = null;
   private snapshot: Project | null = null;
   private format: 'zip' | MediaFormat = 'zip';
+  /** Canvas: the project's fixed frame or fit-to-this-animation (+ padding). */
+  private frameMode: 'project' | 'fit' = 'fit';
 
   constructor(app: App) {
     this.app = app;
@@ -45,6 +47,8 @@ export class ExportDialog {
     this.snapshot = cloneProject(ed.project);
     this.animId = anim?.id ?? null;
     this.req = anim ? defaultRequest(anim) : { fps: 30, start: 0, end: 0, scale: 1, padding: 4 };
+    // A project that defines a delivery frame exports at it unless the user picks Fit.
+    this.frameMode = this.snapshot.frame ? 'project' : 'fit';
     this.render();
     this.dlg.showModal();
   }
@@ -79,6 +83,11 @@ export class ExportDialog {
       this.render();
     });
 
+    const frameSel = frameSelect('seq-frame', p, this.frameMode, (m) => {
+      this.frameMode = m;
+      this.render();
+    });
+    req.frame = this.frameMode === 'project' && p.frame ? p.frame : null;
     const prepared = prepareSequence(p, this.animId, req, this.app.ed.skinId);
     const errors = [...(prepared.ok ? [] : prepared.errors), ...(this.format === 'zip' ? [] : mediaErrors(this.format, req.fps))];
     const formatSel = h('select', { 'data-testid': 'seq-format', 'aria-label': 'Output format' },
@@ -103,7 +112,8 @@ export class ExportDialog {
         ? `Looping: frames 0–${last} at ${req.fps} fps. Frame ${last + 1} is the loop point (it repeats frame 0) and is not exported.`
         : `One-shot: frames 0–${last} at ${req.fps} fps, including the final pose at frame ${last}.`
       : '';
-    const summary = prepared.ok ? `${prepared.setup.frames.length} frames · ${prepared.setup.geometry.width}×${prepared.setup.geometry.height} px · transparent background · one size for every frame (union of all poses + ${req.padding}px padding)` : '';
+    const sizing = req.frame ? 'the project frame (fixed size and origin; padding unused)' : `union of all poses + ${req.padding}px padding`;
+    const summary = prepared.ok ? `${prepared.setup.frames.length} frames · ${prepared.setup.geometry.width}×${prepared.setup.geometry.height} px · transparent background · one size for every frame (${sizing})` : '';
     const progress = h('progress', { max: 1, value: 0, 'data-testid': 'seq-progress' });
     const progressText = h('span', { class: 'dim', 'data-testid': 'seq-progress-text' }, '');
     const first = h('canvas', { class: 'seq-preview', 'data-testid': 'seq-preview-first', 'aria-label': 'First frame preview' });
@@ -128,6 +138,7 @@ export class ExportDialog {
         num('seq-padding', 'Padding px', req.padding, 1, (v) => void (this.req = { ...this.req!, padding: v })),
       ),
       h('div', { class: 'row2' }, h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Format'), formatSel), h('p', { class: 'hint', 'data-testid': 'seq-format-note' }, formatNote)),
+      h('div', { class: 'row2' }, h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Canvas'), frameSel), frameWarning('seq-frame-warning', prepared.ok ? prepared.setup.warnings : [])),
       h('p', { class: 'hint', 'data-testid': 'seq-policy' }, policy),
       errors.length ? h('ul', { class: 'errors', role: 'alert', 'data-testid': 'seq-errors' }, ...errors.map((e) => h('li', {}, e))) : h('p', { class: 'hint', 'data-testid': 'seq-summary' }, summary),
       h('div', { class: 'seq-previews' }, h('figure', {}, first, h('figcaption', {}, 'first')), h('figure', {}, lastC, h('figcaption', {}, 'last'))),
@@ -228,6 +239,22 @@ export class ExportDialog {
     this.app.status(`Exported ${total} frames (${stats.width}×${stats.height}) as ${name}. ${mediaSummary(stats)}`);
     this.dlg.close();
   }
+}
+
+/** Canvas choice shared by the export, mix and Lottie dialogs (RV-003). */
+export function frameSelect(testId: string, p: Project, mode: 'project' | 'fit', set: (m: 'project' | 'fit') => void): HTMLSelectElement {
+  const f = p.frame;
+  const sel = h('select', { 'data-testid': testId, 'aria-label': 'Canvas' },
+    h('option', { value: 'fit' }, 'Fit this animation'),
+    h('option', { value: 'project', disabled: !f }, f ? `Project frame ${Math.round(f.width)}×${Math.round(f.height)}` : 'Project frame (none set)'));
+  sel.value = f ? mode : 'fit';
+  sel.addEventListener('change', () => set(sel.value as 'project' | 'fit'));
+  return sel;
+}
+
+/** Visible, non-blocking notice that art leaves the fixed frame and is clipped. */
+export function frameWarning(testId: string, warnings: string[]): HTMLElement {
+  return warnings.length ? h('p', { class: 'warning frame-warning', role: 'status', 'data-testid': testId }, `⚠ ${warnings.join(' ')}`) : h('span', {});
 }
 
 export function mediaSummary(s: MediaStats): string {

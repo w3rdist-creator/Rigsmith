@@ -4,12 +4,12 @@ import type { Bounds, Frame } from '../model/evaluate.ts';
 import { evaluate, frameBounds } from '../model/evaluate.ts';
 import type { Mat } from '../model/math.ts';
 import type { SequenceGeometry, SequencePlan, SequenceRequest } from '../model/sequence.ts';
-import { checkCapacity, planSequence, sequenceGeometry } from '../model/sequence.ts';
+import { checkCapacity, frameWarnings, planSequence, requestGeometry } from '../model/sequence.ts';
 import type { MixPlan } from '../model/mix.ts';
 import { evaluateMix, planLength } from '../model/mix.ts';
 import { buildZip } from '../model/zip.ts';
 import type { ZipEntry } from '../model/zip.ts';
-import type { Animation, Project } from '../model/types.ts';
+import type { Animation, Project, ProjectFrame } from '../model/types.ts';
 import type { ImageLookup } from './draw.ts';
 import { drawFrame } from './draw.ts';
 
@@ -18,15 +18,17 @@ export interface SequenceSetup {
   plan: SequencePlan;
   geometry: SequenceGeometry;
   frames: Frame[];
+  /** Non-blocking notices (e.g. art clipped by the fixed project frame). */
+  warnings: string[];
 }
 
 export type Prepared = { ok: true; setup: SequenceSetup } | { ok: false; errors: string[] };
 
 /**
  * A transition (mix plan) as a one-shot sequence: frames 0..⌊length·fps⌋ at `fps`,
- * one stable canvas size, named "<first>-to-<last>".
+ * one stable canvas size (the fixed `frame` when given), named "<first>-to-<last>".
  */
-export function prepareMixSequence(project: Project, mix: MixPlan, fps: number, skinId: string | null, scale = 1, padding = 4): Prepared {
+export function prepareMixSequence(project: Project, mix: MixPlan, fps: number, skinId: string | null, scale = 1, padding = 4, frame: ProjectFrame | null = null): Prepared {
   const length = planLength(project, mix);
   const names = mix.entries.map((e) => project.animations.find((a) => a.id === e.animId)?.name ?? '?');
   if (!(length > 0) || names.includes('?')) return { ok: false, errors: ['Choose animations for the transition.'] };
@@ -38,11 +40,11 @@ export function prepareMixSequence(project: Project, mix: MixPlan, fps: number, 
   let b: Bounds | null = null;
   for (const f of evaluated) b = frameBounds(f, b);
   if (!b) return { ok: false, errors: ['Nothing visible to export: attach at least one visible image.'] };
-  const geometry = sequenceGeometry(b, scale, padding);
+  const geometry = requestGeometry(b, scale, padding, frame);
   const cap = checkCapacity(geometry, evaluated.length);
   if (cap.length) return { ok: false, errors: cap };
   const anim: Animation = { id: 'mix', name: names.join('-to-'), duration: length, fps, loop: false, tracks: {} };
-  return { ok: true, setup: { anim, plan: { times, frames, lastFrame: last }, geometry, frames: evaluated } };
+  return { ok: true, setup: { anim, plan: { times, frames, lastFrame: last }, geometry, frames: evaluated, warnings: frameWarnings(b, frame, `“${anim.name}”`) } };
 }
 
 /** Validates the request, samples every frame and computes one stable canvas size. */
@@ -54,10 +56,10 @@ export function prepareSequence(project: Project, animId: string | null, req: Se
   let b: Bounds | null = null;
   for (const f of frames) b = frameBounds(f, b);
   if (!b) return { ok: false, errors: ['Nothing visible to export: attach at least one visible image.'] };
-  const geometry = sequenceGeometry(b, req.scale, req.padding);
+  const geometry = requestGeometry(b, req.scale, req.padding, req.frame);
   const cap = checkCapacity(geometry, frames.length);
   if (cap.length) return { ok: false, errors: cap };
-  return { ok: true, setup: { anim: anim!, plan: r.plan, geometry, frames } };
+  return { ok: true, setup: { anim: anim!, plan: r.plan, geometry, frames, warnings: frameWarnings(b, req.frame, `“${anim!.name}”`) } };
 }
 
 export function sequenceViewMatrix(geo: SequenceGeometry): Mat {
@@ -84,6 +86,8 @@ export interface SequenceMeta {
   height: number;
   scale: number;
   padding: number;
+  /** "project" = the project's fixed frame (padding unused); "fit" = union bounds + padding. */
+  frame: 'project' | 'fit';
   /** World point at pixel (0,0); world = origin + px / scale. */
   origin: { x: number; y: number };
   endpointPolicy: string;
@@ -111,6 +115,7 @@ export function sequenceMeta(project: Project, setup: SequenceSetup, req: Sequen
     height: setup.geometry.height,
     scale: req.scale,
     padding: req.padding,
+    frame: req.frame ? 'project' : 'fit',
     origin: { x: setup.geometry.originX, y: setup.geometry.originY },
     endpointPolicy: setup.anim.loop
       ? `loop: frame ${setup.plan.lastFrame + 1} (= duration) repeats frame 0 and is never exported`

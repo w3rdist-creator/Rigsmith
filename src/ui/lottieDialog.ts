@@ -5,6 +5,7 @@ import { exportLottie } from '../model/lottie.ts';
 import { safeName } from '../render/sequence.ts';
 import type { App } from './app.ts';
 import { download } from './app.ts';
+import { frameSelect, frameWarning } from './exportDialog.ts';
 import { clear, h } from './dom.ts';
 
 export class LottieDialog {
@@ -12,6 +13,7 @@ export class LottieDialog {
   private dlg: HTMLDialogElement;
   private body: HTMLElement;
   private anim = '';
+  private frameMode: 'project' | 'fit' = 'fit';
 
   constructor(app: App) {
     this.app = app;
@@ -23,6 +25,7 @@ export class LottieDialog {
   open(): void {
     const p = this.app.ed.project;
     this.anim = (this.app.ed.anim() ?? p.animations[0])?.name ?? '';
+    this.frameMode = p.frame ? 'project' : 'fit';
     this.render();
     this.dlg.showModal();
   }
@@ -38,7 +41,13 @@ export class LottieDialog {
       this.anim = sel.value;
       this.render();
     });
-    const r = exportLottie(p, this.anim, skin);
+    const frame = this.frameMode === 'project' && p.frame ? p.frame : null;
+    const r = exportLottie(p, this.anim, skin, frame);
+    const frameSel = frameSelect('lottie-frame', p, this.frameMode, (m) => {
+      this.frameMode = m;
+      this.render();
+    });
+    const clipped = r.diagnostics.filter((d) => d.feature === 'project frame').map((d) => d.message);
     const exportBtn = h('button', { class: 'accent', 'data-testid': 'lottie-export', disabled: !r.ok }, 'Export Lottie JSON');
     exportBtn.addEventListener('click', () => {
       if (!r.ok) return;
@@ -49,6 +58,7 @@ export class LottieDialog {
     const L = r.ok ? (r.lottie as { w: number; h: number; op: number; fr: number; layers: { ty: number }[]; assets: unknown[] }) : null;
     this.body.append(
       h('div', { class: 'row2' }, h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Animation'), sel), h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Skin (from the editor)'), h('span', {}, skin ?? '(default images)'))),
+      h('div', { class: 'row2' }, h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Canvas'), frameSel), frameWarning('lottie-frame-warning', clipped)),
       h('p', { class: 'hint' }, 'Exports only what Lottie represents exactly: bone keys (linear, stepped, smooth, bezier), flat images, opacity, visibility and image swaps, and the active skin. IK, paths, meshes, deform and draw-order keys are refused, not approximated.'),
       L ? h('p', { class: 'hint', 'data-testid': 'lottie-summary' }, `${L.w}×${L.h} · ${L.op} frames at ${L.fr} fps · ${L.layers.filter((l) => l.ty === 2).length} image layer(s), ${L.layers.filter((l) => l.ty === 3).length} null layer(s), ${L.assets.length} embedded PNG(s)`) : '',
       h('ul', { class: 'skin-diags', 'data-testid': 'lottie-diagnostics' }, ...r.diagnostics.map((d) => h('li', { class: d.level === 'error' ? 'warning' : 'info' }, `${d.level === 'error' ? '✖ ' : ''}${d.feature} — ${d.item}: ${d.message}`))),

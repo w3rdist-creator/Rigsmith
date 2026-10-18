@@ -6,6 +6,7 @@
 // leaves no partial output.
 import path from 'node:path';
 import type { MissingPolicy } from '../src/model/mix.ts';
+import type { Project, ProjectFrame } from '../src/model/types.ts';
 import { safeName } from '../src/render/sequence.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
@@ -16,10 +17,12 @@ const USAGE = `rigsmith <command> [options]
   info <project.rig.json>
   runtime <project> --out <file.runtime.json>
   atlas <project> --out <dir> [--padding 2] [--bleed 1] [--no-trim] [--pot] [--max 2048]
-  render <project> --anim <name> --out <file.zip> [--skin <name>] [--fps N] [--start F] [--end F] [--scale S] [--padding P]
-  mix <project> --from <anim> --to <anim> --at <seconds> --out <file.zip> [--duration S] [--missing setup|hold] [--skin <name>] [--fps N]
-  lottie <project> --anim <name> --out <file.json> [--skin <name>]
-  media <project> --format apng|gif|webm|mp4 (--anim <name> | --from <a> --to <b> --at <s>) --out <file> [render options] [--background #rrggbb]
+  render <project> --anim <name> --out <file.zip> [--skin <name>] [--fps N] [--start F] [--end F] [--scale S] [--padding P] [frame]
+  mix <project> --from <anim> --to <anim> --at <seconds> --out <file.zip> [--duration S] [--missing setup|hold] [--skin <name>] [--fps N] [frame]
+  lottie <project> --anim <name> --out <file.json> [--skin <name>] [frame]
+  media <project> --format apng|gif|webm|mp4 (--anim <name> | --from <a> --to <b> --at <s>) --out <file> [render options] [--background #rrggbb] [frame]
+  frame: --frame project|fit|<x,y,width,height>  (default fit: each export fits its animation)
+         --frame-from <other.rig.json>           (use that project's frame, e.g. to align two versions)
   add-image <project> --file <image.png> [--name <name>] --out <project>
   replace-image <project> --image <name> --file <image.png> [--allow-resize] --out <project>
   skin <project> --name <skin> [--set attachment=image ...] [--keyed attachment:fromImage=image ...] --out <project>
@@ -61,6 +64,26 @@ const pairs = (k: string, sep: string): Record<string, string> =>
     if (i <= 0) usage(`--${k} expects name${sep}value (got “${s}”).`);
     return [s.slice(0, i), s.slice(i + 1)];
   }));
+
+/** The fixed frame selected by --frame / --frame-from (null = fit each export to its animation). */
+function frameOption(p: Project): ProjectFrame | null {
+  const from = flag('frame-from');
+  const f = flag('frame');
+  if (from !== undefined && f !== undefined) usage('Use either --frame or --frame-from, not both.');
+  if (from !== undefined) {
+    const other = readProject(from);
+    if (!other.frame) throw new ApiError(`${from} has no project frame.`, [`${from} has no project frame (set one in the editor: Project ▸ Frame).`]);
+    return other.frame;
+  }
+  if (f === undefined || f === 'fit') return null;
+  if (f === 'project') {
+    if (!p.frame) throw new ApiError('The project has no frame.', ['The project has no frame (set one in the editor: Project ▸ Frame), or use --frame x,y,width,height.']);
+    return p.frame;
+  }
+  const v = f.split(',').map(Number);
+  if (v.length !== 4 || !v.every(Number.isFinite) || !(v[2] >= 1) || !(v[3] >= 1)) usage(`--frame must be project, fit or x,y,width,height (got “${f}”).`);
+  return { x: v[0], y: v[1], width: v[2], height: v[3] };
+}
 
 let cancelled = false;
 process.on('SIGINT', () => {
@@ -115,23 +138,25 @@ async function main(): Promise<Record<string, unknown>> {
       const bgFlag = flag('background');
       if (bgFlag !== undefined && !/^#[0-9a-f]{6}$/i.test(bgFlag)) usage(`--background must be #rrggbb (got “${bgFlag}”).`);
       const asSequence = cmd === 'render' || (cmd === 'media' && !flag('from'));
+      const frame = frameOption(p);
       const req =
         asSequence
-          ? { kind: 'sequence' as const, anim: need('anim'), skin: flag('skin') ?? null, fps: num('fps'), start: num('start'), end: num('end'), scale: num('scale'), padding: num('padding') }
-          : { kind: 'mix' as const, from: need('from'), to: need('to'), at: num('at') ?? usage('--at is required.'), duration: num('duration'), missing: (flag('missing') ?? 'setup') as MissingPolicy, skin: flag('skin') ?? null, fps: num('fps'), scale: num('scale'), padding: num('padding') };
+          ? { kind: 'sequence' as const, anim: need('anim'), skin: flag('skin') ?? null, fps: num('fps'), start: num('start'), end: num('end'), scale: num('scale'), padding: num('padding'), frame }
+          : { kind: 'mix' as const, from: need('from'), to: need('to'), at: num('at') ?? usage('--at is required.'), duration: num('duration'), missing: (flag('missing') ?? 'setup') as MissingPolicy, skin: flag('skin') ?? null, fps: num('fps'), scale: num('scale'), padding: num('padding'), frame };
       const r = await withRenderer((rd) => rd.render(p, req, { onProgress: progress, isCancelled: () => cancelled }));
       process.stderr.write('\n');
+      for (const w of r.warnings) process.stderr.write(`warning: ${w}\n`);
       if (format !== 'zip') {
         const m = await encodeMedia(r, format, out, { background: flag('background'), isCancelled: () => cancelled, onProgress: (d, t) => process.stderr.write(`\rencode ${d}/${t}`) });
         process.stderr.write('\n');
-        return { outputs: [out], animation: r.meta.animation, fps: r.meta.fps, ...m.stats };
+        return { outputs: [out], animation: r.meta.animation, fps: r.meta.fps, ...m.stats, frame: r.meta.frame, warnings: r.warnings };
       }
       writeOutput(out, sequenceZip(r));
-      return { outputs: [out], frames: r.files.length, width: r.meta.width, height: r.meta.height, animation: r.meta.animation };
+      return { outputs: [out], frames: r.files.length, width: r.meta.width, height: r.meta.height, animation: r.meta.animation, frame: r.meta.frame, warnings: r.warnings };
     }
     case 'lottie': {
       const out = need('out');
-      const r = exportLottie(p, need('anim'), flag('skin') ?? null);
+      const r = exportLottie(p, need('anim'), flag('skin') ?? null, frameOption(p));
       if (!r.ok) throw new ApiError('Not exportable as the Lottie subset', r.errors);
       writeOutput(out, JSON.stringify(r.lottie));
       return { outputs: [out], diagnostics: r.diagnostics };
