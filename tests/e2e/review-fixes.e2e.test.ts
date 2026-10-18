@@ -7,10 +7,12 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { BrowserContext, Page } from 'playwright-core';
+import { exportRuntime } from '../../src/model/exportRuntime.ts';
 import { serializeProject } from '../../src/model/format.ts';
 import { gridPoints, triangulate } from '../../src/model/meshOps.ts';
 import type { Project } from '../../src/model/types.ts';
 import { encodePng } from '../support/png-encode.ts';
+import { richProject } from '../support/runtime-fixture.ts';
 import { EVIDENCE, launchIsolated, pickPort, probe, startPreview } from './harness.ts';
 
 const OUT = path.join(EVIDENCE, 'post-review/review-fixes');
@@ -19,8 +21,10 @@ mkdirSync(OUT, { recursive: true });
 let server: ChildProcess;
 let ctx: BrowserContext;
 let page: Page;
+let player: Page;
 let base: string;
 const pageErrors: string[] = [];
+const playerErrors: string[] = [];
 const state = () => probe<any>(page, 'state');
 const project = () => probe<any>(page, 'project');
 
@@ -53,6 +57,10 @@ before(async () => {
   page.on('dialog', (d) => void d.accept());
   await page.goto(base);
   await page.getByTestId('empty-stage').waitFor({ state: 'visible' });
+  player = await ctx.newPage();
+  player.on('pageerror', (e) => playerErrors.push(e.message));
+  await player.goto(`${base}player.html`);
+  await player.getByTestId('player-files').waitFor({ state: 'attached' });
 });
 
 after(async () => {
@@ -106,5 +114,92 @@ describe('P1-1: Auto weights on a large part bound to short bones', () => {
     assert.equal(await page.getByTestId('error-toast').count(), 0);
     pageErrors.splice(0, pageErrors.length, ...pageErrors.filter((e) => !e.includes('review probe')));
     assert.deepEqual(pageErrors, []);
+  });
+});
+
+describe('P2-2 / P3-1: the reference player validates runtime files and never shows a stale frame', () => {
+  // Runtime files are generated from the shared fixture with the model exporter (the
+  // editor-UI export path is covered by p4-player); malformed variants mutate one field.
+  const DIR = path.join(OUT, 'player');
+  mkdirSync(DIR, { recursive: true });
+  const fixture = richProject();
+  const images = fixture.images.map((im) => {
+    const f = path.join(DIR, im.name);
+    writeFileSync(f, Buffer.from(im.dataUrl.split(',')[1], 'base64'));
+    return f;
+  });
+  const runtime = (name: string, mutate: (o: any) => void = () => {}) => {
+    const o = JSON.parse(JSON.stringify(exportRuntime(fixture)));
+    mutate(o);
+    const f = path.join(DIR, `${name}.runtime.json`);
+    writeFileSync(f, JSON.stringify(o));
+    return f;
+  };
+  const view = () => player.evaluate(() => {
+    const q = (id: string) => document.querySelector(`[data-testid="${id}"]`) as HTMLElement;
+    const c = q('player-canvas') as HTMLCanvasElement;
+    return {
+      status: q('player-status').textContent!,
+      errors: q('player-errors').hidden ? '' : q('player-errors').innerText,
+      canvas: `${c.width}x${c.height}`,
+      sliderMax: (q('player-time') as HTMLInputElement).max,
+      label: q('player-frame-label').textContent,
+      probe: (window as any).__rigsmithPlayer.state(),
+    };
+  });
+  async function load(file: string) {
+    await player.getByTestId('player-files').setInputFiles([file, ...images]);
+    await player.waitForFunction(() => document.querySelector('[data-testid="player-status"]')!.textContent !== 'Loading…');
+  }
+  async function loadValid() {
+    await load(runtime('valid'));
+    const v = await view();
+    assert.match(v.status, /^Loaded “runtime-rig” \(runtime v2\)/);
+    assert.equal(v.errors, '');
+    assert.notEqual(v.canvas, '0x0');
+    assert.equal(v.probe.frames, 30);
+  }
+
+  const malformed: [string, (o: any) => void, RegExp][] = [
+    ['bone-cycle', (o) => { o.bones[0].parent = o.bones[o.bones.length - 1].name; }, /cycle/],
+    ['string-number', (o) => { o.bones[1].x = 'oops'; }, /bones\[1\]\.x must be a finite number/],
+    ['tri-out-of-range', (o) => { o.attachments.find((x: any) => x.mesh).mesh.triangles[0] = 9999; }, /triangles must be index triples/],
+    ['deform-arity', (o) => { for (const an of o.animations) for (const st of Object.values<any>(an.slots)) if (st.deform) st.deform.forEach((k: any) => (k.value = [1])); }, /deform.*must hold \d+ offsets/],
+    ['fps-zero', (o) => { for (const an of o.animations) an.fps = 0; }, /fps must be an integer from 1 to 240/],
+  ];
+  for (const [name, mutate, pattern] of malformed) {
+    it(`a valid file, then ${name}: rejected with the reason; the previous frame is cleared`, async () => {
+      await loadValid();
+      await load(runtime(name, mutate));
+      const v = await view();
+      assert.equal(v.status, 'Not loaded.');
+      assert.match(v.errors, pattern);
+      assert.equal(v.canvas, '0x0', 'no stale frame');
+      assert.equal(v.sliderMax, '0');
+      assert.equal(v.label, '');
+      assert.equal(v.probe.loaded, false);
+      assert.deepEqual(playerErrors, []);
+    });
+  }
+
+  it('a loadable file whose animation cannot be prepared: status says so, canvas cleared; another animation recovers', async () => {
+    await loadValid();
+    // 100 s at 60 fps = 6000 frames (looping: frame 0 is not repeated), over the 2000-frame sequence limit (valid file, failing prepare).
+    await load(runtime('too-long', (o) => { o.animations[0].duration = 100; o.animations[0].fps = 60; }));
+    let v = await view();
+    assert.match(v.errors, /6000 frames is more than the 2000-frame limit/);
+    assert.match(v.status, /“wave” cannot be shown/);
+    assert.equal(v.canvas, '0x0', 'no stale frame');
+    assert.equal(v.sliderMax, '0');
+    assert.equal(v.probe.frames, 0);
+    await player.getByTestId('player-play').click();
+    assert.equal((await view()).probe.playing, false, 'nothing to play');
+    await player.getByTestId('player-anim').selectOption('rest');
+    v = await view();
+    assert.match(v.status, /^Loaded “runtime-rig”/);
+    assert.equal(v.errors, '');
+    assert.notEqual(v.canvas, '0x0');
+    assert.equal(v.probe.frames, 16);
+    assert.deepEqual(playerErrors, []);
   });
 });

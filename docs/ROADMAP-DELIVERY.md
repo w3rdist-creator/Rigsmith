@@ -102,7 +102,7 @@ exercises it. The ids and measurements for each row are in
 ### Phase 3: meshes, weights, deformation
 | Contract item | Status | Notes |
 |---|---|---|
-| Mesh authoring/triangulation, textured rendering, editable vertices, normalized weights + weight paint, deform keys, undo/redo, import validation | delivered | — |
+| Mesh authoring/triangulation, textured rendering, editable vertices, normalized weights + weight paint, deform keys, undo/redo, import validation | delivered | Auto weights failed on vertices far from every bone until the drwdmrs3 fix pass (P1-1) |
 | Smallest sound renderer, with seams/flips/alpha/degenerate triangles verified independently | delivered | Canvas2D clipped affine triangles, layered. Verified on CfT's software raster only |
 | Versioned format, lossless v1 migration, documented reader limits | delivered | v1 files re-save byte-identically; v1 readers reject v2 (documented) |
 | Bendy-limb / secondary-motion demo with rendered reference tests | delivered | `npm run demo:phase3`. Appeal is the operator's call |
@@ -113,7 +113,7 @@ exercises it. The ids and measurements for each row are in
 | Skins with visible editing/switching, safe reuse, validation | delivered | — |
 | Mixing/transition preview incl. missing tracks and interrupts | delivered | Frames match an independent blend: 0 px over tolerance |
 | Texture atlas: deterministic metadata, padding/bleed, round-trip consumer | delivered | 0 differing px on reconstruction; byte-identical re-export; the player consumes it |
-| Runtime schema + reference player with editor/runtime agreement | delivered | Player frames equal editor frames (0 px over tolerance), wave / skin / mix |
+| Runtime schema + reference player with editor/runtime agreement | delivered | Player frames equal editor frames (0 px over tolerance), wave / skin / mix. Malformed runtime files were accepted and failed loads kept a stale frame until the drwdmrs3 fix pass (P2-2, P3-1) |
 | Headless authoring/export via stable commands/API (not the probe); reproducible brand pipeline | delivered | `scripts/rigsmith.ts` (12 commands), `docs/cli.md`. Brand manifest is identical across two runs |
 | Lottie supported-subset exporter with explicit diagnostics | delivered (subset) | See the Lottie note below the table |
 | Animated media with honest codec/alpha/platform labels; PNG sequence stays the alpha path | delivered | See the media note below the table |

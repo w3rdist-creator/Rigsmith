@@ -4,17 +4,61 @@
 // constraints.ts, mesh.ts, mix.ts, animation.ts, curve.ts) — the same code the editor
 // uses — so what this loader proves is that the runtime file alone carries the full rig.
 // A v1 file has no curves, slots, constraints, skins or mixes; those load empty.
+//
+// Validation: after conversion the rig goes through the editor's project validator
+// (validateProject: finite numbers, bone cycles, triangle ranges, deform arity, fps and
+// duration ranges, constraint references and mixes…), with stub image data since the
+// runtime carries image sizes only. Every problem is reported; paths name the runtime
+// fields (`keys` for bone tracks, `mesh.uvs` for mesh points). A file whose shape is too
+// broken to convert at all is rejected as malformed instead of throwing a TypeError.
+// Not validated: the baked v1 data (`baked`, `bakedMeshes`, `frames`), which the player
+// does not read.
 import type { RuntimeExport, RuntimeKey } from '../model/exportRuntime.ts';
 import { RUNTIME_FORMAT_ID } from '../model/exportRuntime.ts';
+import { validateProject } from '../model/format.ts';
 import type { Animation, Attachment, Bone, ImageAsset, Key, Project } from '../model/types.ts';
 import { FORMAT_ID } from '../model/types.ts';
 
-export class RuntimeError extends Error {}
+export class RuntimeError extends Error {
+  /** Every problem found (the message summarises the first). */
+  readonly errors: string[];
+  constructor(message: string, errors: string[] = [message]) {
+    super(message);
+    this.errors = errors;
+  }
+}
 
-const keys = (ks: RuntimeKey[] | undefined): Key[] =>
-  (ks ?? []).map((k) => ({ time: k.time, value: k.value.slice(), interp: k.interp, ...(k.curve ? { curve: [...k.curve] as Key['curve'] } : {}) }));
+/** 1×1 transparent PNG: stands in for image data the runtime file does not carry. */
+const STUB_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+/** Problems the editor's validator finds in a converted runtime rig, in runtime terms. */
+export function loadedRigProblems(project: Project): string[] {
+  const asFile = JSON.parse(JSON.stringify({ ...project, images: project.images.map((im) => ({ ...im, mime: 'image/png', dataUrl: STUB_PNG })) }));
+  const r = validateProject(asFile);
+  if (r.ok) return [];
+  return r.errors.map((e) => e.replace(/\.tracks\b/g, '.keys').replace(/\.mesh\.points\b/g, '.mesh.uvs'));
+}
 
 export function loadRuntime(raw: unknown): Project {
+  let project: Project;
+  try {
+    project = convertRuntime(raw);
+  } catch (e) {
+    if (e instanceof RuntimeError) throw e;
+    throw new RuntimeError(`Malformed runtime file (its structure does not match rigsmith.runtime): ${(e as Error).message}`);
+  }
+  const problems = loadedRigProblems(project);
+  if (problems.length) throw new RuntimeError(`Invalid runtime file: ${problems[0]}${problems.length > 1 ? ` (and ${problems.length - 1} more)` : ''}`, problems);
+  return project;
+}
+
+/** Copies an array; any other value passes through unchanged for the validator to name. */
+const copy = <T>(v: T): T => (Array.isArray(v) ? (v.slice() as T) : v);
+
+const keys = (ks: RuntimeKey[] | undefined): Key[] =>
+  (ks ?? []).map((k) => ({ time: k.time, value: copy(k.value), interp: k.interp, ...(k.curve ? { curve: copy(k.curve) as Key['curve'] } : {}) }));
+
+function convertRuntime(raw: unknown): Project {
   const rt = raw as RuntimeExport;
   if (!rt || typeof rt !== 'object' || rt.format !== RUNTIME_FORMAT_ID) throw new RuntimeError('Not a rigsmith.runtime file.');
   if ((rt.version as number) !== 1 && rt.version !== 2) throw new RuntimeError(`Unsupported runtime version ${rt.version}.`);
@@ -42,7 +86,7 @@ export function loadRuntime(raw: unknown): Project {
     opacity: a.opacity,
     ...(a.hidden ? { hidden: true } : {}),
     ...(a.mesh
-      ? { mesh: { points: a.mesh.uvs.slice(), triangles: a.mesh.triangles.slice(), hull: a.mesh.hull, ...(a.mesh.weights ? { weights: a.mesh.weights.map((l) => l.map((x) => ({ bone: need(boneNames, x.bone, 'weight bone'), w: x.w }))) } : {}) } }
+      ? { mesh: { points: copy(a.mesh.uvs), triangles: copy(a.mesh.triangles), hull: a.mesh.hull, ...(a.mesh.weights ? { weights: a.mesh.weights.map((l) => (Array.isArray(l) ? l.map((x) => ({ bone: need(boneNames, x.bone, 'weight bone'), w: x.w })) : l)) } : {}) } }
       : {}),
   }));
   const attNames = new Set(attachments.map((a) => a.id));

@@ -121,6 +121,7 @@ export function solveIk(bones: readonly Bone[], pose: Map<string, LocalPose>, ik
   const D = Math.hypot(q.x, q.y);
   const chain: Chain = { sx: local1.scaleX, sy: local1.scaleY, ex: local2.x, ey: local2.y, k: local2.scaleX * cBone.length };
   const { ex, ey, k } = chain;
+  if (![D, chain.sx, chain.sy, ex, ey, k].every(Number.isFinite)) return; // non-finite pose: leave it as keyed
   const elbowArm: Vec = { x: chain.sx * ex, y: chain.sy * ey };
   const side = ik.bendPositive ? 1 : -1;
 
@@ -147,6 +148,7 @@ export function solveIk(bones: readonly Bone[], pose: Map<string, LocalPose>, ik
     // Requested side first; a straight (collinear) chain serves either side.
     const pool = wanted.length ? wanted : straight.length ? straight : options;
     pool.sort((a, b) => Math.abs(wrap(a.r2 - base2)) - Math.abs(wrap(b.r2 - base2)));
+    if (!pool.length || !Number.isFinite(pool[0].r1)) return; // no finite solution: leave the pose as keyed
     solved1 = nearTurn(base1, pool[0].r1);
     solved2 = nearTurn(base2, pool[0].r2);
   }

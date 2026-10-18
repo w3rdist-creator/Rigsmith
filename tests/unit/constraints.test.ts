@@ -189,6 +189,17 @@ describe('two-bone IK under non-uniform scale (review P2-1)', () => {
     });
   }
 
+  it('a non-finite pose value leaves the chain as keyed instead of throwing', () => {
+    for (const bad of [NaN, Infinity]) {
+      const p = rig({ root: [2, 1] }, 50, 60);
+      p.bones[2].x = bad;
+      const pose = samplePose(p.bones, null, 0);
+      applyConstraints(p, pose, null, 0); // must not throw
+      assert.equal(pose.get('a')!.rotation, 0);
+      assert.equal(pose.get('b')!.rotation, 0);
+    }
+  });
+
   it('the reviewer brute-force check: no target with a brute-force solution is missed by the solver', () => {
     let checked = 0;
     const tip = (p: Project, a: number, b: number, tx: number, ty: number) => {

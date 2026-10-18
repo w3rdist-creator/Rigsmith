@@ -5,6 +5,7 @@ import type { AtlasMeta } from './model/atlas.ts';
 import type { RuntimeExport } from './model/exportRuntime.ts';
 import { renderSequenceFrame } from './render/sequence.ts';
 import type { SequenceSetup } from './render/sequence.ts';
+import { RuntimeError } from './runtime/load.ts';
 import { RigPlayer } from './runtime/player.ts';
 import { h } from './ui/dom.ts';
 import './styles.css';
@@ -16,6 +17,8 @@ let setup: SequenceSetup | null = null;
 let index = 0;
 let raf = 0;
 let runtimeName = '';
+/** Status line of the loaded file, restored whenever the selection can be shown. */
+let loadedStatus = '';
 const state = { anim: '', skin: '', mixTo: '', mixAt: 0.5 };
 
 const fileIn = h('input', { type: 'file', multiple: true, accept: '.json,image/png', 'data-testid': 'player-files', 'aria-label': 'Runtime JSON, atlas JSON and page images' });
@@ -51,6 +54,19 @@ function showErrors(list: string[]): void {
   errors.hidden = !list.length;
 }
 
+/** Drops the shown frame so a failed load or prepare never leaves a stale picture. */
+function clearView(): void {
+  stop();
+  setup = null;
+  index = 0;
+  canvas.width = 0;
+  canvas.height = 0;
+  for (const k of ['ox', 'oy', 'scale', 'time', 'frame']) delete canvas.dataset[k];
+  slider.max = '0';
+  slider.value = '0';
+  label.textContent = '';
+}
+
 function decodeImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -62,7 +78,7 @@ function decodeImage(file: File): Promise<HTMLImageElement> {
 
 fileIn.addEventListener('change', async () => {
   const files = [...(fileIn.files ?? [])];
-  stop();
+  clearView();
   status.textContent = 'Loading…';
   showErrors([]);
   try {
@@ -94,14 +110,16 @@ fileIn.addEventListener('change', async () => {
     state.anim = anims[0] ?? '';
     state.skin = '';
     state.mixTo = '';
-    status.textContent = `Loaded “${runtimeName}” (runtime v${(rt.v as RuntimeExport).version}): ${player.project.bones.length} bones, ${player.project.attachments.length} attachments, ${anims.length} animation(s)${atlas ? `, atlas with ${atlas.meta.regions.length} region(s) on ${atlas.pages.length} page(s)` : ', loose images'}.`;
+    loadedStatus = `Loaded “${runtimeName}” (runtime v${(rt.v as RuntimeExport).version}): ${player.project.bones.length} bones, ${player.project.attachments.length} attachments, ${anims.length} animation(s)${atlas ? `, atlas with ${atlas.meta.regions.length} region(s) on ${atlas.pages.length} page(s)` : ', loose images'}.`;
+    status.textContent = loadedStatus;
     showErrors([]);
     prepare();
   } catch (e) {
     player = null;
-    setup = null;
+    clearView();
+    for (const sel of [animSel, skinSel, mixSel]) sel.replaceChildren();
     status.textContent = 'Not loaded.';
-    showErrors([(e as Error).message]);
+    showErrors(e instanceof RuntimeError ? e.errors : [(e as Error).message]);
   }
 });
 
@@ -109,10 +127,12 @@ function prepare(): void {
   if (!player) return;
   const r = state.mixTo ? player.prepareMix(state.anim, state.mixTo, state.mixAt, state.skin || null) : player.prepare(state.anim, state.skin || null);
   if (!r.ok) {
-    setup = null;
+    clearView();
+    status.textContent = `${loadedStatus} “${state.mixTo ? `${state.anim} → ${state.mixTo}` : state.anim}” cannot be shown (see below).`;
     showErrors(r.errors);
     return;
   }
+  status.textContent = loadedStatus;
   showErrors([]);
   setup = r.setup;
   index = Math.min(index, setup.frames.length - 1);

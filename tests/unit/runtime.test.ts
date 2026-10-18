@@ -7,7 +7,7 @@ import { exportRuntime, runtimeProblems } from '../../src/model/exportRuntime.ts
 import { parseProject, serializeProject } from '../../src/model/format.ts';
 import { evaluateMix } from '../../src/model/mix.ts';
 import type { Frame } from '../../src/model/evaluate.ts';
-import { loadRuntime } from '../../src/runtime/load.ts';
+import { loadRuntime, RuntimeError } from '../../src/runtime/load.ts';
 import { richProject } from '../support/runtime-fixture.ts';
 
 function sameFrame(a: Frame, b: Frame, nameOfBone: (id: string) => string, tol: number, what: string): number {
@@ -101,5 +101,57 @@ describe('runtime v2', () => {
     const d = richProject();
     d.bones[1].name = 'root';
     assert.match(runtimeProblems(d).join('\n'), /Two bones are named “root”/);
+  });
+});
+
+describe('runtime file validation (review P2-2)', () => {
+  // The player used to accept structurally broken files (bone cycles, strings for
+  // numbers, out-of-range triangles, wrong deform arity) and render them as "Loaded".
+  const p = richProject();
+  const exported = () => JSON.parse(JSON.stringify(exportRuntime(p)));
+  const errorsOf = (rt: unknown): string[] => {
+    try {
+      loadRuntime(rt);
+    } catch (e) {
+      assert.ok(e instanceof RuntimeError, `a RuntimeError, not ${(e as Error).constructor.name}: ${(e as Error).message}`);
+      assert.ok(e.errors.length >= 1);
+      return e.errors;
+    }
+    return [];
+  };
+  const cases: [string, (o: any) => void, RegExp][] = [
+    ['bone cycle', (o) => { o.bones[0].parent = o.bones[o.bones.length - 1].name; }, /cycle/],
+    ['string for a number', (o) => { o.bones[1].x = 'oops'; }, /bones\[1\]\.x must be a finite number/],
+    ['null for a number (what JSON writes for 1e999 / NaN)', (o) => { o.bones[1].y = null; }, /bones\[1\]\.y must be a finite number/],
+    ['triangle index out of range', (o) => { o.attachments.find((x: any) => x.mesh).mesh.triangles[0] = 9999; }, /mesh\.triangles must be index triples/],
+    ['deform key arity', (o) => { for (const an of o.animations) for (const s of Object.values<any>(an.slots)) if (s.deform) s.deform.forEach((k: any) => (k.value = [1])); }, /deform.*must hold \d+ offsets/],
+    ['fps 0', (o) => { for (const an of o.animations) an.fps = 0; }, /fps must be an integer from 1 to 240/],
+    ['bone track key value not a list', (o) => { o.animations[0].keys.torso.rotate[0].value = 5; }, /animations\[0\]\.keys\["torso"\]\.rotate\[0\]\.value must be 1 finite number/],
+    ['bones entry not an object', (o) => { o.bones.push(42); }, /Malformed runtime file|bones\[\d+\]/],
+    ['mesh without triangles', (o) => { delete o.attachments.find((x: any) => x.mesh).mesh.triangles; }, /triangles/],
+    ['IK mix out of range', (o) => { o.ik[0].mix = 7; }, /ik\[0\]\.mix must be between 0 and 1/],
+  ];
+  for (const [label, mutate, pattern] of cases) {
+    it(`rejects: ${label}`, () => {
+      const rt = exported();
+      mutate(rt);
+      const errors = errorsOf(rt);
+      assert.ok(errors.some((e) => pattern.test(e)), `expected ${pattern} in:\n${errors.join('\n')}`);
+    });
+  }
+
+  it('every editor-exported runtime (v2, its v1 subset, a plain rig) validates with no errors', () => {
+    assert.deepEqual(errorsOf(exported()), []);
+    const v1 = exported();
+    v1.version = 1;
+    for (const k of ['images', 'ik', 'paths', 'pathConstraints', 'skins', 'mixes']) delete v1[k];
+    for (const a of v1.animations) for (const k of ['slots', 'drawOrder', 'constraints']) delete a[k];
+    for (const a of v1.attachments) if (a.mesh) delete a.mesh.weights;
+    assert.deepEqual(errorsOf(v1), []);
+    const plain = richProject();
+    plain.ik = [];
+    plain.pathConstraints = [];
+    plain.paths = [];
+    assert.deepEqual(errorsOf(JSON.parse(JSON.stringify(exportRuntime(plain)))), []);
   });
 });

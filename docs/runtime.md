@@ -96,6 +96,18 @@ PNGs, or the loose image files), `player-anim`, `player-skin`, `player-mix-to` +
 `player-errors` (missing texture / page / runtime file, unknown names). Read-only probe
 `window.__rigsmithPlayer` (`state()`, `frame()`) for tests.
 
+**Validation.** After converting the runtime file, the loader runs the rig through the
+editor's project validator (`validateProject`: finite numbers, bone cycles, triangle
+index ranges, deform-key arity, fps 1–240 / duration ranges, constraint and mix
+references) with stub image data, since the file carries image sizes only. Every
+problem is listed in `player-errors` with runtime field paths (`keys` for bone tracks,
+`mesh.uvs` for mesh points); a file too broken to convert is reported as malformed. The
+baked v1 data (`baked`, `bakedMeshes`, `frames`) is not read and not validated. A failed
+load, or an animation/transition that cannot be prepared (for example over the
+2000-frame limit), clears the canvas, slider and frame label, so no stale frame stays on
+screen (drwdmrs3 review P2-2, P3-1; `tests/unit/runtime.test.ts`,
+`tests/e2e/review-fixes.e2e.test.ts`).
+
 **Code shared with the editor** (deliberately — one evaluator, one renderer):
 `src/model/evaluate.ts`, `constraints.ts`, `mesh.ts`, `mix.ts`, `animation.ts`,
 `curve.ts`, `skeleton.ts`, `math.ts`, `src/model/sequence.ts` +
