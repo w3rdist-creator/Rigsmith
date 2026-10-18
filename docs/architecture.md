@@ -132,7 +132,11 @@ image, skin, draw order) → mesh vertices.
 - **Cutouts** (`src/model/cutout.ts`): coverage from the signed distance to the outline
   (1-px anti-aliased edge, exact outward overlap); piece and remainder are complementary
   at overlap 0; patches fill only transparent pixels inside the outline with a flat
-  colour placed behind existing pixels and record the synthesized pixel count.
+  colour placed behind existing pixels, never above the source image's own alpha, and
+  record the synthesized pixel count. Joint extension (`extendPiece`) repeats the piece's
+  first clean cross-section back past the pivot (axis: pivot → outline area centroid),
+  filling only transparent pixels under opaque cover (alpha ≥ 250), so the grown part
+  stays hidden at rest and fills the gap when the joint bends.
 
 ## Runtime export (`rigsmith.runtime`, version 1)
 

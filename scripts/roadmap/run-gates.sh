@@ -15,6 +15,7 @@ run() {
   echo "$name exit=$code $counts" | tee -a "$OUT/summary.txt"
 }
 run preservation python3 -I scripts/roadmap/check_preservation.py
+run testid-audit node scripts/roadmap/testid-audit.ts
 run unit npm test
 run typecheck npm run typecheck
 run build npm run build

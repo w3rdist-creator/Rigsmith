@@ -88,6 +88,33 @@ Phase-2 semantics and limits (also in docs/architecture.md):
 - The v1 runtime export now bakes worlds through `evaluate()` (constraints included) and
   adds per-frame slot state; the full runtime schema + player is phase 4.
 
+Phase-2 follow-up (after review):
+- Patch bug fixed: the flat patch previously also filled background the source never
+  covered; it is now capped by the source alpha (`patchBehind(…, limit)`, red→green unit test).
+- Joint extension (`cut-extend`, px): sweeps the piece's clean cross-section back past the
+  pivot, only under opaque cover (remainder when replacing, else the source), and places the
+  piece behind the source (`cut-behind`, auto-ticked). Axis = pivot → outline area centroid.
+  Provenance `derived.kind = 'extension'` with the synthesized pixel count. Limit: one
+  cross-section is repeated (no texture inference); keeping the source *and* a piece behind
+  it thickens the source's semi-transparent edges (opaque pixels unchanged, tested).
+- Eyedropper (`cut-mode-pick`) sets the patch colour from the art.
+- Control coverage: `scripts/roadmap/testid-audit.ts` (now a gate in `run-gates.sh`) fails
+  if any UI `data-testid` is never referenced by a test; `tests/e2e/controls.e2e.test.ts`
+  exercises the 64 previously untested controls with asserted effects. 170/170 referenced,
+  0 allow-listed.
+
+Wiz-prep parity (the original Wiz art was prepared by scripts; what the editor now offers):
+
+| Wiz prep step | Editor equivalent | Status |
+|---|---|---|
+| Polygon masks for limb pieces | `cut-mode-polygon` / `cut-mode-rect` | mapped |
+| Joint pivots | `cut-mode-pivot`, `pivot-mode` for later edits | mapped |
+| Sleeve gap patch | flat `cut-patch` + `cut-mode-pick` eyedropper, capped by source alpha | mapped (flat colour only) |
+| Joint extension under the parent | `cut-extend` + `cut-behind` | mapped (single cross-section sweep) |
+| Colour-threshold masks | — | not offered: needs a tolerance/selection UI; polygons cover the slice's limb cuts |
+| Flood-fill glove selection | — | not offered: same reason; glove outlines are drawn as polygons |
+| Speck/stray-pixel removal | — | not offered: no pixel-editing tools in scope (external editor) |
+
 ### Phase 3 — meshes, weights, deformation
 | Item | Status | Evidence |
 |---|---|---|

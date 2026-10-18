@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Rgba } from '../../src/model/cutout.ts';
-import { coverage, cutOut, patchBehind, polygonProblem, signedDistance } from '../../src/model/cutout.ts';
+import { coverage, cutOut, extendPiece, patchBehind, polygonCentroid, polygonProblem, signedDistance } from '../../src/model/cutout.ts';
 import { evaluate, drawOrderAt } from '../../src/model/evaluate.ts';
 import { parseProject, serializeProject } from '../../src/model/format.ts';
 import { repairReferences } from '../../src/model/integrity.ts';
@@ -218,5 +218,65 @@ describe('loop seam on stepped lanes', () => {
     const at1 = evaluate(p, an, 1);
     const at0 = evaluate(p, an, 0);
     assert.deepEqual(at1.attachments.map((f) => [f.att.id, f.visible, f.image!.id]), at0.attachments.map((f) => [f.att.id, f.visible, f.image!.id]), 'end frame shows what frame 0 shows');
+  });
+});
+
+describe('patch limits', () => {
+  it('a loose outline never paints background the source did not cover', () => {
+    // Opaque disk (r = 8) inside a transparent 30×30 square; outline covers the whole square.
+    const data = new Uint8ClampedArray(30 * 30 * 4);
+    for (let y = 0; y < 30; y++) for (let x = 0; x < 30; x++) {
+      const a = Math.min(1, Math.max(0, 8.5 - Math.hypot(x + 0.5 - 15, y + 0.5 - 15)));
+      data.set([0, 0, 255, Math.round(255 * a)], (y * 30 + x) * 4);
+    }
+    const src: Rgba = { width: 30, height: 30, data };
+    const all = [0, 0, 30, 0, 30, 30, 0, 30];
+    const { remainder } = cutOut(src, [10, 10, 20, 10, 20, 20, 10, 20], 0);
+    const p = patchBehind(remainder, all, 1, [255, 0, 0], src);
+    assert.equal(p.image.data[(2 * 30 + 2) * 4 + 3], 0, 'corner stays transparent');
+    assert.equal(p.image.data[(15 * 30 + 15) * 4 + 3], 255, 'hole restored to source alpha');
+    let over = 0;
+    for (let i = 0; i < 900; i++) if (p.image.data[i * 4 + 3] > src.data[i * 4 + 3]) over++;
+    assert.equal(over, 0, 'never more alpha than the source had');
+    assert.ok(p.synthesized <= 121, `only hole pixels counted (${p.synthesized})`);
+  });
+});
+
+describe('joint extension', () => {
+  it('axis aims at the outline area centroid (a rectangle cut from its left-edge midpoint runs horizontally)', () => {
+    const c = polygonCentroid([100, 0, 200, 0, 200, 44, 100, 44]);
+    assert.deepEqual(c, { x: 150, y: 22 });
+    // Vertex-dense side does not pull the centroid: extra points along the top edge.
+    const d = polygonCentroid([100, 0, 125, 0, 150, 0, 175, 0, 200, 0, 200, 44, 100, 44]);
+    assert.ok(Math.abs(d.x - 150) < 1e-9 && Math.abs(d.y - 22) < 1e-9, JSON.stringify(d));
+    assert.deepEqual(polygonCentroid([0, 0, 10, 0, 20, 0]), { x: 10, y: 0 }, 'degenerate falls back to vertex mean');
+  });
+
+  // A horizontal bar (rows 4..15, opaque, colour varies by row) across a 100×20 image.
+  function bar(): Rgba {
+    const data = new Uint8ClampedArray(100 * 20 * 4);
+    for (let y = 4; y < 16; y++) for (let x = 0; x < 100; x++) data.set([y * 10, 50, 200, 255], (y * 100 + x) * 4);
+    return { width: 100, height: 20, data };
+  }
+
+  it('sweeps the clean cross-section back under opaque cover only, counting synthesized pixels', () => {
+    const src = bar();
+    const cut = cutOut(src, [50, 0, 100, 0, 100, 20, 50, 20], 0);
+    const ext = extendPiece(cut.piece, cut.offsetX, cut.offsetY, { x: 50, y: 10 }, { x: 1, y: 0 }, 20, cut.remainder);
+    assert.equal(ext.offsetX, 30, 'grew 20 px back past the cut');
+    assert.equal(ext.offsetY, 4);
+    assert.ok(ext.synthesized >= 20 * 12 - 12 && ext.synthesized <= 20 * 12, `synthesized ${ext.synthesized}`);
+    const px = (x: number, y: number) => Array.from(ext.piece.data.subarray(((y - ext.offsetY) * ext.piece.width + (x - ext.offsetX)) * 4, ((y - ext.offsetY) * ext.piece.width + (x - ext.offsetX)) * 4 + 4));
+    assert.deepEqual(px(35, 8), [80, 50, 200, 255], 'row colour continued from the clean section');
+    assert.deepEqual(px(60, 8), [80, 50, 200, 255], 'original piece pixels untouched');
+  });
+
+  it('does not synthesize where nothing opaque covers the joint at rest', () => {
+    const src = bar();
+    const cut = cutOut(src, [50, 0, 100, 0, 100, 20, 50, 20], 0);
+    const empty: Rgba = { width: 100, height: 20, data: new Uint8ClampedArray(100 * 20 * 4) };
+    const ext = extendPiece(cut.piece, cut.offsetX, cut.offsetY, { x: 50, y: 10 }, { x: 1, y: 0 }, 20, empty);
+    assert.equal(ext.synthesized, 0);
+    assert.equal(ext.offsetX, 50);
   });
 });

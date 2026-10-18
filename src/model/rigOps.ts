@@ -238,6 +238,8 @@ export interface CutoutPlacement {
   boneParentId: string | null;
   /** Cut outline (source pixels) — the new bone points at its farthest vertex. */
   polygon: number[];
+  /** Insert the piece just below the source in draw order (hides a joint extension at rest). */
+  behind?: boolean;
   ids: { att: string; bone: string };
 }
 
@@ -285,7 +287,7 @@ export function placeCutout(project: Project, o: CutoutPlacement): { attId: stri
   const l = localFromWorld(base, pieceWorld);
   const att: Attachment = { id: o.ids.att, name: uniqueName(project.attachments.map((a) => a.name), o.name), boneId, imageId: o.piece.id, x: round3(l.x), y: round3(l.y), rotation: l.rotation, scaleX: l.scaleX, scaleY: l.scaleY, opacity: src.opacity };
   const idx = project.attachments.indexOf(src);
-  project.attachments.splice(idx + 1, 0, att);
+  project.attachments.splice(o.behind ? idx : idx + 1, 0, att);
   if (o.remainder) src.imageId = o.remainder.id;
   return { attId: att.id, boneId: createdBone };
 }

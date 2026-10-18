@@ -4,14 +4,14 @@
 // source replaced by its remainder, optionally patched with a flat colour). The source
 // image is never modified and stays in the project.
 import type { Rgba } from '../model/cutout.ts';
-import { cutOut, parseHexColor, patchBehind, polygonBounds, polygonProblem } from '../model/cutout.ts';
+import { cutOut, extendPiece, parseHexColor, patchBehind, polygonBounds, polygonCentroid, polygonProblem } from '../model/cutout.ts';
 import { placeCutout } from '../model/rigOps.ts';
 import type { ImageAsset } from '../model/types.ts';
 import { newId } from '../model/types.ts';
 import type { App } from './app.ts';
 import { append, clear, h } from './dom.ts';
 
-type Mode = 'polygon' | 'rect' | 'pivot';
+type Mode = 'polygon' | 'rect' | 'pivot' | 'pick';
 const VIEW_W = 520;
 const VIEW_H = 400;
 
@@ -30,6 +30,8 @@ export class CutoutDialog {
   private parentId: string | null = null;
   private patch = false;
   private patchColor = '#808080';
+  private extend = 0;
+  private behind = false;
   private errors: string[] = [];
   private busy = false;
   private canvas: HTMLCanvasElement | null = null;
@@ -55,6 +57,14 @@ export class CutoutDialog {
     this.pivot = null;
     this.mode = 'polygon';
     this.errors = [];
+    // Every cut starts from the documented defaults.
+    this.overlap = 4;
+    this.replace = true;
+    this.makeBone = true;
+    this.patch = false;
+    this.patchColor = '#808080';
+    this.extend = 0;
+    this.behind = false;
     this.name = `${att.name}-piece`;
     this.parentId = att.boneId;
     this.render();
@@ -121,6 +131,7 @@ export class CutoutDialog {
         modeBtn('polygon', 'Polygon', 'Click to add outline points'),
         modeBtn('rect', 'Rectangle', 'Drag a crop rectangle'),
         modeBtn('pivot', 'Pivot', 'Click the joint (rotation point) of the piece'),
+        modeBtn('pick', 'Pick colour', 'Click the image to take the patch colour from it'),
         h('button', { class: 'mini', 'data-testid': 'cut-undo-point', disabled: !this.poly.length, onclick: () => (this.poly.splice(-2), this.render()) }, 'Undo point'),
         h('button', { class: 'mini', 'data-testid': 'cut-clear', onclick: () => ((this.poly = []), (this.pivot = null), this.render()) }, 'Clear'),
       ),
@@ -133,6 +144,14 @@ export class CutoutDialog {
       check('cut-remainder', 'Replace the source with the remainder (original image kept)', this.replace, (v) => (this.replace = v)),
       check('cut-patch', 'Patch the hole behind the piece with a flat colour', this.patch, (v) => (this.patch = v)),
       h('label', { class: 'field inline' }, h('span', { class: 'field-label' }, 'Patch colour'), color),
+      h('div', { class: 'seq-grid' },
+        num('cut-extend', 'Extend under joint (px)', this.extend, (v) => {
+          this.extend = Math.min(64, Math.max(0, Math.round(v) || 0));
+          if (this.extend > 0) this.behind = true;
+        }),
+        check('cut-behind', 'Place the piece behind the source', this.behind, (v) => (this.behind = v)),
+      ),
+      h('p', { class: 'hint' }, 'Extension sweeps the piece’s cross-section back past the pivot, only under fully opaque art (hidden at rest); synthesized pixels are counted.'),
       check('cut-bone', 'Create a joint bone at the pivot', this.makeBone, (v) => (this.makeBone = v)),
       h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Bone parent'), parentSel),
       this.errors.length ? h('ul', { class: 'seq-errors', role: 'alert', 'data-testid': 'cut-errors' }, ...this.errors.map((e) => h('li', {}, e))) : null,
@@ -156,6 +175,13 @@ export class CutoutDialog {
       const q = this.toImage(e, im);
       if (this.mode === 'pivot') {
         this.pivot = q;
+        return this.render();
+      }
+      if (this.mode === 'pick') {
+        const px = this.pixels(im);
+        const i = (Math.min(im.height - 1, Math.floor(q.y)) * im.width + Math.min(im.width - 1, Math.floor(q.x))) * 4;
+        this.patchColor = `#${[0, 1, 2].map((k) => px.data[i + k].toString(16).padStart(2, '0')).join('')}`;
+        this.patch = true;
         return this.render();
       }
       if (this.mode === 'rect') {
@@ -260,6 +286,10 @@ export class CutoutDialog {
       this.errors = [problem];
       return this.render();
     }
+    if (this.extend > 0 && !this.pivot) {
+      this.errors = ['Joint extension needs a pivot (the joint it extends past).'];
+      return this.render();
+    }
     if (this.makeBone && !this.pivot) {
       this.errors = ['Set a pivot (Pivot mode, click the joint) or untick “Create a joint bone”.'];
       return this.render();
@@ -267,13 +297,33 @@ export class CutoutDialog {
     this.busy = true;
     try {
       const base = im.name.replace(/\.[a-z0-9]+$/i, '');
-      const res = cutOut(this.pixels(im), this.poly, this.overlap);
-      const piece = this.asset(res.piece, `${base}-${this.name}.png`, { kind: 'cutout', sourceId: im.id, offsetX: res.offsetX, offsetY: res.offsetY, polygon: this.poly.slice(), synthesized: 0, note: `overlap ${this.overlap}px` });
+      const srcPx = this.pixels(im);
+      const res = cutOut(srcPx, this.poly, this.overlap);
+      let pieceRgba = res.piece, ox = res.offsetX, oy = res.offsetY, synth = 0;
+      if (this.extend > 0 && this.pivot) {
+        // Axis: from the pivot toward the outline's area centroid (the piece's direction). The
+        // farthest vertex is not used: on a rectangle it is a corner, which skews the sweep.
+        const far = polygonCentroid(this.poly);
+        const ext = extendPiece(res.piece, res.offsetX, res.offsetY, this.pivot, { x: far.x - this.pivot.x, y: far.y - this.pivot.y }, this.extend, this.replace ? res.remainder : srcPx);
+        pieceRgba = ext.piece;
+        ox = ext.offsetX;
+        oy = ext.offsetY;
+        synth = ext.synthesized;
+      }
+      const piece = this.asset(pieceRgba, `${base}-${this.name}.png`, {
+        kind: synth ? 'extension' : 'cutout',
+        sourceId: im.id,
+        offsetX: ox,
+        offsetY: oy,
+        polygon: this.poly.slice(),
+        synthesized: synth,
+        note: `overlap ${this.overlap}px${synth ? `; joint extension ${this.extend}px swept from one cross-section under opaque art, ${synth} px synthesized` : ''}`,
+      });
       let remainder: ImageAsset | undefined;
       if (this.replace) {
         if (this.patch) {
           const rgb = parseHexColor(this.patchColor) ?? [128, 128, 128];
-          const patched = patchBehind(res.remainder, this.poly, 1, rgb);
+          const patched = patchBehind(res.remainder, this.poly, 1, rgb, srcPx);
           remainder = this.asset(patched.image, `${base}-rest.png`, { kind: 'patch', sourceId: im.id, offsetX: 0, offsetY: 0, polygon: this.poly.slice(), synthesized: patched.synthesized, note: `hole behind “${this.name}” filled with flat ${this.patchColor}; ${patched.synthesized} px synthesized` });
         } else {
           remainder = this.asset(res.remainder, `${base}-rest.png`, { kind: 'remainder', sourceId: im.id, offsetX: 0, offsetY: 0, polygon: this.poly.slice(), synthesized: 0 });
@@ -283,7 +333,7 @@ export class CutoutDialog {
       const ids = { att: newId('att'), bone: newId('bone') };
       let placed = { attId: '', boneId: null as string | null };
       this.app.ed.mutate(`Cut out ${this.name}`, (p) => {
-        placed = placeCutout(p, { sourceAttId: att.id, piece, remainder, name: this.name, pivot: this.pivot, createBone: this.makeBone, boneParentId: this.parentId, polygon: this.poly, ids });
+        placed = placeCutout(p, { sourceAttId: att.id, piece, remainder, name: this.name, pivot: this.pivot, createBone: this.makeBone, boneParentId: this.parentId, polygon: this.poly, ids, behind: this.behind });
       });
       this.dlg.close();
       this.app.ed.select(placed.boneId ? { kind: 'bone', id: placed.boneId } : { kind: 'attachment', id: placed.attId });
