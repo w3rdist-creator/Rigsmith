@@ -8,7 +8,12 @@ production rig.
 
 The initial delivery record (`docs/DELIVERY.md`, `.hermes/STATUS.md`) is left as it was.
 This test found and fixed one editor defect (§6), so the default e2e suite now has 20
-tests instead of the 19 recorded there.
+tests instead of the 19 recorded there, and `dist/` now builds `index-CeSeqo4b.js`. The
+original record can still be reproduced: `git checkout 67ee986 && npm run build` gives
+`index-bftQBcAc.js`.
+
+REA was not used for this test; it was optional. No entries were added to
+`docs/rea-evidence.md`.
 
 ## 0. Preflight (before any character work)
 
@@ -28,7 +33,7 @@ re-ran its gates on the untouched tree first, then glanced at its demo screensho
 | Original (read-only, untouched) | `/Users/w3rd/Code/cheesesteak-diamond-hands/factory/brand/wiz_master.png` |
 | Working copy | `.hermes/assets/wiz/source/wiz_master.png` |
 | sha256 (both, re-checked at the end) | `2197f409dcac8bdd9f8295591979dacd47edddbb61734534770e36f5baf2cab9` |
-| Identity | Brand notes (`factory/brand/directions.yaml`, mascot "Wiz"): an anthropomorphic Philly cheesesteak hoagie with a glossy melted-cheese pompadour, a paper-wrapper jacket, cartoon eyes and a cocky grin. Only that file and the PNG were read in the other repo. |
+| Identity | Brand notes (`factory/brand/directions.yaml`, mascot "Wiz"): an anthropomorphic Philly cheesesteak hoagie with a glossy melted-cheese pompadour, a paper-wrapper jacket, cartoon eyes and a cocky grin. In the other repo I read only that file and the PNG. I also ran one directory listing of `factory/brand/` and a read-only `git status` there. Nothing was modified. |
 
 **Observed in the image** (inspected visually and by pixel statistics):
 - 1024×1536 RGBA. It is one flattened illustration, not a layered file.
@@ -232,11 +237,12 @@ These are self-reported. Each bucket was run on its own.
 | Bucket | Command | Result | Raw output |
 |---|---|---|---|
 | Unit (model) | `npm test` | 43/43 pass, exit 0 | `.hermes/evidence/wiz/gate-unit.txt` |
-| Typecheck + build | `npm run typecheck && npm run build` | exit 0 | `.hermes/evidence/wiz/gate-build.txt` |
+| Typecheck + build | `npm run typecheck && npm run build` | exit 0. `tsconfig` covers `src/` only, so the new `scripts/wiz/*.ts` and `tests/acceptance/*.ts` run through Node type stripping and are **not** typechecked. | `.hermes/evidence/wiz/gate-build.txt` |
 | Default browser e2e | `npm run test:e2e` | 20/20 pass, exit 0 (19 original + regression) | `.hermes/evidence/wiz/gate-e2e.txt` |
 | Cutout reassembly | `npm run wiz:prepare` | max diff 2.6/255, 0 px > 8 | `prepared/manifest.json` → `reassembly` |
 | Editor build + setup-pose diff | `npm run wiz:build` | build OK, 0 page errors; Rigsmith export vs source max 2.7/255, 0 px > 8 | `.hermes/evidence/wiz/build-log.txt`, `pipeline-run.txt` |
-| Wiz acceptance | `npm run test:wiz` | **11/11 pass, exit 0, two consecutive runs** | `.hermes/evidence/wiz/acceptance-final-1.txt`, `-2.txt` |
+| Wiz acceptance, first run | `npm run test:wiz` | 8/11. Three failures: greeting loop seam (this led to the §6 fix), an over-tight 0.02° world-angle tolerance (§7, item 5; non-uniform parent scale is legitimate, so I relaxed it to 0.5°), and the save test failing as a knock-on effect | `.hermes/evidence/wiz/acceptance-run1.txt` |
+| Wiz acceptance, final | `npm run test:wiz` | **11/11 pass, exit 0, two consecutive runs** after the fix and rebuild | `.hermes/evidence/wiz/acceptance-final-1.txt`, `-2.txt` |
 
 `npm run test:wiz` runs `tests/acceptance/wiz.acceptance.test.ts`. It opens the
 **saved** file in a fresh profile, `wiz-verify`, and covers:
@@ -280,9 +286,10 @@ the numerical tests above asserts art quality.
 - **Raised-arm seam.** With the arm fully raised (greeting f12–f48), the inside of the
   sleeve opening shows the dark synthesized patch and a small step in the stick outline
   where the per-column cut meets the swept extension. It is visible in 4× crops; at the
-  delivered 960 px size it is a few pixels inside the sleeve shadow. Raising the arm
-  further than about 85° would make the stick visibly emerge from behind the sleeve
-  cloth, so the wave is limited to that range.
+  delivered 960 px size it is a few pixels inside the sleeve shadow. The wave peaks at
+  −84° from rest. Larger raises were not rendered or tested. I expect the stick to
+  emerge visibly from behind the sleeve cloth beyond that, but this is inferred, not
+  observed.
 - **Non-uniform body scale** (breathing/squash) slightly skews child limbs (≤ 3.5%),
   which Rigsmith's matrix composition renders faithfully. This is intended stretch, not
   a bug, but it is not volume-preserving deformation: there are no meshes.
@@ -318,7 +325,9 @@ npm run wiz:prepare && npm run build && npm run wiz:build && npm run wiz:capture
 
 ## 10. Git hygiene
 
-`git check-ignore -v` confirms each private path is ignored:
+The ignore rules needed no change. The Wiz entries (`.hermes/assets/` plus
+`.hermes/dispatch/wiz/` logs) were already committed in `.gitignore`; I checked that
+they are sufficient. `git check-ignore -v` confirms each private path is ignored:
 - `.hermes/assets/` (`.gitignore:15`) covers the source copy, prepared PNGs, manifest,
   project file, media and frames.
 - `.hermes/evidence/` (`:3`) covers the re-saved project copy and screenshots.
@@ -326,4 +335,5 @@ npm run wiz:prepare && npm run build && npm run wiz:build && npm run wiz:capture
 
 Commits contain only code, tests, the mask parameters and docs. No images, base64 art or
 project files are committed. `.hermes/dispatch/` (operator orchestration) is left
-uncommitted, as before.
+uncommitted, as before. At handoff nothing is running: no listeners on 127.0.0.1
+47613–47617, no `vite preview`, and no Chrome for Testing processes.
