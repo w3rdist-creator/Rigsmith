@@ -174,6 +174,72 @@ describe('pure-Node commands', () => {
   });
 });
 
+describe('clip specs (R6)', () => {
+  it('clip export → lint → apply --replace round-trips; create refuses an existing name; lint names problems (exit 1, nothing written)', () => {
+    const spec = path.join(OUT, 'wave.clip.yaml');
+    assert.equal(cli('clip', 'export', RIG, '--anim', 'wave', '--out', spec).code, 0);
+    assert.match(readFileSync(spec, 'utf8'), /^format: rigsmith\.clip$/m);
+    assert.equal(cli('clip', 'lint', RIG, '--spec', spec).json.clean, true);
+    const created = cli('clip', 'apply', RIG, '--spec', spec, '--out', path.join(OUT, 'c1.rig.json'));
+    assert.equal(created.code, 1);
+    assert.match(created.json.errors[0], /exists; apply with replace/);
+    assert.ok(!existsSync(path.join(OUT, 'c1.rig.json')));
+    const out = path.join(OUT, 'c2.rig.json');
+    const r = cli('clip', 'apply', RIG, '--spec', spec, '--replace', '--out', out);
+    assert.equal(r.code, 0, JSON.stringify(r.json));
+    const again = path.join(OUT, 'c3.rig.json');
+    cli('clip', 'apply', out, '--spec', spec, '--replace', '--out', again);
+    assert.equal(sha(out), sha(again), 'applying twice gives the same bytes');
+    const a = parseProject(readFileSync(RIG, 'utf8')), b = parseProject(readFileSync(out, 'utf8'));
+    assert.ok(a.ok && b.ok);
+    if (a.ok && b.ok) assert.deepEqual(b.project.animations.find((x) => x.name === 'wave'), a.project.animations.find((x) => x.name === 'wave'), 'the replaced animation equals the original (key order of tracks aside)');
+    // JSON specs too; a new name creates.
+    const json = path.join(OUT, 'wave.clip.json');
+    cli('clip', 'export', RIG, '--anim', 'wave', '--out', json);
+    const spec2 = JSON.parse(readFileSync(json, 'utf8'));
+    spec2.name = 'wave2';
+    writeFileSync(json, JSON.stringify(spec2));
+    const c = cli('clip', 'apply', RIG, '--spec', json, '--out', path.join(OUT, 'c4.rig.json'));
+    assert.deepEqual([c.code, c.json.created], [0, true]);
+    const bad = path.join(OUT, 'bad.clip.yaml');
+    writeFileSync(bad, 'name: wave\nbones:\n  nobody: {rotate: [[0, 1]]}\n  torso: {rotate: [[99, 1, wobbly]]}\n');
+    const lint = cli('clip', 'lint', RIG, '--spec', bad);
+    assert.equal(lint.code, 1);
+    assert.deepEqual(lint.json.errors.length, 3, lint.json.errors.join('\n'));
+    writeFileSync(bad, 'name: wave\nbones: &a {}\n');
+    const yaml = cli('clip', 'lint', RIG, '--spec', bad);
+    assert.equal(yaml.code, 1);
+    assert.match(yaml.json.errors[0], /line 2: .*anchors/);
+  });
+
+  it('key / deform-key / draw-order / constraint-key add one key each through the same applier', () => {
+    const out = path.join(OUT, 'k.rig.json');
+    const steps: string[][] = [
+      ['key', RIG, '--anim', 'wave', '--bone', 'torso', '--channel', 'rotate', '--at', '10', '--value', '-70', '--ease', 'ease-out'],
+      ['key', out, '--anim', 'wave', '--bone', 'lower-target', '--channel', 'translate', '--at', '0.2s', '--value', '5,6', '--ease-y', 'step'],
+      ['key', out, '--anim', 'wave', '--slot', 'upper', '--channel', 'image', '--at', '25', '--value', 'arm.png'],
+      ['key', out, '--anim', 'wave', '--slot', 'torso', '--channel', 'color', '--at', '5', '--value', '#ff000080'],
+      ['deform-key', out, '--anim', 'wave', '--att', 'band', '--at', '20', '--rest'],
+      ['draw-order', out, '--anim', 'wave', '--at', '20', '--move', 'band', '--to', 'front'],
+      ['constraint-key', out, '--anim', 'wave', '--constraint', 'lower-ik', '--channel', 'mix', '--at', '25', '--value', '0.2'],
+    ];
+    for (const s of steps) assert.equal(cli(...s, '--out', out).code, 0, s.join(' '));
+    const r = parseProject(readFileSync(out, 'utf8'));
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    const w = r.project.animations.find((a) => a.name === 'wave')!;
+    assert.deepEqual(w.tracks.torso.rotate.find((k) => Math.abs(k.time - 1 / 3) < 1e-9)?.curve, [0, 0, 0.58, 1]);
+    assert.equal(w.tracks.arm_target.translate.find((k) => k.time === 0.2)?.interpY, 'step');
+    assert.deepEqual(w.slots!.a_upper.image!.at(-1), { time: 25 / 30, imageId: 'i_arm' });
+    assert.deepEqual(w.drawOrder!.at(-1)!.order.at(-1), 'a_band');
+    assert.deepEqual(w.constraints!.ik_arm.mix!.at(-1)!.value, [0.2]);
+    const miss = cli('key', RIG, '--anim', 'nope', '--bone', 'torso', '--channel', 'rotate', '--at', '1', '--value', '1', '--out', path.join(OUT, 'k2.rig.json'));
+    assert.equal(miss.code, 1);
+    assert.match(miss.json.errors[0], /No animation named “nope” to add keys to/);
+    assert.equal(cli('draw-order', RIG, '--anim', 'wave', '--at', '1', '--out', path.join(OUT, 'k2.rig.json')).code, 2);
+  });
+});
+
 describe('rendering (headless Chrome for Testing via render.html)', () => {
   it('render: byte-identical to the editor UI sequence export (plain, skin, sub-range)', async () => {
     for (const [label, args, ui] of [

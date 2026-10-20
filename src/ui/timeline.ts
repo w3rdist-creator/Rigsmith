@@ -188,6 +188,9 @@ export class Timeline {
       h('button', { class: 'mini', 'data-testid': 'nudge-right', disabled: !nSel, title: 'Nudge selected keys one frame later (])', 'aria-label': 'Nudge keys right', onclick: () => app.nudgeKeys(1) }, '1f▸'),
       h('button', { class: 'mini', 'data-testid': 'copy-keys', disabled: !nSel, title: 'Copy selected keys (Ctrl/⌘+C)', onclick: () => app.copySelectedKeys() }, 'Copy'),
       h('button', { class: 'mini', 'data-testid': 'paste-keys', disabled: !ed.clipboard, title: ed.clipboard ? `Paste ${describePortable(ed.clipboard)} at the playhead (Ctrl/⌘+V); onto the selected bone if the keys came from one other bone` : 'Paste keys at the playhead (Ctrl/⌘+V)', 'data-clip': ed.clipboard ? String(ed.clipboard.items.length) : '0', onclick: () => app.pasteKeysAtPlayhead() }, 'Paste'),
+      h('span', { class: 'sep' }),
+      h('button', { class: 'mini', 'data-testid': 'anim-export-spec', title: 'Download this animation as a clip spec (YAML, names instead of ids)', onclick: () => app.exportClipSpec() }, 'Export spec'),
+      h('button', { class: 'mini', 'data-testid': 'anim-apply-spec', title: 'Apply a clip spec (.yaml / .json): creates the animation, or rebuilds the one with the same name', onclick: () => app.clipSpecInput.click() }, 'Apply spec…'),
       h('button', { class: 'mini', 'data-testid': 'loop-seam', title: 'Close the loop: copy each lane’s first key to the end (selected lanes, or all)', onclick: () => app.closeLoop() }, '⟲ Close loop'),
       beyond ? h('span', { class: 'warn', title: 'Keys after the end are kept but not played.' }, `${beyond} key(s) past end`) : null,
     );

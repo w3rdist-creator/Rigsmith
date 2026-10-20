@@ -218,3 +218,21 @@ export async function overrideQuota(page: Page, origin: string, bytes: number): 
     await cdp.detach();
   };
 }
+
+/**
+ * The cutout dialog's canvas box and image→canvas mapping, read once the dialog has
+ * settled: it re-renders (a new canvas) when the asynchronous speck count arrives, so a
+ * box read before that can be null or stale. Retries until both are readable.
+ */
+export async function cutoutGeometry(page: Page): Promise<{ box: { x: number; y: number; width: number; height: number }; s: number; ox: number; oy: number }> {
+  const canvas = page.getByTestId('cutout-canvas');
+  await canvas.waitFor({ state: 'visible' });
+  await page.waitForFunction(() => !/Counting/.test(document.querySelector('[data-testid="cut-speck-count"]')?.textContent ?? 'Counting'));
+  for (let tries = 0; tries < 40; tries++) {
+    const box = await canvas.boundingBox().catch(() => null);
+    const v = await canvas.evaluate((c) => [c.dataset.scale, c.dataset.ox, c.dataset.oy].map(Number)).catch(() => null);
+    if (box && v && v.every(Number.isFinite)) return { box, s: v[0], ox: v[1], oy: v[2] };
+    await page.waitForTimeout(50);
+  }
+  throw new Error('cutout canvas geometry unavailable');
+}

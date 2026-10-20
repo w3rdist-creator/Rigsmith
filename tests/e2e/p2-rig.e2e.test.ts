@@ -13,7 +13,7 @@ import { writeTestArt } from '../support/png-encode.ts';
 import type { M } from '../support/reference-composite.ts';
 import { boneWorlds, composite, decodeProjectImages, diffImages } from '../support/reference-composite.ts';
 import { readZip } from '../support/zip-read.ts';
-import { EVIDENCE, launchIsolated, pickPort, probe, startPreview } from './harness.ts';
+import { cutoutGeometry, EVIDENCE, launchIsolated, pickPort, probe, startPreview } from './harness.ts';
 
 const OUT = path.join(EVIDENCE, 'roadmap/p2-rig');
 const ART = path.join(OUT, 'art');
@@ -514,10 +514,7 @@ describe('cutout tools and pivot mode', () => {
     limbUrl = (await project()).images.find((i: any) => i.name === 'limb.png').dataUrl;
     const before = await exportPng('cut-before.png');
     await page.getByTestId('att-cutout').click();
-    const canvas = page.getByTestId('cutout-canvas');
-    await canvas.waitFor({ state: 'visible' }); // the dialog lays out before its box is read
-    const box = (await canvas.boundingBox())!;
-    const geo = { s: Number(await canvas.getAttribute('data-scale')), ox: Number(await canvas.getAttribute('data-ox')), oy: Number(await canvas.getAttribute('data-oy')) };
+    const { box, ...geo } = await cutoutGeometry(page);
     const at = (x: number, y: number) => ({ x: box.x + geo.ox + x * geo.s, y: box.y + geo.oy + y * geo.s });
     for (const [x, y] of [[100, -2], [202, -2], [202, 46], [100, 46]]) {
       const q = at(Math.max(0, Math.min(199, x)), Math.max(0, Math.min(43.5, y)));
@@ -570,10 +567,7 @@ describe('cutout tools and pivot mode', () => {
     await page.getByTestId('tree-att-limb').click();
     const n0 = (await project()).images.length;
     await page.getByTestId('att-cutout').click();
-    const canvas = page.getByTestId('cutout-canvas');
-    await canvas.waitFor({ state: 'visible' }); // the dialog lays out before its box is read
-    const box = (await canvas.boundingBox())!;
-    const s = Number(await canvas.getAttribute('data-scale')), ox = Number(await canvas.getAttribute('data-ox')), oy = Number(await canvas.getAttribute('data-oy'));
+    const { box, s, ox, oy } = await cutoutGeometry(page);
     await page.mouse.click(box.x + ox + 20 * s, box.y + oy + 10 * s);
     await page.mouse.click(box.x + ox + 40 * s, box.y + oy + 10 * s);
     assert.equal(await page.getByTestId('cut-apply').isDisabled(), true, 'two points cannot be applied');
@@ -581,8 +575,7 @@ describe('cutout tools and pivot mode', () => {
     assert.equal((await project()).images.length, n0, 'cancel: nothing added');
     await page.getByTestId('att-cutout').click();
     await page.getByTestId('cut-mode-rect').click();
-    await page.getByTestId('cutout-canvas').waitFor({ state: 'visible' });
-    const c2 = (await page.getByTestId('cutout-canvas').boundingBox())!;
+    const c2 = (await cutoutGeometry(page)).box;
     await drag({ x: c2.x + ox + 30 * s, y: c2.y + oy + 8 * s }, { x: c2.x + ox + 60 * s, y: c2.y + oy + 36 * s });
     await page.getByTestId('cut-bone').uncheck();
     await page.getByTestId('cut-patch').check();
@@ -643,9 +636,7 @@ describe('persistence', () => {
     await page.getByTestId('tree-att-torso').click();
     await page.getByTestId('mode-setup').click();
     await page.getByTestId('att-cutout').click();
-    const canvas = page.getByTestId('cutout-canvas');
-    await canvas.waitFor({ state: 'visible' }); // the dialog lays out before its box is read
-    const box = (await canvas.boundingBox())!;
+    const { box } = await cutoutGeometry(page);
     for (const [fx, fy] of [[0.3, 0.3], [0.7, 0.3], [0.5, 0.6]]) await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
     await page.getByTestId('cut-bone').uncheck();
     await page.getByTestId('cut-apply').click();

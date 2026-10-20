@@ -12,7 +12,7 @@ import type { BrowserContext, Page } from 'playwright-core';
 import { decodePng } from '../support/png-decode.ts';
 import { encodePng } from '../support/png-encode.ts';
 import { readZip } from '../support/zip-read.ts';
-import { EVIDENCE, launchIsolated, pickPort, probe, startPreview, waitUntil } from './harness.ts';
+import { cutoutGeometry, EVIDENCE, launchIsolated, pickPort, probe, startPreview, waitUntil } from './harness.ts';
 
 const OUT = path.join(EVIDENCE, 'roadmap/rv012-onboarding');
 mkdirSync(OUT, { recursive: true });
@@ -52,12 +52,8 @@ async function setField(testId: string, v: string | number): Promise<void> {
 
 /** Clicks image pixel coordinates on the cutout canvas (exact; the dialog rounds to 0.1). */
 async function cutCanvas(): Promise<(x: number, y: number) => Promise<void>> {
-  const canvas = page.getByTestId('cutout-canvas');
-  await canvas.waitFor();
-  const box = (await canvas.boundingBox())!;
   // The selection tools need the exact source pixels, decoded asynchronously on open.
-  await page.waitForFunction(() => !/Counting/.test(document.querySelector('[data-testid="cut-speck-count"]')?.textContent ?? 'Counting'));
-  const s = Number(await canvas.getAttribute('data-scale')), ox = Number(await canvas.getAttribute('data-ox')), oy = Number(await canvas.getAttribute('data-oy'));
+  const { box, s, ox, oy } = await cutoutGeometry(page);
   return (x, y) => page.mouse.click(box.x + ox + x * s, box.y + oy + y * s);
 }
 

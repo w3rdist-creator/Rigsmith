@@ -42,6 +42,13 @@ read-only test probe.
 | `bind <project> --att A [--anim N --at s \| --clear] --out p2` | no | binds a weighted mesh at the setup pose or at an animation frame's pose (v3); `--clear` binds at the setup pose again |
 | `ik <project> --bone B [--one-bone] [--bend positive\|negative] --out p2` | no | adds 2-bone (or 1-bone) IK ending at B with a target at its tip; the bend side follows the setup elbow unless `--bend` is given |
 | `constrain <project> --bone B --out p2` + one of `--copy-rotation SRC [--factor 0.5] [--offset 0] [--mitre k:max]` · `--aim deg\|hold [--relative-to bone]`, and `[--name n] [--mix 1]` | no | adds a transform constraint (file becomes v3) |
+| `clip export <project> --anim A --out f.clip.yaml\|.json` | no | writes animation A as a clip spec (below): names instead of ids, lossless (applying it back evaluates identically) |
+| `clip apply <project> --spec f [--replace \| --merge] --out p2` | no | builds the spec's animation: new name → created; existing name needs `--replace` (rebuilt in place, same id, so mixes and sequences keep it) or `--merge` (adds the spec's keys to it). Applying the same spec twice gives identical bytes |
+| `clip lint <project> --spec f [--merge]` | no | every problem the spec would hit (unknown bones/attachments/images/constraints, value counts, deform offsets vs the mesh's vertex count, unknown eases, keys past the end, YAML errors with line numbers); exit 1 with the list, nothing written |
+| `key <project> --anim A --at T (--bone B --channel translate\|rotate\|scale \| --slot S --channel opacity\|visible\|color\|image) --value v[,v] [--ease e] [--curve x1,y1,x2,y2] [--ease-y e] [--curve-y …] --out p2` | no | one key on an existing animation (a one-key spec through `clip apply --merge`) |
+| `deform-key <project> --anim A --att S --at T (--rest \| --offsets f.json) [--ease e] --out p2` | no | one mesh deform key (`--offsets`: a JSON list, 2 per vertex) |
+| `draw-order <project> --anim A --at T (--order a,b,… \| --move S (--to front\|back \| --above X \| --below X)) --out p2` | no | one draw-order key; `--move` starts from the order in effect before T |
+| `constraint-key <project> --anim A --constraint C --channel mix\|position\|angle --at T --value v [--ease e] --out p2` | no | one constraint key (position: path constraints; angle: transform constraints) |
 
 Authoring commands validate the result with the editor's reader before writing and
 never modify their input file unless `--out` names it.
@@ -61,6 +68,66 @@ never modify their input file unless `--out` names it.
 Raised caps hold every frame in memory: about 4 bytes per pixel before the ZIP or
 encoder, so 6000 megapixels needs tens of gigabytes. The editor's export dialogs always
 use the defaults.
+
+### Clip specs (`clip`, `key`, `deform-key`, `draw-order`, `constraint-key`)
+
+A clip spec is an animation as text: YAML (a strict subset, below) or JSON, referring to
+bones, attachments, images and constraints **by name**, so a factory can write clips from
+a motion spec and re-apply them after art changes. In the editor: timeline ▸ **Export
+spec** / **Apply spec…** (one undo step; an existing name is rebuilt in place).
+
+```yaml
+format: rigsmith.clip   # optional header
+version: 1
+name: hop               # the animation
+fps: 30
+length: 20              # frames, or "0.75s"
+loop: false
+ease: smooth            # default ease of keys that name none (default linear)
+poses:                  # bone → rotate degrees, or {rotate, translate, scale}
+  crouch: {hips: {translate: [0, 10]}, knee_l: 30, knee_r: -30}
+  up: {hips: {translate: [0, -24]}, arm_l: -140}
+timeline:               # pose keys: each bone/channel any entry uses is keyed at every
+  - {at: 0, pose: crouch}               # entry, at its setup value where an entry omits it
+  - {at: 6, pose: [up], ease: ease-out} # a list of poses merges them (later wins)
+  - {at: 10, hold: true}                # the previous entry's values again
+  - {at: 20, pose: crouch, ease: step}
+bones:                  # explicit keys; they replace timeline keys at the same time
+  hips:
+    translate:
+      - [0, 0, 10]                      # [at, x, y, ease?]
+      - {at: 6, value: [0, -24], ease: linear, easeY: ease-out}   # separate y easing
+    rotate: [[0, 0], ["0.4s", 8, overshoot]]
+slots:                  # by attachment name
+  eyes: {image: [[0, eyes_open.png], [12, eyes_closed.png]]}      # image keys by image name
+  spark: {visible: [[0, false], [6, true], [9, false]], opacity: [[6, 1], [9, 0]]}
+  body: {color: [[0, "#ffffffff"], [6, "#ffd0a0ff"]], deform: [{at: 0, value: rest}]}
+drawOrder:
+  - {at: 6, move: arm_l, to: front}     # or above: / below: <attachment>
+  - {at: 12, order: [body, arm_l, head, spark]}   # or a full back→front list
+constraints:
+  arm_ik: {mix: [[0, 1], [10, 0]]}      # mix; position (path); angle (transform)
+events: []              # reserved for timeline events; must be empty for now
+```
+
+- **Times:** a number is a frame (time = frame / fps); `"0.25s"` is seconds. `clip
+  export` writes a frame only where frame / fps is exactly the stored time, seconds
+  otherwise, so nothing drifts.
+- **Eases:** `linear`, `step`, `smooth`, a preset (`ease-in`, `ease-out`, `ease-in-out`,
+  `overshoot`, `anticipate`, `back-in-out`), or `bezier` with `curve: [x1, y1, x2, y2]`
+  (x in 0..1). Translate keys may add `easeY`/`curveY`. Visibility keys default to `step`.
+- **Key forms:** `[at, value…, ease?]` or `{at, value, ease?, curve?, easeY?, curveY?}`.
+  Values: rotate/opacity/mix/position/angle one number; translate/scale two; colour
+  `"#rrggbb[aa]"` or four numbers 0..1; visible `true`/`false`; deform a list of
+  2 × vertices offsets or `rest`.
+- **YAML subset:** block maps, `- ` lists (including `- key: value` maps), flow `[…]` and
+  `{…}` (may span lines), numbers, `true`/`false`, `null`/`~`, plain, `'single'` and
+  `"double"` (JSON escapes) strings, `#` comments. Anchors, aliases, tags, block scalars
+  (`|`, `>`), several documents, tab indentation and duplicate keys are refused with the
+  line number. Files ending in `.json` (or starting with `{`) are read as JSON.
+- An exported spec is the animation's raw keys: a clip built procedurally (e.g. a baked
+  spring or a deform computed from a mesh) exports and re-applies exactly, but its deform
+  offsets are tied to that mesh — `clip lint` flags them when the vertex count changes.
 
 ### Limb weights (`weights --along`)
 

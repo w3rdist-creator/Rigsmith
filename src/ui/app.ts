@@ -33,6 +33,7 @@ import { h } from './dom.ts';
 import { BROWSER_SAVE, CLIPBOARD, LEGACY_KEYS, isQuotaError, migrateLegacy, readRecord, readStored, writeRecord, writeStored } from './storage.ts';
 import { ImageCache, importImageFile } from './images.ts';
 import { Viewport, isTyping } from './viewport.ts';
+import { applyClip, exportClip, formatClipSpec, parseClipText } from '../model/clipSpec.ts';
 
 /** Legacy localStorage key of the browser save (migrated to IndexedDB, src/ui/storage.ts). */
 export const STORAGE_KEY = LEGACY_KEYS[BROWSER_SAVE];
@@ -59,6 +60,7 @@ export class App {
   private statusTimer = 0;
   readonly fileInput = h('input', { type: 'file', accept: '.json,.rig.json,application/json', hidden: true, 'data-testid': 'open-input' });
   readonly imageInput = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', multiple: true, hidden: true, 'data-testid': 'image-input' });
+  readonly clipSpecInput = h('input', { type: 'file', accept: '.yaml,.yml,.json', hidden: true, 'data-testid': 'clip-spec-input' });
 
   mount(canvas: HTMLCanvasElement, statusEl: HTMLElement, toastEl: HTMLElement): void {
     this.statusEl = statusEl;
@@ -82,7 +84,12 @@ export class App {
         this.ed.emit('view');
       })
       .catch((e) => this.error('Browser storage unavailable', [(e as Error).message]));
-    document.body.append(this.fileInput, this.imageInput);
+    document.body.append(this.fileInput, this.imageInput, this.clipSpecInput);
+    this.clipSpecInput.addEventListener('change', () => {
+      const f = this.clipSpecInput.files?.[0];
+      this.clipSpecInput.value = '';
+      if (f) void f.text().then((text) => this.applyClipSpec(text, f.name));
+    });
     this.fileInput.addEventListener('change', () => {
       const f = this.fileInput.files?.[0];
       this.fileInput.value = '';
@@ -449,6 +456,39 @@ export class App {
     this.ed.setAnimation(id);
     this.ed.setMode('animate');
     this.status('New animation. Pose bones in Animate mode to set keys.');
+  }
+
+  /** Downloads the current animation as a clip spec (`<name>.clip.yaml`, docs/cli.md → Clip specs). */
+  exportClipSpec(): void {
+    const anim = this.ed.anim();
+    if (!anim) return;
+    try {
+      const text = formatClipSpec(exportClip(this.ed.project, anim.id));
+      download(new Blob([text], { type: 'application/yaml' }), `${anim.name.replace(/[^\w.-]+/g, '_')}.clip.yaml`);
+      this.status(`Exported “${anim.name}” as a clip spec.`);
+    } catch (e) {
+      this.status(`Clip spec not exported: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * Applies a clip spec as one undo step: a new animation, or the same-named one rebuilt
+   * in place (its id kept, so mixes and sequences still use it). Nothing changes on errors.
+   */
+  applyClipSpec(text: string, fileName: string): void {
+    const parsed = parseClipText(text, fileName);
+    const fail = (errors: string[]) => this.status(`Clip spec not applied (${errors.length} problem${errors.length > 1 ? 's' : ''}): ${errors.slice(0, 3).join('; ')}${errors.length > 3 ? '; …' : ''}`);
+    if (!parsed.ok) return fail(parsed.errors);
+    const name = parsed.spec.name;
+    const replace = this.ed.project.animations.some((a) => a.name === name);
+    const r = applyClip(this.ed.project, parsed.spec, replace ? 'replace' : 'create');
+    if (!r.ok) return fail(r.errors);
+    this.ed.mutate(`${replace ? 'Replace' : 'Create'} animation ${String(name)} from clip spec`, (p) => {
+      p.animations = r.project.animations;
+    });
+    this.ed.setAnimation(r.animId);
+    this.ed.setMode('animate');
+    this.status(`${replace ? 'Replaced' : 'Created'} “${String(name)}” from ${fileName} (${r.keys} keys).`);
   }
 
   deleteAnimation(): void {

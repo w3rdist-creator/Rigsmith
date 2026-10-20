@@ -4,11 +4,14 @@
 // 2 usage, 3 environment (no build / no Chrome for Testing), 4 render failure/cancel.
 // Outputs are written atomically (temp file + rename): a failed or cancelled command
 // leaves no partial output.
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { MissingPolicy } from '../src/model/mix.ts';
 import type { Project, ProjectFrame } from '../src/model/types.ts';
 import { safeName } from '../src/render/sequence.ts';
 import { resolveLimits } from '../src/model/sequence.ts';
+import { applyClip, exportClip, formatClipSpec, lintClip, parseClipText } from '../src/model/clipSpec.ts';
+import type { ClipMode, ClipSpec } from '../src/model/clipSpec.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
 import type { TransformRequest, VertexAlphaRequest, WeightRequest } from './lib/rigsmith-api.ts';
@@ -56,7 +59,16 @@ const USAGE = `rigsmith <command> [options]
   bind <project> --att <attachment> [--anim <name> --at <seconds> | --clear] --out <project>
           (bind a weighted mesh at the setup pose, or at an animation frame's pose; --clear: bind at setup)
   ik <project> --bone <bone> [--one-bone] [--bend positive|negative] --out <project>
-          (2-bone IK ending at <bone>, target at its tip; the bend side follows the setup elbow unless given)`;
+          (2-bone IK ending at <bone>, target at its tip; the bend side follows the setup elbow unless given)
+  clip export <project> --anim <name> --out <clip.yaml|clip.json>
+  clip apply <project> --spec <clip.yaml|clip.json> [--replace | --merge] --out <project>
+  clip lint <project> --spec <clip.yaml|clip.json> [--merge]
+  key <project> --anim <name> --at <frame|Ns> (--bone <b> --channel translate|rotate|scale | --slot <att> --channel opacity|visible|color|image)
+          --value <v[,v]> [--ease <name>] [--curve x1,y1,x2,y2] [--ease-y <name>] [--curve-y …] --out <project>
+  deform-key <project> --anim <name> --att <attachment> --at <frame|Ns> (--rest | --offsets <file.json>) [--ease <name>] --out <project>
+  draw-order <project> --anim <name> --at <frame|Ns> (--order a,b,… | --move <att> (--to front|back | --above <att> | --below <att>)) --out <project>
+  constraint-key <project> --anim <name> --constraint <name> --channel mix|position|angle --at <frame|Ns> --value <v> [--ease <name>] --out <project>
+  (times: a number is a frame, "0.25s" is seconds; specs: docs/cli.md → Clip specs)`;
 
 type Args = { _: string[]; flags: Record<string, string[]> };
 
@@ -122,7 +134,112 @@ process.on('SIGINT', () => {
 });
 const progress = (done: number, total: number) => process.stderr.write(`\rframe ${done}/${total}`);
 
+/** --at / spec times: a number is a frame, "<n>s" seconds. */
+const atFlag = (): number | string => {
+  const v = need('at');
+  return /s$/.test(v) ? v : Number.isFinite(Number(v)) ? Number(v) : usage(`--at must be a frame number or "<seconds>s" (got “${v}”).`);
+};
+const curveFlag = (k: string): number[] | undefined => {
+  const v = flag(k);
+  if (v === undefined) return undefined;
+  const c = v.split(',').map(Number);
+  if (c.length !== 4 || !c.every(Number.isFinite)) usage(`--${k} expects x1,y1,x2,y2.`);
+  return c;
+};
+
+/** Applies a spec (one code path for clip apply and the single-key commands); exit 1 with every problem. */
+function applySpec(p: Project, spec: ClipSpec, mode: ClipMode): Project {
+  const r = applyClip(p, spec, mode);
+  if (!r.ok) throw new ApiError('The clip spec does not fit this project', r.errors);
+  return r.project;
+}
+
+/** One key as a merge spec for the existing animation --anim. */
+function singleKeySpec(cmd: string): ClipSpec {
+  const name = need('anim');
+  const at = atFlag();
+  const ease = flag('ease'), curve = curveFlag('curve');
+  const easeFields = { ...(ease !== undefined ? { ease } : {}), ...(curve ? { curve } : {}) };
+  if (cmd === 'deform-key') {
+    if ((flag('rest') === undefined) === (flag('offsets') === undefined)) usage('deform-key: give --rest or --offsets <file.json>.');
+    const value = flag('rest') !== undefined ? 'rest' : JSON.parse(readFileSync(need('offsets'), 'utf8'));
+    return { name, slots: { [need('att')]: { deform: [{ at, value, ...easeFields }] } } };
+  }
+  if (cmd === 'draw-order') {
+    const order = flag('order');
+    if ((order === undefined) === (flag('move') === undefined)) usage('draw-order: give --order a,b,… or --move <att> with --to, --above or --below.');
+    if (order !== undefined) return { name, drawOrder: [{ at, order: order.split(',') }] };
+    const dest = (['to', 'above', 'below'] as const).filter((k) => flag(k) !== undefined);
+    if (dest.length !== 1) usage('draw-order --move: give exactly one of --to front|back, --above <att>, --below <att>.');
+    return { name, drawOrder: [{ at, move: need('move'), [dest[0]]: need(dest[0]) }] };
+  }
+  const raw = need('value');
+  const nums = raw.split(',').map(Number);
+  const numeric = nums.every(Number.isFinite);
+  if (cmd === 'constraint-key') {
+    if (!numeric || nums.length !== 1) usage('--value: one number.');
+    return { name, constraints: { [need('constraint')]: { [need('channel')]: [{ at, value: nums[0], ...easeFields }] } } };
+  }
+  const ch = need('channel');
+  if (flag('bone') !== undefined) {
+    if (!numeric) usage('--value: numbers, comma-separated (translate/scale x,y).');
+    const easeY = flag('ease-y'), curveY = curveFlag('curve-y');
+    const yFields = { ...(easeY !== undefined ? { easeY } : {}), ...(curveY ? { curveY } : {}) };
+    return { name, bones: { [need('bone')]: { [ch]: [{ at, value: nums.length === 1 ? nums[0] : nums, ...easeFields, ...yFields }] } } };
+  }
+  const slot = flag('slot') ?? usage('key: give --bone or --slot.');
+  if (ch === 'image') return { name, slots: { [slot]: { image: [[at, raw]] } } };
+  const value = ch === 'visible' ? (raw === 'true' ? true : raw === 'false' ? false : usage('--value for visible: true or false.')) : ch === 'color' && raw.startsWith('#') ? raw : numeric ? (nums.length === 1 ? nums[0] : nums) : usage(`--value: numbers${ch === 'color' ? ' or #rrggbb[aa]' : ''}.`);
+  return { name, slots: { [slot]: { [ch]: [{ at, value, ...easeFields }] } } };
+}
+
+function readSpec(): ClipSpec {
+  const file = need('spec');
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    throw new ApiError(`No such file: ${file}`, undefined, EXIT.usage);
+  }
+  const r = parseClipText(text, file);
+  if (!r.ok) throw new ApiError(`${path.basename(file)} is not a valid clip spec`, r.errors);
+  return r.spec;
+}
+
 async function main(): Promise<Record<string, unknown>> {
+  if (args._[0] === 'clip') {
+    const sub = args._[1];
+    const file = args._[2];
+    if (!['export', 'apply', 'lint'].includes(sub ?? '')) usage('clip: export, apply or lint.');
+    if (!file) usage(`clip ${sub}: give a project file.`);
+    const p = readProject(file);
+    if (sub === 'export') {
+      const out = need('out');
+      const anim = p.animations.find((a) => a.name === need('anim'));
+      if (!anim) throw new ApiError(`No animation named “${flag('anim')}”.`, [`No animation named “${flag('anim')}”.`]);
+      let spec: ClipSpec;
+      try {
+        spec = exportClip(p, anim.id);
+      } catch (e) {
+        throw new ApiError((e as Error).message, [(e as Error).message]);
+      }
+      writeOutput(out, formatClipSpec(spec, /\.json$/i.test(out)));
+      return { outputs: [out], animation: anim.name };
+    }
+    const spec = readSpec();
+    const mode: ClipMode = flag('merge') !== undefined ? 'merge' : flag('replace') !== undefined || sub === 'lint' ? 'replace' : 'create';
+    if (flag('merge') !== undefined && flag('replace') !== undefined) usage('clip: --replace or --merge, not both.');
+    if (sub === 'lint') {
+      const problems = lintClip(p, spec, mode);
+      if (problems.length) throw new ApiError(`${problems.length} problem(s) in the clip spec`, problems);
+      return { clean: true, animation: spec.name };
+    }
+    const out = need('out');
+    const r = applyClip(p, spec, mode);
+    if (!r.ok) throw new ApiError('The clip spec does not fit this project', r.errors);
+    writeProject(out, r.project);
+    return { outputs: [out], animation: spec.name, created: r.created, keys: r.keys, mode };
+  }
   const [cmd, file] = args._;
   if (!cmd || cmd === 'help' || flag('help')) usage('Choose a command.');
   if (!file) usage(`${cmd}: give a project file.`);
@@ -333,6 +450,15 @@ async function main(): Promise<Record<string, unknown>> {
       const res = addIkNamed(p, need('bone'), { oneBone: flag('one-bone') !== undefined, bend: bend as 'positive' | 'negative' | undefined });
       writeProject(out, p);
       return { outputs: [out], ik: res };
+    }
+    case 'key':
+    case 'deform-key':
+    case 'draw-order':
+    case 'constraint-key': {
+      const out = need('out');
+      const spec = singleKeySpec(cmd);
+      writeProject(out, applySpec(p, spec, 'merge'));
+      return { outputs: [out], animation: spec.name };
     }
     case 'constrain': {
       const out = need('out');

@@ -11,7 +11,7 @@ import type { BrowserContext, Page } from 'playwright-core';
 import { decodePng } from '../support/png-decode.ts';
 import { writeTestArt } from '../support/png-encode.ts';
 import { diffImages } from '../support/reference-composite.ts';
-import { EVIDENCE, ROOT, launchIsolated, pickPort, probe, startPreview } from './harness.ts';
+import { cutoutGeometry, EVIDENCE, launchIsolated, pickPort, probe, ROOT, startPreview } from './harness.ts';
 
 const OUT = path.join(EVIDENCE, 'roadmap/controls');
 mkdirSync(path.join(OUT, 'art'), { recursive: true });
@@ -294,10 +294,7 @@ describe('cutout dialog extras', () => {
     await page.getByTestId('attach-limb.png').click();
     const before = await exportPng('ext-before.png');
     await page.getByTestId('att-cutout').click();
-    const c = page.getByTestId('cutout-canvas');
-    await c.waitFor({ state: 'visible' }); // the dialog lays out before its box is read
-    const box = (await c.boundingBox())!;
-    const s = Number(await c.getAttribute('data-scale')), ox = Number(await c.getAttribute('data-ox')), oy = Number(await c.getAttribute('data-oy'));
+    const { box, s, ox, oy } = await cutoutGeometry(page);
     const at = (x: number, y: number) => ({ x: box.x + ox + x * s, y: box.y + oy + y * s });
     for (const [x, y] of [[20, 10], [40, 10], [30, 30]]) {
       const q = at(x, y);
