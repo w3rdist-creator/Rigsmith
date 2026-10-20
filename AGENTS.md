@@ -5,10 +5,11 @@ parity with any commercial tool.
 
 ## Authority
 - Work only inside this repo, `.hermes/browser-profiles/` and `.hermes/evidence/`.
-- Agent work is local-only: agents add no remotes and never push, deploy or publish.
-  Private GitHub publication is owned solely by the operator-authorized Hermes
-  controller. `.gitignore` keeps `.hermes/{dispatch,assets,evidence,browser-profiles}/`,
-  credentials and env files out of every commit.
+- Agent work is local-only: agents add no remotes and never push, deploy or publish
+  unless the operator asks. Any dispatcher (Hermes, Claude, a CLI lane) may hand work
+  to an agent; none of them is the acceptance authority. `.gitignore` keeps
+  `.hermes/{dispatch,assets,evidence,browser-profiles}/`, credentials and env files out
+  of every commit (the `.hermes/` folder is only a local working-data location).
 - No public binds. Preview binds `127.0.0.1` only, on a port
   checked free first (default 47613; e2e picks 47614–47617).
 - Never open/focus the user's Chrome. Automation uses headless Chrome for Testing with a
@@ -28,4 +29,5 @@ Save raw output to `.hermes/evidence/` (git-ignored). Never hand-edit outputs.
   observed / inferred / unknown. Passive tools observe; `capture_browser_scenario` is
   controlled — say which.
 - A feature is "delivered" only if a visible control exists and a test exercises it.
-- Status lives in `.hermes/STATUS.md`; Hermes verification is external — never self-certify.
+- Status lives in `.hermes/STATUS.md`. Report gate results with their raw output; acceptance
+  belongs to the operator (the owner), who may delegate review to any agent.
