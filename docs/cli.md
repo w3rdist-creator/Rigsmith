@@ -39,6 +39,8 @@ read-only test probe.
 | `inherit <project> --bone B [--rotation on\|off] [--scale on\|off] [--reflection on\|off] --out p2` | no | sets a bone's inherit flags, keeping its setup placement (any flag off → v3) |
 | `tint <project> --att A [--blend normal\|additive\|screen\|multiply] [--color #rrggbb[aa]] [--anim N --at s] --out p2` | no | sets the blend mode and/or setup tint; with `--anim`/`--at` keys the colour instead (any non-default → v3) |
 | `vertex-alpha <project> --att A --out p2` + one of `--radial cx,cy,inner,outer [--invert]` · `--set i=a[,i=a…]` · `--clear` | no | per-vertex alpha on a mesh attachment: radial fade in image px (1 inside `inner`, 0 beyond `outer`), single vertices, or back to opaque (v3) |
+| `bind <project> --att A [--anim N --at s \| --clear] --out p2` | no | binds a weighted mesh at the setup pose or at an animation frame's pose (v3); `--clear` binds at the setup pose again |
+| `ik <project> --bone B [--one-bone] [--bend positive\|negative] --out p2` | no | adds 2-bone (or 1-bone) IK ending at B with a target at its tip; the bend side follows the setup elbow unless `--bend` is given |
 | `constrain <project> --bone B --out p2` + one of `--copy-rotation SRC [--factor 0.5] [--offset 0] [--mitre k:max]` · `--aim deg\|hold [--relative-to bone]`, and `[--name n] [--mix 1]` | no | adds a transform constraint (file becomes v3) |
 
 Authoring commands validate the result with the editor's reader before writing and
@@ -90,6 +92,10 @@ then only uses CLI commands: `add-image` ×15, `skin` ×3, `set-mix`, `validate`
 on this Chrome for Testing build (other Chrome builds may encode PNG bytes differently).
 
 ## Verified by
+
+`npm test` (`tests/unit/bind-pose.test.ts`): `bind` (at a frame, at setup, clear) equals the
+model's `bindMesh`; `ik --bend negative` writes the side with name-derived ids; usage errors
+exit 2, invalid requests exit 1, nothing written on failure.
 
 `npm test` (`tests/unit/blend-tint.test.ts`): `tint` and `vertex-alpha` as subprocesses —
 blend + setup tint, a keyed tint and a radial fade equal the model functions; usage errors

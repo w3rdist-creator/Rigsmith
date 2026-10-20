@@ -21,9 +21,11 @@ import type { MediaFormat } from '../../src/model/media.ts';
 import { MediaCancelled, encodeAnimated, mediaErrors } from '../../src/model/media.ts';
 import type { LimbSpec } from '../../src/model/limbWeights.ts';
 import { limbWeights, mirrorWeights, smoothWeights, suffixBoneMap } from '../../src/model/limbWeights.ts';
-import { autoWeights, gridPoints, meshSummary, setMesh, triangulate } from '../../src/model/meshOps.ts';
+import { autoWeights, bindMesh, gridPoints, meshSummary, setMesh, triangulate } from '../../src/model/meshOps.ts';
+import { evaluate } from '../../src/model/evaluate.ts';
+import { computeWorld } from '../../src/model/skeleton.ts';
 import { setMixRule } from '../../src/model/mix.ts';
-import { addAimConstraint, addRotationConstraint, constraintNames } from '../../src/model/rigOps.ts';
+import { addAimConstraint, addIk, addRotationConstraint, constraintNames } from '../../src/model/rigOps.ts';
 import { dataUrlBytes, decodePngExact, encodePngExact } from '../../src/model/png.ts';
 import { addSkin, setSkinEntry } from '../../src/model/skinOps.ts';
 import type { BoneInherit, ClipSequence, ImageAsset, Project } from '../../src/model/types.ts';
@@ -268,6 +270,43 @@ export function setWeights(p: Project, attName: string, req: WeightRequest, smoo
   }
   const w = att.mesh.weights!;
   return { vertices: w.length, maxInfluences: Math.max(...w.map((l) => l.length)) };
+}
+
+/**
+ * Binds a weighted mesh at the setup pose, or at an animation frame (`at` seconds), or
+ * (`clear`) goes back to binding at the setup pose.
+ */
+export function setBind(p: Project, attName: string, req: { clear?: boolean; anim?: string; at?: number }): { bound: 'setup' | 'own'; bones: number } {
+  const att = attachmentNamed(p, attName);
+  if (!att.mesh?.weights) fail(`${attName} needs a weighted mesh (see \`mesh\` and \`weights\`).`);
+  if (req.clear) delete att.mesh.bind;
+  else {
+    let world = computeWorld(p.bones);
+    if (req.anim !== undefined) {
+      const an = p.animations.find((a) => a.name === req.anim) ?? fail(`No animation named “${req.anim}”.`);
+      const t = req.at ?? 0;
+      if (!(t >= 0 && t <= an.duration)) fail(`--at must be within 0..${an.duration} s.`);
+      world = evaluate(p, an, t).world;
+    }
+    bindMesh(att, world);
+  }
+  return { bound: att.mesh.bind ? 'own' : 'setup', bones: Object.keys(att.mesh.bind?.bones ?? {}).length };
+}
+
+/** Adds IK ending at a bone (2-bone unless `oneBone`), with an explicit bend side when given. */
+export function addIkNamed(p: Project, boneName: string, opts: { oneBone?: boolean; bend?: 'positive' | 'negative' }): { name: string; bones: string[]; target: string; bendPositive: boolean } {
+  const id = boneNamed(p, boneName);
+  // Ids derived from the bone name, so scripted runs are reproducible.
+  const free = (base: string, taken: string[]) => {
+    let out = base;
+    for (let n = 2; taken.includes(out); n++) out = `${base}_${n}`;
+    return out;
+  };
+  const ids = { ik: free(`ik_${safeName(boneName)}`, (p.ik ?? []).map((k) => k.id)), target: free(`b_${safeName(boneName)}_target`, p.bones.map((b) => b.id)) };
+  const ik = addIk(p, id, !opts.oneBone, ids, opts.bend === undefined ? undefined : opts.bend === 'positive');
+  if (!ik) fail(opts.oneBone ? `Cannot add IK at ${boneName}.` : `Cannot add 2-bone IK ending at ${boneName}: it needs a parent and must inherit its parent's full transform.`);
+  const nameOf = (b: string) => p.bones.find((x) => x.id === b)!.name;
+  return { name: ik.name, bones: ik.bones.map(nameOf), target: nameOf(ik.target), bendPositive: ik.bendPositive };
 }
 
 /**

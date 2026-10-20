@@ -47,6 +47,7 @@ export function repairReferences(p: Project): string[] {
   // mesh becomes rigid).
   for (const a of p.attachments) {
     const m = a.mesh;
+    if (m?.bind && !m.weights) delete m.bind; // a bind pose only means something with weights
     if (!m?.weights) continue;
     let changed = 0;
     let rigid = false;
@@ -64,6 +65,7 @@ export function repairReferences(p: Project): string[] {
     });
     if (rigid || next.length !== m.points.length / 2) delete m.weights;
     else m.weights = next;
+    if (m.bind) for (const id of Object.keys(m.bind.bones)) if (!boneIds.has(id)) delete m.bind.bones[id];
     if (changed) notes.push(`${a.name}: ${changed} vertex weight list(s) repaired.`);
   }
   const constraintIds = new Set([...(p.ik ?? []), ...(p.pathConstraints ?? []), ...(p.transformConstraints ?? [])].map((k) => k.id));

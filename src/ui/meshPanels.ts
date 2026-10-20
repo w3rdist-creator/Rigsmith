@@ -3,7 +3,10 @@
 // Setup mode and per-vertex deform offsets + deform keys in Animate mode.
 import { findKeyIndex, snapToFrame } from '../model/animation.ts';
 import { laneKeys, slotLane } from '../model/keys.ts';
-import { autoWeights, deformAt, keyDeform, meshSummary, moveMeshPoint, normalizeWeights, paintVertex, setMesh } from '../model/meshOps.ts';
+import { autoWeights, bindMesh, deformAt, keyDeform, meshSummary, moveMeshPoint, normalizeWeights, paintVertex, setMesh } from '../model/meshOps.ts';
+import { evaluate } from '../model/evaluate.ts';
+import type { Mat } from '../model/math.ts';
+import { computeWorld } from '../model/skeleton.ts';
 import type { PaintMode } from '../model/meshOps.ts';
 import { limbWeights, mirrorWeights, smoothWeights, suffixBoneMap } from '../model/limbWeights.ts';
 import { isAncestorOrSelf } from '../model/skeleton.ts';
@@ -76,9 +79,13 @@ export function meshSection(app: App, a: Attachment): HTMLElement[] {
           title: `Weight every vertex to the nearest of: ${auto.map((b) => b.name).join(', ') || '(no bone)'}`,
           onclick: () => setMeshAtt('Auto weights', (x) => void (x.mesh!.weights = autoWeights(ed.project, x, auto.map((b) => b.id)))),
         }, 'Auto weights'),
-        h('button', { class: 'mini', 'data-testid': 'weights-rigid', disabled: !mesh.weights, title: 'Remove weights: the mesh follows its attachment’s bone rigidly', onclick: () => setMeshAtt('Make mesh rigid', (x) => void delete x.mesh!.weights) }, 'Make rigid'),
+        h('button', { class: 'mini', 'data-testid': 'weights-rigid', disabled: !mesh.weights, title: 'Remove weights: the mesh follows its attachment’s bone rigidly', onclick: () => setMeshAtt('Make mesh rigid', (x) => {
+          delete x.mesh!.weights;
+          delete x.mesh!.bind;
+        }) }, 'Make rigid'),
       ),
     );
+    out.push(...bindSection(app, a));
     out.push(...limbSection(app, a, setMeshAtt), ...alphaSection(app, a, setMeshAtt));
     if (ed.meshTool === 'weights') {
       const b = ed.brush;
@@ -295,6 +302,48 @@ function alphaSection(app: App, a: Attachment, setMeshAtt: (label: string, fn: (
         }
       } }, 'Apply radial fade'),
       h('button', { class: 'mini', 'data-testid': 'va-clear', disabled: !mesh.alphas, title: 'Every vertex back to alpha 1', onclick: () => setMeshAtt('Clear vertex alpha', (x) => void delete x.mesh!.alphas) }, 'Clear'),
+    ),
+  ];
+}
+
+/** Bind-pose form state per attachment (animation id and frame). */
+const bindForms = new Map<string, { anim: string; frame: number }>();
+
+/**
+ * Mesh ▸ Bind pose: bind the weighted mesh at the setup pose or at an animation frame, or
+ * go back to binding at the setup pose. The image shows undistorted whenever the bones
+ * are in the bind pose, so the setup pose can differ from the pose the art was drawn in.
+ */
+function bindSection(app: App, a: Attachment): HTMLElement[] {
+  const { ed } = app;
+  const p = ed.project;
+  const mesh = a.mesh!;
+  const f = bindForms.get(a.id) ?? { anim: p.animations[0]?.id ?? '', frame: 0 };
+  if (!p.animations.some((x) => x.id === f.anim)) f.anim = p.animations[0]?.id ?? '';
+  bindForms.set(a.id, f);
+  const bind = (label: string, world: () => ReadonlyMap<string, Mat>) => {
+    try {
+      ed.mutate(label, (q) => bindMesh(q.attachments.find((x) => x.id === a.id)!, world()));
+    } catch (e) {
+      app.error('Bind pose not changed', [(e as Error).message]);
+    }
+  };
+  const atFrame = () => {
+    const an = p.animations.find((x) => x.id === f.anim)!;
+    return evaluate(ed.project, an, Math.min(an.duration, f.frame / an.fps)).world;
+  };
+  const n = mesh.bind ? Object.keys(mesh.bind.bones).length : 0;
+  return [
+    h('div', { class: 'group-label' }, 'Bind pose'),
+    h('p', { class: 'dim', 'data-testid': 'mesh-bind-summary' }, mesh.bind ? `Own bind pose · ${n} bone${n === 1 ? '' : 's'}` : 'Bound at the setup pose'),
+    h('div', { class: 'row2' },
+      h('button', { class: 'mini', 'data-testid': 'mesh-bind', disabled: !mesh.weights, title: 'Bind at the current setup pose: later setup-pose edits then bend the mesh', onclick: () => bind('Bind mesh at setup pose', () => computeWorld(ed.project.bones)) }, 'Bind at setup'),
+      h('button', { class: 'mini', 'data-testid': 'mesh-unbind', disabled: !mesh.bind, title: 'Bind at whatever the setup pose is (the default)', onclick: () => ed.mutate('Clear bind pose', (q) => void delete q.attachments.find((x) => x.id === a.id)!.mesh!.bind) }, 'Clear bind'),
+    ),
+    labeledSelect('mesh-bind-anim', 'Animation', p.animations.map((x) => ({ value: x.id, label: x.name })), f.anim, (v) => void (f.anim = v)),
+    h('div', { class: 'row2' },
+      numberField({ label: 'Frame', value: f.frame, min: 0, testId: 'mesh-bind-frame', onCommit: (v) => void (f.frame = Math.max(0, Math.round(v))) }),
+      h('button', { class: 'mini', 'data-testid': 'mesh-bind-at-frame', disabled: !mesh.weights || !f.anim, title: 'Bind in that frame’s pose: the art shows undistorted when the bones are posed like that frame', onclick: () => bind('Bind mesh at frame', atFrame) }, 'Bind at frame'),
     ),
   ];
 }

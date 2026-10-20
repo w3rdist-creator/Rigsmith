@@ -12,6 +12,7 @@
 // rgb and the opacity; a mesh's vertex alpha is interpolated (barycentric) at the pixel
 // centre through each owning triangle's map; blend modes use the W3C compositing
 // formulas (additive = plus-lighter, clamped; screen and multiply = separable blends).
+// v3 bind pose: a weighted mesh with `mesh.bind` skins from the stored matrices.
 import type { Decoded } from './png-decode.ts';
 import { decodePng } from './png-decode.ts';
 
@@ -298,11 +299,15 @@ export function meshScreenVertices(a: any, st: any, t: number, project: any, wor
     if (!mesh.weights) {
       [x, y] = apply(mul(a.boneId ? worlds.get(a.boneId)! : ident, attLocal), lx, ly);
     } else {
-      const [rx, ry] = apply(mul(a.boneId ? setup.get(a.boneId)! : ident, attLocal), lx, ly);
+      // v3 bind pose: the stored matrices replace the setup pose (bones without one: setup).
+      const bind = mesh.bind;
+      const rest: M = bind ? (bind.attachment as M) : mul(a.boneId ? setup.get(a.boneId)! : ident, attLocal);
+      const [rx, ry] = apply(rest, lx, ly);
       x = 0;
       y = 0;
       for (const inf of mesh.weights[i]) {
-        const [qx, qy] = apply(mul(worlds.get(inf.bone)!, inv(setup.get(inf.bone)!)), rx, ry);
+        const B: M = (bind?.bones[inf.bone] as M) ?? setup.get(inf.bone)!;
+        const [qx, qy] = apply(mul(worlds.get(inf.bone)!, inv(B)), rx, ry);
         x += qx * inf.w;
         y += qy * inf.w;
       }

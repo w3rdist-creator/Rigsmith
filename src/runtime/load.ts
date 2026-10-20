@@ -16,7 +16,7 @@
 import type { RuntimeExport, RuntimeKey } from '../model/exportRuntime.ts';
 import { RUNTIME_FORMAT_ID } from '../model/exportRuntime.ts';
 import { validateProject } from '../model/format.ts';
-import type { Animation, Attachment, Bone, ImageAsset, Key, Project } from '../model/types.ts';
+import type { Affine, Animation, Attachment, Bone, ImageAsset, Key, Project } from '../model/types.ts';
 import { FORMAT_ID } from '../model/types.ts';
 
 export class RuntimeError extends Error {
@@ -86,7 +86,7 @@ function convertRuntime(raw: unknown): Project {
     opacity: a.opacity,
     ...(a.hidden ? { hidden: true } : {}),
     ...(a.mesh
-      ? { mesh: { points: copy(a.mesh.uvs), triangles: copy(a.mesh.triangles), hull: a.mesh.hull, ...(a.mesh.weights ? { weights: a.mesh.weights.map((l) => (Array.isArray(l) ? l.map((x) => ({ bone: need(boneNames, x.bone, 'weight bone'), w: x.w })) : l)) } : {}), ...(a.mesh.alphas ? { alphas: copy(a.mesh.alphas) } : {}) } }
+      ? { mesh: { points: copy(a.mesh.uvs), triangles: copy(a.mesh.triangles), hull: a.mesh.hull, ...(a.mesh.weights ? { weights: a.mesh.weights.map((l) => (Array.isArray(l) ? l.map((x) => ({ bone: need(boneNames, x.bone, 'weight bone'), w: x.w })) : l)) } : {}), ...(a.mesh.alphas ? { alphas: copy(a.mesh.alphas) } : {}), ...(a.mesh.bind ? { bind: { attachment: copy(a.mesh.bind.attachment) as Affine, bones: Object.fromEntries(Object.entries(a.mesh.bind.bones).map(([n, m]) => [need(boneNames, n, 'bind bone'), copy(m) as Affine])) } } : {}) } }
       : {}),
     ...(a.blend ? { blend: a.blend } : {}),
     ...(a.color ? { color: a.color } : {}),

@@ -216,9 +216,18 @@ tint, image, skin, draw order) → mesh vertices.
   first clean cross-section back past the pivot (axis: pivot → outline area centroid),
   filling only transparent pixels under opaque cover (alpha ≥ 250), so the grown part
   stays hidden at rest and fills the gap when the joint bends.
-- **Meshes** (`src/model/mesh.ts`, `meshOps.ts`): the bind pose is the current **setup
-  pose** — a weighted vertex is `Σ wᵢ · Wᵢ(now) · Wᵢ(setup)⁻¹ · A(setup) · (p + deform)`,
-  so editing setup bones re-binds (the mesh follows the attachment's bone at setup).
+- **Meshes** (`src/model/mesh.ts`, `meshOps.ts`): by default the bind pose is the current
+  **setup pose** — a weighted vertex is `Σ wᵢ · Wᵢ(now) · Wᵢ(setup)⁻¹ · A(setup) · (p + deform)`,
+  so editing setup bones re-binds (the mesh follows the attachment's bone at setup). A
+  weighted mesh can instead store its own bind pose (v3 `mesh.bind`: the attachment's and
+  the weight bones' world matrices, captured by Mesh ▸ Bind pose or the `bind` CLI at the
+  setup pose or at an animation frame); skinning then uses `W(bind)` and `A(bind)` in place
+  of the setup terms (bones without an entry bind at setup), so the mesh is the undistorted
+  image whenever the bones are in the bind pose, and setup edits bend it like animation
+  does (a tail drawn straight can rest curled). Weight tools (auto, limb, mirror input)
+  measure geometry in the bind frame. A bind needs weights: making the mesh rigid drops it,
+  and deleting a bone drops its entry. `addIk` takes the bend side from the setup elbow
+  unless given (`ik --bend`), since a straight chain has no side of its own.
   Geometry is centred on the setup image; an image key or skin showing another image
   scales only the texture coordinates (normalized UVs). Changing the setup image rescales
   the points (and deform keys). Triangulation: ear clipping of the outline, interior

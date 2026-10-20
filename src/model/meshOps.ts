@@ -6,9 +6,9 @@
 import { sampleKeys } from './animation.ts';
 import type { Mat } from './math.ts';
 import { apply, invert, multiply } from './math.ts';
-import { localVertex } from './mesh.ts';
+import { bindFrame, bindWorld, localVertex, toAffine, toMat } from './mesh.ts';
 import { attachmentWorld, computeWorld } from './skeleton.ts';
-import type { Animation, Attachment, Key, Mesh, Project, VertexWeights } from './types.ts';
+import type { Affine, Animation, Attachment, Key, Mesh, Project, VertexWeights } from './types.ts';
 
 type V = { x: number; y: number };
 const cross = (o: V, a: V, b: V) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
@@ -237,7 +237,7 @@ export function bindAll(mesh: Mesh, bone: string): VertexWeights[] {
 /** Setup-pose world positions of a mesh's vertices (no deform). */
 export function setupVertices(project: Project, att: Attachment): V[] {
   const im = project.images.find((i) => i.id === att.imageId)!;
-  const m = attachmentWorld(att, computeWorld(project.bones));
+  const m = att.mesh?.bind && att.mesh.weights ? toMat(att.mesh.bind.attachment) : attachmentWorld(att, computeWorld(project.bones));
   const n = att.mesh!.points.length / 2;
   return Array.from({ length: n }, (_, i) => apply(m, localVertex(att.mesh!.points, i, im)));
 }
@@ -263,7 +263,7 @@ function cutRamp(w: number): number {
  */
 export function autoWeights(project: Project, att: Attachment, boneIds: readonly string[], maxInfluences = 2): VertexWeights[] {
   if (!boneIds.length) throw new Error('Auto weights needs at least one bone.');
-  const world = computeWorld(project.bones);
+  const world = bindWorld(att, computeWorld(project.bones));
   const segs = boneIds.map((id) => {
     const b = project.bones.find((x) => x.id === id)!;
     const m = world.get(id)!;
@@ -294,10 +294,10 @@ export function autoWeights(project: Project, att: Attachment, boneIds: readonly
 export function vertexJacobian(att: Attachment, i: number, world: ReadonlyMap<string, Mat>, setupWorld: ReadonlyMap<string, Mat>): Mat {
   const mesh = att.mesh!;
   if (!mesh.weights) return { ...attachmentWorld(att, world), tx: 0, ty: 0 };
-  const rest = attachmentWorld(att, setupWorld);
+  const { rest, bone: bindOf } = bindFrame(att, setupWorld);
   let a = 0, b = 0, c = 0, d = 0;
   for (const inf of mesh.weights[i]) {
-    const now = world.get(inf.bone), bind = setupWorld.get(inf.bone);
+    const now = world.get(inf.bone), bind = bindOf(inf.bone);
     const s = now && bind ? multiply(now, invert(bind)) : { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
     const m = multiply(s, rest);
     a += m.a * inf.w;
@@ -348,6 +348,22 @@ export function setMesh(project: Project, attId: string, mesh: Mesh | null): voi
     const st = an.slots?.[attId];
     if (st?.deform) delete st.deform;
   }
+}
+
+/**
+ * Binds a weighted mesh in the pose given by `world` (bone world matrices, e.g. the setup
+ * pose or an animation frame): the image, placed by the attachment in that pose, is what
+ * the mesh shows undistorted whenever the bones return to it.
+ */
+export function bindMesh(att: Attachment, world: ReadonlyMap<string, Mat>): void {
+  const mesh = att.mesh;
+  if (!mesh?.weights) throw new Error(`${att.name} needs weights before it can be bound in a pose.`);
+  const bones: Record<string, Affine> = {};
+  for (const id of new Set(mesh.weights.flatMap((l) => l.map((x) => x.bone)))) {
+    const m = world.get(id);
+    if (m) bones[id] = toAffine(m);
+  }
+  mesh.bind = { attachment: toAffine(attachmentWorld(att, world)), bones };
 }
 
 /** Changes an attachment's setup image; a mesh keeps its shape relative to the image (points rescale). */

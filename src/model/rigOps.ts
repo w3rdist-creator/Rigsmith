@@ -100,8 +100,10 @@ function topAncestor(bones: readonly Bone[], id: string): string {
 /**
  * Adds a 1- or 2-bone IK ending at `endBoneId` and a new target bone at its tip. The
  * target hangs under the chain's top-most ancestor (outside the chain), or at the root.
+ * The bend side follows the setup elbow unless `bendPositive` is given (a straight chain
+ * has no side of its own).
  */
-export function addIk(project: Project, endBoneId: string, twoBone: boolean, ids: { ik: string; target: string }): IkConstraint | null {
+export function addIk(project: Project, endBoneId: string, twoBone: boolean, ids: { ik: string; target: string }, bendPositive?: boolean): IkConstraint | null {
   const end = project.bones.find((b) => b.id === endBoneId);
   if (!end) return null;
   const chain = twoBone ? (end.parentId ? [end.parentId, end.id] : null) : [end.id];
@@ -118,7 +120,7 @@ export function addIk(project: Project, endBoneId: string, twoBone: boolean, ids
   const target = makeBone(ids.target, name, parentId, local.x, local.y, 0, 0);
   target.color = '#ff6b9a';
   project.bones.push(target);
-  const ik: IkConstraint = { id: ids.ik, name: uniqueName(constraintNames(project), `${end.name}-ik`), bones: chain, target: target.id, mix: 1, bendPositive: bendOf(project, chain) };
+  const ik: IkConstraint = { id: ids.ik, name: uniqueName(constraintNames(project), `${end.name}-ik`), bones: chain, target: target.id, mix: 1, bendPositive: bendPositive ?? bendOf(project, chain) };
   (project.ik ??= []).push(ik);
   return ik;
 }

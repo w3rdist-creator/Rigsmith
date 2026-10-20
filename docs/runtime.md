@@ -30,7 +30,8 @@ rounded.
     "hidden": true,                                                        // v2, only when hidden at setup
     "mesh": { "uvs": [u0, v0, …], "triangles": [i0, i1, i2, …], "hull": 10,
               "weights": [[{ "bone": "m1", "w": 0.7 }, { "bone": "m2", "w": 0.3 }], …],  // weights v2
-              "alphas"?: [a0, a1, …] },                                                  // v3: per-vertex alpha 0..1
+              "alphas"?: [a0, a1, …],                                                    // v3: per-vertex alpha 0..1
+              "bind"?: { "attachment": [a, b, c, d, tx, ty], "bones": { "<bone>": [a, b, c, d, tx, ty] } } }, // v3 bind pose
     "blend"?: "additive" | "screen" | "multiply",                             // v3, absent = normal
     "color"?: "#rrggbbaa"                                                      // v3 tint, absent = white
   }],
@@ -64,7 +65,8 @@ Evaluation rules are those of the editor (`docs/architecture.md`): local pose fr
 first key) → IK in array order → path constraints in array order → transform constraints
 in array order (v3) → world matrices →
 slot state, skin, draw order → mesh vertices
-`Σ wᵢ · Wᵢ(now) · Wᵢ(setup)⁻¹ · A(setup) · (p + deform)`. Skins: an entry without `from`
+`Σ wᵢ · Wᵢ(now) · Wᵢ(bind)⁻¹ · A(bind) · (p + deform)`, where the bind terms are the mesh's
+`bind` matrices when present (v3) and the setup pose otherwise. Skins: an entry without `from`
 replaces the attachment's setup image wherever it shows; with `from` it replaces that keyed
 image. Mixes: `docs/architecture.md` → Mixing.
 
@@ -73,7 +75,7 @@ Baked data lets a consumer play without an interpolator: `frames` samples at `i 
 Bakes ignore skins and mixes (evaluate from keys for those).
 
 **Version 3** is version 2 plus `transformConstraints`, `angle` constraint keys, bone
-`inherit` flags, attachment `blend` and `color`, slot `color` keys and mesh `alphas`
+`inherit` flags, attachment `blend` and `color`, slot `color` keys, mesh `alphas` and mesh `bind`
 (rules: `docs/architecture.md` → Transform constraints, Inherit flags, Blend, tint and
 vertex alpha). It is written only when the rig uses them; a v2-only consumer can still
 play a v3 file's `baked` data, which already includes the constraints (but must draw the

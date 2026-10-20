@@ -11,7 +11,7 @@ import { safeName } from '../src/render/sequence.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
 import type { TransformRequest, VertexAlphaRequest, WeightRequest } from './lib/rigsmith-api.ts';
-import { ApiError, EXIT, addImage, addTransform, setInherit, setTint, setVertexAlpha, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
+import { ApiError, EXIT, addImage, addIkNamed, addTransform, setBind, setInherit, setTint, setVertexAlpha, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
 
 const USAGE = `rigsmith <command> [options]
   validate <project.rig.json>
@@ -46,7 +46,11 @@ const USAGE = `rigsmith <command> [options]
   vertex-alpha <project> --att <attachment> --out <project> (one of:)
           --radial <cx>,<cy>,<inner>,<outer> [--invert]   (image px: 1 inside inner, 0 beyond outer)
           --set <vertex>=<alpha>[,<vertex>=<alpha>…]
-          --clear`;
+          --clear
+  bind <project> --att <attachment> [--anim <name> --at <seconds> | --clear] --out <project>
+          (bind a weighted mesh at the setup pose, or at an animation frame's pose; --clear: bind at setup)
+  ik <project> --bone <bone> [--one-bone] [--bend positive|negative] --out <project>
+          (2-bone IK ending at <bone>, target at its tip; the bend side follows the setup elbow unless given)`;
 
 type Args = { _: string[]; flags: Record<string, string[]> };
 
@@ -303,6 +307,23 @@ async function main(): Promise<Record<string, unknown>> {
       const res = setVertexAlpha(p, need('att'), req);
       writeProject(out, p);
       return { outputs: [out], attachment: flag('att'), mode: req.kind, ...res };
+    }
+    case 'bind': {
+      const out = need('out');
+      if (flag('clear') !== undefined && flag('anim') !== undefined) usage('bind: --clear and --anim exclude each other.');
+      if ((flag('anim') === undefined) !== (flag('at') === undefined)) usage('bind: --anim and --at go together.');
+      const res = setBind(p, need('att'), { clear: flag('clear') !== undefined, anim: flag('anim'), at: num('at') });
+      writeProject(out, p);
+      return { outputs: [out], attachment: flag('att'), ...res };
+    }
+    case 'ik': {
+      const out = need('out');
+      const bend = flag('bend');
+      if (bend !== undefined && bend !== 'positive' && bend !== 'negative') usage(`--bend must be positive or negative (got “${bend}”).`);
+      if (bend !== undefined && flag('one-bone') !== undefined) usage('--bend applies to 2-bone IK only.');
+      const res = addIkNamed(p, need('bone'), { oneBone: flag('one-bone') !== undefined, bend: bend as 'positive' | 'negative' | undefined });
+      writeProject(out, p);
+      return { outputs: [out], ik: res };
     }
     case 'constrain': {
       const out = need('out');

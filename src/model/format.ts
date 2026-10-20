@@ -1,6 +1,7 @@
 import { colorValueProblem, formatColor, isColor, isWhite, parseColor, setupColor } from './color.ts';
 import { findCycles, hasInheritFlags, isAncestorOrSelf } from './skeleton.ts';
 import type {
+  Affine,
   Animation,
   Attachment,
   Bone,
@@ -76,6 +77,7 @@ export function v3Features(p: Project): string[] {
     if (a.blend && a.blend !== 'normal') f.add('blend modes');
     if (a.color && !isWhite(setupColor(a))) f.add('tint colours');
     if (a.mesh?.alphas) f.add('vertex alpha');
+    if (a.mesh?.bind) f.add('mesh bind poses');
   }
   for (const an of p.animations) {
     if (an.constraints && Object.values(an.constraints).some((c) => c.angle?.length)) f.add('constraint angle keys');
@@ -448,6 +450,7 @@ export function validateProject(raw: unknown): ParseResult {
       const mesh = readMesh(c, a.mesh, `${w}.mesh`, boneIds, imageDims.get(imageId));
       if (mesh) {
         if (mesh.alphas) v3only('vertex alpha', `${w}.mesh`);
+        if (mesh.bind) v3only('bind', `${w}.mesh`);
         att.mesh = mesh;
         meshVerts.set(id, mesh.points.length / 2);
       }
@@ -867,6 +870,29 @@ function readMesh(c: Checker, raw: unknown, w: string, boneIds: Set<string>, dim
       weights.push(list);
     });
     mesh.weights = weights;
+  }
+  if (raw.bind !== undefined) {
+    const bw = `${w}.bind`;
+    const affine = (v: unknown, where: string): Affine | null => {
+      const m = c.numbers(v, where);
+      if (m.length !== 6 || Math.abs(m[0] * m[3] - m[1] * m[2]) < 1e-12) {
+        c.fail(`${where} must be an invertible matrix [a, b, c, d, tx, ty]`);
+        return null;
+      }
+      return m as Affine;
+    };
+    if (!isObj(raw.bind) || !isObj(raw.bind.bones)) c.fail(`${bw} must be { attachment, bones }`);
+    else if (!mesh.weights) c.fail(`${bw} needs weights`);
+    else {
+      const att = affine(raw.bind.attachment, `${bw}.attachment`);
+      const bones: Record<string, Affine> = {};
+      for (const [id, m] of Object.entries(raw.bind.bones)) {
+        if (!boneIds.has(id)) c.fail(`${bw}.bones references missing bone "${id}"`);
+        const a = affine(m, `${bw}.bones["${id}"]`);
+        if (a) bones[id] = a;
+      }
+      if (att) mesh.bind = { attachment: att, bones };
+    }
   }
   if (raw.alphas !== undefined) {
     const alphas = c.numbers(raw.alphas, `${w}.alphas`);

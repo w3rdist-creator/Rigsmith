@@ -82,6 +82,21 @@ export interface Mesh {
    * Absent = every vertex 1.
    */
   alphas?: number[];
+  /**
+   * v3: the pose the weighted mesh is bound in (absent = the setup pose). World matrices
+   * of the attachment and of the weight bones at bind time; skinning then deforms from
+   * this pose instead of the setup pose, so the setup pose can differ from the pose the
+   * art was drawn in (a tail drawn straight can rest curled). Bones without an entry
+   * bind at the setup pose. Only with weights.
+   */
+  bind?: MeshBind;
+}
+
+/** v3: affine matrix [a, b, c, d, tx, ty] (x' = a·x + c·y + tx, y' = b·x + d·y + ty). */
+export type Affine = [number, number, number, number, number, number];
+export interface MeshBind {
+  attachment: Affine;
+  bones: Record<string, Affine>;
 }
 
 /** v3: how an attachment composites onto what is behind it. */

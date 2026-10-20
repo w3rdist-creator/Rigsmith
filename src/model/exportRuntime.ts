@@ -5,7 +5,7 @@
 // needs to evaluate from keys alone: curves, slot / draw-order / constraint keys, IK and
 // path constraints, mesh weights, skins and mix rules. Version 3 adds transform
 // constraints and their angle keys, bone inherit flags, blend modes, tint colours and
-// colour keys, and mesh vertex alpha; it is written only when the rig uses them, so a
+// colour keys, mesh vertex alpha and mesh bind poses; it is written only when the rig uses them, so a
 // version-2 player keeps reading every other rig. Images are referenced by name (the
 // atlas region name, or the file name).
 import { frameCount } from './animation.ts';
@@ -40,7 +40,7 @@ export interface RuntimeExport {
     /** v2: hidden in the setup pose. */
     hidden?: boolean;
     /** Mesh attachments: texture coordinates (setup-image px), triangles and outline length; v2: per-vertex weights by bone name. */
-    mesh?: { uvs: number[]; triangles: number[]; hull: number; weights?: { bone: string; w: number }[][]; alphas?: number[] };
+    mesh?: { uvs: number[]; triangles: number[]; hull: number; weights?: { bone: string; w: number }[][]; alphas?: number[]; bind?: { attachment: number[]; bones: Record<string, number[]> } };
     /** v3: absent = normal. */
     blend?: 'additive' | 'screen' | 'multiply';
     /** v3: tint `#rrggbbaa`; absent = white. */
@@ -164,7 +164,7 @@ export function exportRuntime(project: Project): RuntimeExport {
         scaleY: a.scaleY,
         opacity: a.opacity,
         ...(a.hidden ? { hidden: true } : {}),
-        ...(a.mesh ? { mesh: { uvs: a.mesh.points.slice(), triangles: a.mesh.triangles.slice(), hull: a.mesh.hull, ...(a.mesh.weights ? { weights: a.mesh.weights.map((l) => l.map((x) => ({ bone: bone(x.bone), w: x.w }))) } : {}), ...(a.mesh.alphas ? { alphas: a.mesh.alphas.slice() } : {}) } } : {}),
+        ...(a.mesh ? { mesh: { uvs: a.mesh.points.slice(), triangles: a.mesh.triangles.slice(), hull: a.mesh.hull, ...(a.mesh.weights ? { weights: a.mesh.weights.map((l) => l.map((x) => ({ bone: bone(x.bone), w: x.w }))) } : {}), ...(a.mesh.alphas ? { alphas: a.mesh.alphas.slice() } : {}), ...(a.mesh.bind ? { bind: { attachment: a.mesh.bind.attachment.slice(), bones: Object.fromEntries(Object.entries(a.mesh.bind.bones).map(([id, m]) => [bone(id), m.slice()])) } } : {}) } } : {}),
         ...(a.blend && a.blend !== 'normal' ? { blend: a.blend } : {}),
         ...(a.color && !isWhite(setupColor(a)) ? { color: formatColor(setupColor(a)) } : {}),
       };

@@ -12,6 +12,7 @@
 // (wrist turns with the hand) and the top to the body bone (the shoulder stretches like
 // skin instead of pivoting on a pin).
 import { angleOf, apply, DEG } from './math.ts';
+import { bindWorld } from './mesh.ts';
 import { normalizeWeights, setupVertices } from './meshOps.ts';
 import { computeWorld } from './skeleton.ts';
 import type { Attachment, Project, VertexWeights } from './types.ts';
@@ -71,7 +72,7 @@ export function limbWeights(project: Project, att: Attachment, spec: LimbSpec): 
   const helper = spec.helper ? bone(project, spec.helper) : null;
   const end = spec.end ? bone(project, spec.end.bone) : null;
   const root = spec.root ? bone(project, spec.root.bone) : null;
-  const m = computeWorld(project.bones).get(up.id)!;
+  const m = bindWorld(att, computeWorld(project.bones)).get(up.id)!;
   const R = apply(m, { x: 0, y: 0 });
   const a = angleOf(m) * DEG;
   const dir = { x: Math.cos(a), y: Math.sin(a) };
