@@ -10,8 +10,8 @@ import type { Project, ProjectFrame } from '../src/model/types.ts';
 import { safeName } from '../src/render/sequence.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
-import type { TransformRequest, WeightRequest } from './lib/rigsmith-api.ts';
-import { ApiError, EXIT, addImage, addTransform, setInherit, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
+import type { TransformRequest, VertexAlphaRequest, WeightRequest } from './lib/rigsmith-api.ts';
+import { ApiError, EXIT, addImage, addTransform, setInherit, setTint, setVertexAlpha, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
 
 const USAGE = `rigsmith <command> [options]
   validate <project.rig.json>
@@ -40,7 +40,13 @@ const USAGE = `rigsmith <command> [options]
   constrain <project> --bone <bone> --out <project> [--name <n>] [--mix 1] (one of:)
           --copy-rotation <source> [--factor 0.5] [--offset 0] [--mitre <k>:<max>]
           --aim <degrees|hold> [--relative-to <bone>]
-  inherit <project> --bone <bone> [--rotation on|off] [--scale on|off] [--reflection on|off] --out <project>`;
+  inherit <project> --bone <bone> [--rotation on|off] [--scale on|off] [--reflection on|off] --out <project>
+  tint <project> --att <attachment> [--blend normal|additive|screen|multiply] [--color #rrggbb[aa]]
+          [--anim <name> --at <seconds>]  (key the colour instead of setting the setup tint) --out <project>
+  vertex-alpha <project> --att <attachment> --out <project> (one of:)
+          --radial <cx>,<cy>,<inner>,<outer> [--invert]   (image px: 1 inside inner, 0 beyond outer)
+          --set <vertex>=<alpha>[,<vertex>=<alpha>…]
+          --clear`;
 
 type Args = { _: string[]; flags: Record<string, string[]> };
 
@@ -270,6 +276,33 @@ async function main(): Promise<Record<string, unknown>> {
       const inherit = setInherit(p, need('bone'), change);
       writeProject(out, p);
       return { outputs: [out], bone: flag('bone'), inherit };
+    }
+    case 'tint': {
+      const out = need('out');
+      if (flag('blend') === undefined && flag('color') === undefined) usage('tint: give --blend and/or --color.');
+      if ((flag('anim') === undefined) !== (flag('at') === undefined)) usage('tint: --anim and --at go together.');
+      const at = num('at');
+      const res = setTint(p, need('att'), { blend: flag('blend'), color: flag('color'), ...(flag('anim') !== undefined ? { key: { anim: need('anim'), time: at! } } : {}) });
+      writeProject(out, p);
+      return { outputs: [out], attachment: flag('att'), ...res };
+    }
+    case 'vertex-alpha': {
+      const out = need('out');
+      const modes = ['radial', 'set', 'clear'].filter((k) => flag(k) !== undefined);
+      if (modes.length !== 1) usage('vertex-alpha: give exactly one of --radial, --set or --clear.');
+      let req: VertexAlphaRequest;
+      if (modes[0] === 'radial') {
+        const v = need('radial').split(',').map(Number);
+        if (v.length !== 4 || !v.every(Number.isFinite)) usage('--radial expects <cx>,<cy>,<inner>,<outer>.');
+        req = { kind: 'radial', cx: v[0], cy: v[1], r0: v[2], r1: v[3], invert: flag('invert') !== undefined };
+      } else if (modes[0] === 'set') {
+        const values = need('set').split(',').map((pair) => pair.split('=').map(Number) as [number, number]);
+        if (!values.every((x) => x.length === 2 && x.every(Number.isFinite))) usage('--set expects <vertex>=<alpha>[,…].');
+        req = { kind: 'set', values };
+      } else req = { kind: 'clear' };
+      const res = setVertexAlpha(p, need('att'), req);
+      writeProject(out, p);
+      return { outputs: [out], attachment: flag('att'), mode: req.kind, ...res };
     }
     case 'constrain': {
       const out = need('out');

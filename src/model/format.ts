@@ -1,8 +1,10 @@
+import { colorValueProblem, formatColor, isColor, isWhite, parseColor, setupColor } from './color.ts';
 import { findCycles, hasInheritFlags, isAncestorOrSelf } from './skeleton.ts';
 import type {
   Animation,
   Attachment,
   Bone,
+  BlendMode,
   BoneTrack,
   ClipSequence,
   ConstraintTrack,
@@ -28,7 +30,7 @@ import type {
   TransformConstraint,
   VertexWeights,
 } from './types.ts';
-import { CHANNEL_ARITY, CHANNELS, FORMAT_ID, FORMAT_VERSION, FRAME_MAX_SIDE, INTERPS, SEQUENCE_MAX_REPEAT } from './types.ts';
+import { BLEND_MODES, CHANNEL_ARITY, CHANNELS, FORMAT_ID, FORMAT_VERSION, FRAME_MAX_SIDE, INTERPS, SEQUENCE_MAX_REPEAT } from './types.ts';
 
 export type ParseResult = { ok: true; project: Project; warnings: string[] } | { ok: false; errors: string[] };
 
@@ -70,7 +72,15 @@ export function v3Features(p: Project): string[] {
   const f = new Set<string>();
   if (p.bones.some(hasInheritFlags)) f.add('bone inherit flags');
   if (p.transformConstraints?.length) f.add('transform constraints');
-  for (const an of p.animations) if (an.constraints && Object.values(an.constraints).some((c) => c.angle?.length)) f.add('constraint angle keys');
+  for (const a of p.attachments) {
+    if (a.blend && a.blend !== 'normal') f.add('blend modes');
+    if (a.color && !isWhite(setupColor(a))) f.add('tint colours');
+    if (a.mesh?.alphas) f.add('vertex alpha');
+  }
+  for (const an of p.animations) {
+    if (an.constraints && Object.values(an.constraints).some((c) => c.angle?.length)) f.add('constraint angle keys');
+    if (an.slots && Object.values(an.slots).some((s) => s.color?.length)) f.add('colour keys');
+  }
   return [...f];
 }
 
@@ -97,6 +107,7 @@ function writeAnimation(an: Animation): Animation {
     if (s.opacity?.length) t.opacity = s.opacity.map(writeKey);
     if (s.image?.length) t.image = s.image;
     if (s.deform?.length) t.deform = s.deform.map(writeKey);
+    if (s.color?.length) t.color = s.color.map(writeKey);
     if (Object.keys(t).length) slots[id] = t;
   }
   if (Object.keys(slots).length) out.slots = slots;
@@ -126,10 +137,15 @@ export function toFileObject(project: Project): Project {
     }),
     images: project.images,
     attachments: project.attachments.map((a) => {
-      const { hidden, mesh, ...base } = a;
+      const { hidden, mesh, blend, color, ...base } = a;
       const o: Attachment = { ...base };
       if (hidden) o.hidden = true;
-      if (mesh) o.mesh = mesh;
+      if (mesh) {
+        const { alphas, ...m } = mesh;
+        o.mesh = alphas ? { ...m, alphas } : m;
+      }
+      if (blend && blend !== 'normal') o.blend = blend;
+      if (color && !isWhite(setupColor(a))) o.color = formatColor(setupColor(a));
       return o;
     }),
     animations: project.animations.map(writeAnimation),
@@ -431,9 +447,20 @@ export function validateProject(raw: unknown): ParseResult {
       v2only('mesh', w);
       const mesh = readMesh(c, a.mesh, `${w}.mesh`, boneIds, imageDims.get(imageId));
       if (mesh) {
+        if (mesh.alphas) v3only('vertex alpha', `${w}.mesh`);
         att.mesh = mesh;
         meshVerts.set(id, mesh.points.length / 2);
       }
+    }
+    if (a.blend !== undefined) {
+      v3only('blend', w);
+      if (typeof a.blend !== 'string' || !(BLEND_MODES as readonly string[]).includes(a.blend)) c.fail(`${w}.blend must be one of ${BLEND_MODES.join(', ')}`);
+      else if (a.blend !== 'normal') att.blend = a.blend as BlendMode;
+    }
+    if (a.color !== undefined) {
+      v3only('color', w);
+      if (!isColor(a.color)) c.fail(`${w}.color must be #rrggbb or #rrggbbaa`);
+      else if (!isWhite(parseColor(a.color)!)) att.color = formatColor(parseColor(a.color)!);
     }
     attachments.push(att);
   });
@@ -629,6 +656,10 @@ export function validateProject(raw: unknown): ParseResult {
             const n = meshVerts.get(attId);
             if (n === undefined) c.fail(`${sw}.deform needs the attachment to have a mesh`);
             st.deform = readKeys(c, sr.deform, `${sw}.deform`, (v) => (n !== undefined && v.length === 2 * n ? null : `must hold ${2 * (n ?? 0)} offsets (2 per mesh vertex)`), version);
+          }
+          if (sr.color !== undefined) {
+            v3only('colour keys', sw);
+            st.color = readKeys(c, sr.color, `${sw}.color`, colorValueProblem, version);
           }
           slots[attId] = st;
         }
@@ -836,6 +867,11 @@ function readMesh(c: Checker, raw: unknown, w: string, boneIds: Set<string>, dim
       weights.push(list);
     });
     mesh.weights = weights;
+  }
+  if (raw.alphas !== undefined) {
+    const alphas = c.numbers(raw.alphas, `${w}.alphas`);
+    if (alphas.length !== n || !alphas.every((v) => v >= 0 && v <= 1)) c.fail(`${w}.alphas must hold one number from 0 to 1 per vertex`);
+    else mesh.alphas = alphas;
   }
   return mesh;
 }

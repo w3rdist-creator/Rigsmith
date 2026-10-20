@@ -136,7 +136,7 @@ export function usedRefs(src: Project, animIds: readonly string[]): UsedRefs {
   for (const an of src.animations.filter((a) => animIds.includes(a.id))) {
     for (const [id, tr] of Object.entries(an.tracks)) add(u.bones, id, tr.translate.length + tr.rotate.length + tr.scale.length);
     for (const [id, st] of Object.entries(an.slots ?? {})) {
-      add(u.attachments, id, (st.visible?.length ?? 0) + (st.opacity?.length ?? 0) + (st.image?.length ?? 0) + (st.deform?.length ?? 0));
+      add(u.attachments, id, (st.visible?.length ?? 0) + (st.opacity?.length ?? 0) + (st.image?.length ?? 0) + (st.deform?.length ?? 0) + (st.color?.length ?? 0));
       for (const k of st.image ?? []) add(u.images, k.imageId, 1);
     }
     for (const k of an.drawOrder ?? []) for (const id of k.order) add(u.attachments, id, 0, true);
@@ -281,7 +281,7 @@ export function importAnimations(dst: Project, src: Project, animIds: readonly s
         if (kept.length) copy.deform = kept;
         else delete copy.deform;
       }
-      const n = (copy.visible?.length ?? 0) + (copy.opacity?.length ?? 0) + (copy.image?.length ?? 0) + (copy.deform?.length ?? 0);
+      const n = (copy.visible?.length ?? 0) + (copy.opacity?.length ?? 0) + (copy.image?.length ?? 0) + (copy.deform?.length ?? 0) + (copy.color?.length ?? 0);
       if (!n) continue;
       (out.slots ??= {})[t] = copy;
       report.keys += n;

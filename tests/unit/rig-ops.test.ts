@@ -153,7 +153,7 @@ describe('slot, draw-order and constraint ops', () => {
     near(f(0.25).opacity, 0.75);
     assert.equal(f(0.1).image!.id, 'i1');
     assert.equal(f(0.2).image!.id, 'i2');
-    assert.deepEqual(slotValues(p.attachments[0], an, 0.6), { visible: false, opacity: 0.4, imageId: 'i2' });
+    assert.deepEqual(slotValues(p.attachments[0], an, 0.6), { visible: false, opacity: 0.4, color: [1, 1, 1, 1], imageId: 'i2' });
   });
 
   it('draw-order keys swap neighbours from the evaluated order and stay valid after edits', () => {

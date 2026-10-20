@@ -134,10 +134,10 @@ are still dropped without a warning.
 Evaluation order (`src/model/evaluate.ts`, shared by the viewport, onion skin, sequence
 export and runtime export): sample local pose → IK constraints (array order) → path
 constraints (array order) → transform constraints (array order, v3) → world matrices → per-attachment state (visibility, opacity,
-image, skin, draw order) → mesh vertices.
+tint, image, skin, draw order) → mesh vertices.
 
 - **Stepped slot channels** (visibility, image, draw order) show the setup value before
-  their first key; interpolated channels (bone channels, opacity) hold their first key.
+  their first key; interpolated channels (bone channels, opacity, tint) hold their first key.
 - **Two-bone IK**: solved in the chain parent's local space, where any parent scale
   (non-uniform or mirrored) is undone. There the shoulder→tip length depends only on the
   elbow angle, so the elbow angle solves `|S1·(e + k·(cos r2, sin r2))| = |target − shoulder|`
@@ -182,6 +182,22 @@ image, skin, draw order) → mesh vertices.
   setup pose (rotation: the offset absorbs the current bend; aim: holds the current
   angle). Files and runtime exports use version 3 only when a rig has transform
   constraints or angle keys, so every other rig stays readable by v2 consumers.
+- **Blend, tint and vertex alpha** (v3, `Attachment.blend`, `Attachment.color`, slot
+  `color` keys, `Mesh.alphas`): `blend` is `normal` (absent), `additive`, `screen` or
+  `multiply` and maps to the canvas operations `source-over`, `lighter`, `screen` and
+  `multiply` (W3C compositing; additive clamps). The tint `#rrggbbaa` (absent = white)
+  multiplies every texel's rgb and multiplies `aa` into the opacity; `color` keys hold
+  `[r, g, b, a]` in 0..1, interpolate like opacity and blend through mixes. `alphas` holds
+  one alpha per mesh vertex, interpolated linearly across each triangle and multiplied into
+  the texture. Rendering (`src/render/draw.ts`): an attachment with neither tint nor vertex
+  alpha draws as before with the blend's composite operation (pixel-identical for normal);
+  otherwise it is drawn at full opacity into an offscreen layer, the tint multiplies the
+  layer's unpremultiplied pixels exactly, the vertex alphas are applied as a mask (each
+  triangle filled with the linear gradient that equals the plane through its three alphas,
+  clipped like the mesh itself so shared edges sum to the right coverage), and the layer
+  is composited once with the opacity and blend. Exports, the player and the CLI share
+  this path. Lottie refuses blend modes, tints and colour keys. Written only when used
+  (v3); a white tint and the normal blend are not stored.
 - **Integrity**: every undoable edit runs `repairReferences` (same undo step) so deleting
   bones/attachments/images drops or fixes dependent constraints, slot keys, skin entries
   and draw-order keys, and the project always re-opens.

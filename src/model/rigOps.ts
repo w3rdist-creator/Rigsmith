@@ -1,6 +1,8 @@
 // Pure rigging operations behind the phase-2 controls: slot (attachment) keys,
 // draw-order keys, IK and path constraints, cutout placement and pivot editing.
 import { findKeyIndex, insertSorted, sampleKeys, setKey, snapToFrame } from './animation.ts';
+import type { Rgba } from './color.ts';
+import { clamp01, setupColor } from './color.ts';
 import { localRotationFor } from './constraints.ts';
 import { angleOf } from './math.ts';
 import type { Mat, Vec } from './math.ts';
@@ -28,6 +30,12 @@ export function keySlotScalar(anim: Animation, attId: string, ch: ScalarSlotChan
   else setKey(keys, t, [Math.min(1, Math.max(0, value))]);
 }
 
+/** Keys the tint [r, g, b, a] (each clamped to 0..1) at time t. */
+export function keySlotColor(anim: Animation, attId: string, time: number, value: readonly number[]): void {
+  const t = snapToFrame(time, anim.fps);
+  setKey((slotTrack(anim, attId).color ??= []), t, value.slice(0, 4).map(clamp01));
+}
+
 export function keySlotImage(anim: Animation, attId: string, time: number, imageId: string): void {
   const t = snapToFrame(time, anim.fps);
   const keys = (slotTrack(anim, attId).image ??= []);
@@ -37,11 +45,12 @@ export function keySlotImage(anim: Animation, attId: string, time: number, image
 }
 
 /** Current (sampled) slot values, for keying "the value shown now". */
-export function slotValues(att: Attachment, anim: Animation | null, time: number): { visible: boolean; opacity: number; imageId: string } {
+export function slotValues(att: Attachment, anim: Animation | null, time: number): { visible: boolean; opacity: number; color: Rgba; imageId: string } {
   const st = anim?.slots?.[att.id];
   return {
     visible: (steppedAt(st?.visible, time)?.value[0] ?? (att.hidden ? 0 : 1)) >= 0.5,
     opacity: st?.opacity?.length ? sampleKeys(st.opacity, time, [att.opacity])[0] : att.opacity,
+    color: (st?.color?.length ? sampleKeys(st.color, time, setupColor(att)) : setupColor(att)).map(clamp01) as Rgba,
     imageId: steppedAt(st?.image, time)?.imageId ?? att.imageId,
   };
 }

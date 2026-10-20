@@ -5,7 +5,7 @@
 // blend is still running (an interruption) is continuous: the earlier blend keeps
 // advancing and is the "from" pose of the new one.
 //
-// Per channel (translate / rotate / scale of a bone, opacity / deform of a slot):
+// Per channel (translate / rotate / scale of a bone, opacity / color / deform of a slot):
 //   P_k = P_{k−1} + w_k · (value_k − P_{k−1}),  w_k = clamp((T − start_k) / mix_k, 0, 1)
 // rotation takes the shortest way round. Constraint mix and path position blend along
 // the chain the same way (an entry that does not key them supplies the constraint's
@@ -22,6 +22,8 @@
 // whatever the outgoing pose shows for it (the setup value if nothing before keyed it),
 // under either policy.
 import { playbackTime, sampleKeys } from './animation.ts';
+import type { Rgba } from './color.ts';
+import { clamp01, setupColor } from './color.ts';
 import type { ConstraintValues } from './constraints.ts';
 import { applyConstraints } from './constraints.ts';
 import type { Frame } from './evaluate.ts';
@@ -176,7 +178,7 @@ export function mixConstraintValues(project: Project, plan: MixPlan, T: number):
 
 /**
  * Full evaluated frame of a mix plan at global time T: blended pose → constraints →
- * world → attachments (discrete state from the dominant entry; opacity and mesh deform
+ * world → attachments (discrete state from the dominant entry; opacity, tint and mesh deform
  * blended along the chain).
  */
 export function evaluateMix(project: Project, plan: MixPlan, T: number, opts: { skinId?: string | null } = {}): Frame {
@@ -192,6 +194,7 @@ export function evaluateMix(project: Project, plan: MixPlan, T: number, opts: { 
   for (const f of frame.attachments) {
     const att = f.att;
     let opacity = att.opacity;
+    let color: number[] = setupColor(att);
     const n = att.mesh?.points.length ?? 0;
     let deform: number[] | null = n ? new Array(n).fill(0) : null;
     let deformed = false;
@@ -203,6 +206,8 @@ export function evaluateMix(project: Project, plan: MixPlan, T: number, opts: { 
       const slot = anim.slots?.[att.id];
       const ok = slot?.opacity?.length ? sampleKeys(slot.opacity, t, [att.opacity])[0] : plan.missing === 'setup' ? att.opacity : null;
       if (ok !== null) opacity += w * (ok - opacity);
+      const ck = slot?.color?.length ? sampleKeys(slot.color, t, setupColor(att)) : plan.missing === 'setup' ? setupColor(att) : null;
+      if (ck) color = color.map((v, k) => v + w * (ck[k] - v));
       if (deform) {
         const dk = slot?.deform?.length ? sampleKeys(slot.deform, t, deform) : plan.missing === 'setup' ? new Array(n).fill(0) : null;
         if (dk) {
@@ -212,6 +217,7 @@ export function evaluateMix(project: Project, plan: MixPlan, T: number, opts: { 
       }
     });
     f.opacity = Math.min(1, Math.max(0, opacity));
+    f.color = color.map(clamp01) as Rgba;
     if (deformed && f.vertices && f.image) {
       const setupIm = project.images.find((im) => im.id === att.imageId) ?? f.image;
       f.vertices = meshWorldVertices(att, setupIm, frame.world, setupWorld, deform!);

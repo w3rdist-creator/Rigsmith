@@ -16,6 +16,7 @@
 // parented to their bone with p = attachment offset and a = image centre. Lottie draws
 // layer 0 on top, so layers are written front to back. Position is split (p.s = true)
 // so x and y ease independently exactly like Rigsmith's per-component interpolation.
+import { isWhite, setupColor } from './color.ts';
 import { lastExportFrame } from './sequence.ts';
 import { frameWarnings, requestGeometry } from './sequence.ts';
 import type { Bounds } from './evaluate.ts';
@@ -44,7 +45,10 @@ export function lottieDiagnostics(project: Project, anim: Animation): LottieDiag
   for (const k of project.transformConstraints ?? []) err('transform constraint', k.name, `Transform constraint “${k.name}” is solved at runtime; Lottie has no equivalent. Not exported.`);
   for (const k of project.pathConstraints ?? []) err('path constraint', k.name, `Path constraint “${k.name}” has no Lottie equivalent. Not exported.`);
   for (const a of project.attachments) if (a.mesh) err('mesh', a.name, `“${a.name}” is a mesh; Lottie image layers cannot deform. Not exported.`);
+  for (const a of project.attachments) if (a.blend && a.blend !== 'normal') err('blend mode', a.name, `“${a.name}” uses the ${a.blend} blend mode; this exporter writes normal layers only. Not exported.`);
+  for (const a of project.attachments) if (a.color && !isWhite(setupColor(a))) err('tint', a.name, `“${a.name}” is tinted; Lottie image layers have no tint in this subset. Not exported.`);
   if (anim.drawOrder?.length) err('draw-order keys', anim.name, `“${anim.name}” keys the draw order; Lottie layer order is fixed. Not exported.`);
+  for (const [id, st] of Object.entries(anim.slots ?? {})) if (st.color?.length) err('colour keys', project.attachments.find((a) => a.id === id)?.name ?? id, 'Colour keys have no equivalent in this Lottie subset. Not exported.');
   for (const [id, st] of Object.entries(anim.slots ?? {})) if (st.deform?.length) err('deform keys', project.attachments.find((a) => a.id === id)?.name ?? id, 'Deform keys need meshes. Not exported.');
   if (anim.constraints && Object.keys(anim.constraints).length) err('constraint keys', anim.name, 'Constraint keys have no Lottie equivalent.');
   for (const im of project.images) if (im.mime !== 'image/png') err('image format', im.name, `${im.name} is ${im.mime}; only PNG assets are embedded.`);

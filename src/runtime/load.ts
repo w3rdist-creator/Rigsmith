@@ -86,8 +86,10 @@ function convertRuntime(raw: unknown): Project {
     opacity: a.opacity,
     ...(a.hidden ? { hidden: true } : {}),
     ...(a.mesh
-      ? { mesh: { points: copy(a.mesh.uvs), triangles: copy(a.mesh.triangles), hull: a.mesh.hull, ...(a.mesh.weights ? { weights: a.mesh.weights.map((l) => (Array.isArray(l) ? l.map((x) => ({ bone: need(boneNames, x.bone, 'weight bone'), w: x.w })) : l)) } : {}) } }
+      ? { mesh: { points: copy(a.mesh.uvs), triangles: copy(a.mesh.triangles), hull: a.mesh.hull, ...(a.mesh.weights ? { weights: a.mesh.weights.map((l) => (Array.isArray(l) ? l.map((x) => ({ bone: need(boneNames, x.bone, 'weight bone'), w: x.w })) : l)) } : {}), ...(a.mesh.alphas ? { alphas: copy(a.mesh.alphas) } : {}) } }
       : {}),
+    ...(a.blend ? { blend: a.blend } : {}),
+    ...(a.color ? { color: a.color } : {}),
   }));
   const attNames = new Set(attachments.map((a) => a.id));
   const animations: Animation[] = rt.animations.map((an) => {
@@ -100,6 +102,7 @@ function convertRuntime(raw: unknown): Project {
         ...(st.opacity ? { opacity: keys(st.opacity) } : {}),
         ...(st.image ? { image: st.image.map((k) => ({ time: k.time, imageId: need(imageNames, k.image, 'image') })) } : {}),
         ...(st.deform ? { deform: keys(st.deform) } : {}),
+        ...(st.color ? { color: keys(st.color) } : {}),
       };
     }
     const constraints: NonNullable<Animation['constraints']> = {};

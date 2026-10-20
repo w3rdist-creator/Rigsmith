@@ -7,6 +7,7 @@ import { autoWeights, deformAt, keyDeform, meshSummary, moveMeshPoint, normalize
 import type { PaintMode } from '../model/meshOps.ts';
 import { limbWeights, mirrorWeights, smoothWeights, suffixBoneMap } from '../model/limbWeights.ts';
 import { isAncestorOrSelf } from '../model/skeleton.ts';
+import { radialAlphas, withVertexAlpha } from '../model/color.ts';
 import type { Attachment } from '../model/types.ts';
 import type { App } from './app.ts';
 import { h, numberField } from './dom.ts';
@@ -78,7 +79,7 @@ export function meshSection(app: App, a: Attachment): HTMLElement[] {
         h('button', { class: 'mini', 'data-testid': 'weights-rigid', disabled: !mesh.weights, title: 'Remove weights: the mesh follows its attachment’s bone rigidly', onclick: () => setMeshAtt('Make mesh rigid', (x) => void delete x.mesh!.weights) }, 'Make rigid'),
       ),
     );
-    out.push(...limbSection(app, a, setMeshAtt));
+    out.push(...limbSection(app, a, setMeshAtt), ...alphaSection(app, a, setMeshAtt));
     if (ed.meshTool === 'weights') {
       const b = ed.brush;
       const opts = p.bones.map((x) => ({ value: x.id, label: x.name }));
@@ -101,6 +102,7 @@ export function meshSection(app: App, a: Attachment): HTMLElement[] {
           numberField({ label: 'Image X', value: mesh.points[2 * vi], testId: 'mv-x', onCommit: (v) => setMeshAtt('Move mesh vertex', (x) => moveMeshPoint(ed.project, x, vi, v, x.mesh!.points[2 * vi + 1])) }),
           numberField({ label: 'Image Y', value: mesh.points[2 * vi + 1], testId: 'mv-y', onCommit: (v) => setMeshAtt('Move mesh vertex', (x) => moveMeshPoint(ed.project, x, vi, x.mesh!.points[2 * vi], v)) }),
         ),
+        numberField({ label: 'Vertex alpha', value: round3(mesh.alphas?.[vi] ?? 1), step: 0.05, min: 0, max: 1, testId: 'mv-alpha', onCommit: (v) => setMeshAtt('Edit vertex alpha', (x) => void (x.mesh!.alphas = withVertexAlpha(x, vi, v))) }),
       );
       if (list && fallback) {
         const nameOf = (id: string) => p.bones.find((x) => x.id === id)?.name ?? id;
@@ -252,5 +254,47 @@ function limbSection(app: App, a: Attachment, setMeshAtt: (label: string, fn: (x
       title: 'Copy the other limb’s weights vertex for vertex, renaming its bones (e.g. _l → _r)',
       onclick: () => run('Mirror weights', (x) => void (x.mesh!.weights = mirrorWeights(ed.project.attachments.find((y) => y.id === f.mirrorFrom)!, x, suffixBoneMap(ed.project, f.swapFrom, f.swapTo)))),
     }, 'Mirror weights'),
+  ];
+}
+
+/** Radial fade form state per attachment. */
+const alphaForms = new Map<string, { cx: number; cy: number; r0: number; r1: number; invert: boolean }>();
+
+/** Mesh ▸ Vertex alpha: a radial fade (e.g. a crease that shows only in the knee pit) and clear. */
+function alphaSection(app: App, a: Attachment, setMeshAtt: (label: string, fn: (x: Attachment) => void) => void): HTMLElement[] {
+  const mesh = a.mesh!;
+  let xs = 0, ys = 0;
+  for (let i = 0; i < mesh.points.length; i += 2) {
+    xs += mesh.points[i];
+    ys += mesh.points[i + 1];
+  }
+  const n = mesh.points.length / 2;
+  const f = alphaForms.get(a.id) ?? { cx: Math.round(xs / n), cy: Math.round(ys / n), r0: 10, r1: 40, invert: false };
+  alphaForms.set(a.id, f);
+  const inv = h('input', { type: 'checkbox', checked: f.invert, 'data-testid': 'va-invert', 'aria-label': 'Invert fade' });
+  inv.addEventListener('change', () => void (f.invert = inv.checked));
+  const faded = mesh.alphas ? mesh.alphas.filter((v) => v < 1).length : 0;
+  return [
+    h('div', { class: 'group-label' }, 'Vertex alpha'),
+    h('p', { class: 'dim', 'data-testid': 'va-summary' }, mesh.alphas ? `${faded} of ${n} vertices below 1` : 'All vertices opaque'),
+    h('div', { class: 'row2' },
+      numberField({ label: 'Centre X', value: f.cx, testId: 'va-cx', onCommit: (v) => void (f.cx = v) }),
+      numberField({ label: 'Centre Y', value: f.cy, testId: 'va-cy', onCommit: (v) => void (f.cy = v) }),
+    ),
+    h('div', { class: 'row2' },
+      numberField({ label: 'Solid radius', value: f.r0, min: 0, testId: 'va-r0', onCommit: (v) => void (f.r0 = Math.max(0, v)) }),
+      numberField({ label: 'Fade radius', value: f.r1, min: 0, testId: 'va-r1', onCommit: (v) => void (f.r1 = Math.max(0, v)) }),
+    ),
+    h('label', { class: 'field check' }, inv, h('span', {}, 'Invert (fade in toward the centre)')),
+    h('div', { class: 'row2' },
+      h('button', { class: 'mini', 'data-testid': 'va-radial', title: 'Alpha 1 within the solid radius of the centre (image px), fading to 0 at the fade radius', onclick: () => {
+        try {
+          setMeshAtt('Radial vertex alpha', (x) => void (x.mesh!.alphas = radialAlphas(x, f.cx, f.cy, f.r0, f.r1, f.invert)));
+        } catch (e) {
+          app.error('Vertex alpha not changed', [(e as Error).message]);
+        }
+      } }, 'Apply radial fade'),
+      h('button', { class: 'mini', 'data-testid': 'va-clear', disabled: !mesh.alphas, title: 'Every vertex back to alpha 1', onclick: () => setMeshAtt('Clear vertex alpha', (x) => void delete x.mesh!.alphas) }, 'Clear'),
+    ),
   ];
 }

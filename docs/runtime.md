@@ -29,7 +29,10 @@ rounded.
     "x", "y", "rotation", "scaleX", "scaleY", "opacity",
     "hidden": true,                                                        // v2, only when hidden at setup
     "mesh": { "uvs": [u0, v0, …], "triangles": [i0, i1, i2, …], "hull": 10,
-              "weights": [[{ "bone": "m1", "w": 0.7 }, { "bone": "m2", "w": 0.3 }], …] }  // weights v2
+              "weights": [[{ "bone": "m1", "w": 0.7 }, { "bone": "m2", "w": 0.3 }], …],  // weights v2
+              "alphas"?: [a0, a1, …] },                                                  // v3: per-vertex alpha 0..1
+    "blend"?: "additive" | "screen" | "multiply",                             // v3, absent = normal
+    "color"?: "#rrggbbaa"                                                      // v3 tint, absent = white
   }],
   "ik": [{ "name", "bones": ["upper", "lower"], "target": "bone", "mix", "bendPositive" }],           // v2
   "paths": [{ "name", "bone": null | "name", "closed", "nodes": [{ "x", "y", "inX", "inY", "outX", "outY" }] }], // v2
@@ -42,11 +45,12 @@ rounded.
   "animations": [{
     "name", "duration", "fps", "loop", "frames",
     "keys": { "<bone>": { "translate": [Key], "rotate": [Key], "scale": [Key] } },
-    "slots": { "<attachment>": { "visible": [Key], "opacity": [Key], "image": [{ "time", "image" }], "deform": [Key] } }, // v2
+    "slots": { "<attachment>": { "visible": [Key], "opacity": [Key], "image": [{ "time", "image" }], "deform": [Key],
+                                "color": [Key] } },                       // v2; color v3, value [r, g, b, a] 0..1
     "drawOrder": [{ "time", "order": ["<attachment>", …] }],                                          // v2
     "constraints": { "<constraint>": { "mix": [Key], "position": [Key], "angle": [Key] } },           // v2; angle v3
     "baked": { "<bone>": [[worldX, worldY, worldRotationDeg, worldScaleX, worldScaleY], …] },
-    "bakedSlots": [[{ "attachment", "visible", "opacity", "image" }, …], …],   // only with slot / draw-order keys
+    "bakedSlots": [[{ "attachment", "visible", "opacity", "image", "color"? }, …], …],   // only with slot / draw-order keys; color only when not white
     "bakedMeshes": { "<attachment>": [[x0, y0, …], …] }                         // only with meshes
   }]
 }
@@ -68,10 +72,13 @@ Baked data lets a consumer play without an interpolator: `frames` samples at `i 
 (`frames = duration·fps` for loops, which omit the repeat of frame 0; `+1` for one-shots).
 Bakes ignore skins and mixes (evaluate from keys for those).
 
-**Version 3** is version 2 plus `transformConstraints`, `angle` constraint keys and bone
-`inherit` flags (rules: `docs/architecture.md` → Transform constraints, Inherit flags). It is written only when the rig
-uses them; a v2-only consumer can still play a v3 file's `baked` data, which already
-includes the constraints.
+**Version 3** is version 2 plus `transformConstraints`, `angle` constraint keys, bone
+`inherit` flags, attachment `blend` and `color`, slot `color` keys and mesh `alphas`
+(rules: `docs/architecture.md` → Transform constraints, Inherit flags, Blend, tint and
+vertex alpha). It is written only when the rig uses them; a v2-only consumer can still
+play a v3 file's `baked` data, which already includes the constraints (but must draw the
+colour fields itself: a consumer that ignores them renders the attachments untinted and
+normally blended).
 
 ## `rigsmith.atlas` version 1
 

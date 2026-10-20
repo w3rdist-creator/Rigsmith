@@ -9,7 +9,8 @@ import { setAttachmentImage } from '../model/meshOps.ts';
 import { meshSection } from './meshPanels.ts';
 import { skinSection } from './skinPanels.ts';
 import { frameSection } from './framePanel.ts';
-import { attachmentSlotSection, boneRigSection, renderConstraintInspector, renderPathInspector } from './rigPanels.ts';
+import { attachmentSlotSection, blendSelect, boneRigSection, renderConstraintInspector, renderPathInspector, tintFields } from './rigPanels.ts';
+import { formatColor, isWhite, setupColor } from '../model/color.ts';
 
 export function renderSkeleton(app: App, root: HTMLElement): void {
   const { ed } = app;
@@ -241,6 +242,14 @@ export function renderInspector(app: App, root: HTMLElement): void {
       numberField({ label: 'Scale Y', value: a.scaleY, step: 0.05, testId: 'att-scale-y', onCommit: (v) => setA('Edit scale', (x) => void (x.scaleY = v)) }),
     ),
     numberField({ label: 'Opacity', value: a.opacity, step: 0.05, min: 0, max: 1, testId: 'att-opacity', onCommit: (v) => setA('Edit opacity', (x) => void (x.opacity = Math.min(1, Math.max(0, v)))) }),
+    blendSelect(a.blend ?? 'normal', (v) => setA('Edit blend mode', (x) => {
+      if (v === 'normal') delete x.blend;
+      else x.blend = v;
+    })),
+    tintFields(setupColor(a), 'att-tint', 'att-tint-alpha', (c) => setA('Edit tint', (x) => {
+      if (isWhite(c)) delete x.color;
+      else x.color = formatColor(c);
+    })),
     h('div', { class: 'group-label' }, `Setup draw order ${idx + 1} of ${p.attachments.length}`),
     h('div', { class: 'row2' },
       h('button', { class: 'mini', 'data-testid': 'att-backward', disabled: idx === 0, onclick: () => app.moveAttachmentOrder(a.id, -1) }, 'Send backward'),

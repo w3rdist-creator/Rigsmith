@@ -28,6 +28,10 @@ import { dataUrlBytes, decodePngExact, encodePngExact } from '../../src/model/pn
 import { addSkin, setSkinEntry } from '../../src/model/skinOps.ts';
 import type { BoneInherit, ClipSequence, ImageAsset, Project } from '../../src/model/types.ts';
 import { setBoneInherit } from '../../src/model/skeleton.ts';
+import type { BlendMode } from '../../src/model/types.ts';
+import { BLEND_MODES } from '../../src/model/types.ts';
+import { formatColor, isWhite, parseColor, radialAlphas, setupColor, withVertexAlpha } from '../../src/model/color.ts';
+import { keySlotColor } from '../../src/model/rigOps.ts';
 import { newId } from '../../src/model/types.ts';
 import { parseStepList } from '../../src/model/clipSequence.ts';
 import { buildZip } from '../../src/model/zip.ts';
@@ -264,6 +268,53 @@ export function setWeights(p: Project, attName: string, req: WeightRequest, smoo
   }
   const w = att.mesh.weights!;
   return { vertices: w.length, maxInfluences: Math.max(...w.map((l) => l.length)) };
+}
+
+/**
+ * Sets an attachment's blend mode and/or setup tint, or (with `key`) keys the tint in an
+ * animation at a time. Returns the attachment's resulting blend and setup tint.
+ */
+export function setTint(p: Project, attName: string, req: { color?: string; blend?: string; key?: { anim: string; time: number } }): { blend: BlendMode; color: string; keyed?: { anim: string; time: number } } {
+  const att = attachmentNamed(p, attName);
+  if (req.blend !== undefined) {
+    if (!(BLEND_MODES as readonly string[]).includes(req.blend)) fail(`Blend mode must be one of ${BLEND_MODES.join(', ')} (got “${req.blend}”).`);
+    if (req.key) fail('A blend mode is setup data; it cannot be keyed.');
+    if (req.blend === 'normal') delete att.blend;
+    else att.blend = req.blend as BlendMode;
+  }
+  let keyed: { anim: string; time: number } | undefined;
+  if (req.color !== undefined) {
+    const c = parseColor(req.color);
+    if (!c) fail(`Colour must be #rrggbb or #rrggbbaa (got “${req.color}”).`);
+    if (req.key) {
+      const an = p.animations.find((a) => a.name === req.key!.anim) ?? fail(`No animation named “${req.key.anim}”.`);
+      if (!(req.key.time >= 0 && req.key.time <= an.duration)) fail(`--at must be within 0..${an.duration} s.`);
+      keySlotColor(an, att.id, req.key.time, c);
+      keyed = { anim: an.name, time: req.key.time };
+    } else if (isWhite(c)) delete att.color;
+    else att.color = formatColor(c);
+  } else if (req.key) fail('Keying needs --color.');
+  return { blend: att.blend ?? 'normal', color: formatColor(setupColor(att)), ...(keyed ? { keyed } : {}) };
+}
+
+export type VertexAlphaRequest =
+  | { kind: 'radial'; cx: number; cy: number; r0: number; r1: number; invert?: boolean }
+  | { kind: 'set'; values: [number, number][] }
+  | { kind: 'clear' };
+
+/** Sets a mesh attachment's per-vertex alpha. Returns how many vertices end up below 1. */
+export function setVertexAlpha(p: Project, attName: string, req: VertexAlphaRequest): { vertices: number; faded: number } {
+  const att = attachmentNamed(p, attName);
+  if (!att.mesh) fail(`${attName} has no mesh (create one with \`mesh\` first).`);
+  try {
+    if (req.kind === 'clear') delete att.mesh.alphas;
+    else if (req.kind === 'radial') att.mesh.alphas = radialAlphas(att, req.cx, req.cy, req.r0, req.r1, req.invert);
+    else for (const [i, v] of req.values) att.mesh.alphas = withVertexAlpha(att, i, v);
+  } catch (e) {
+    fail(`${attName}: ${(e as Error).message}`);
+  }
+  const n = att.mesh.points.length / 2;
+  return { vertices: n, faded: att.mesh.alphas ? att.mesh.alphas.filter((v) => v < 1).length : 0 };
 }
 
 function fail(msg: string): never {

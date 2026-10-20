@@ -1,15 +1,17 @@
 // The single evaluation pipeline shared by the editor viewport, sequence export, the
 // runtime player and the CLI:
 //   local pose (keys + curves) → constraints (IK, paths) → world matrices →
-//   per-attachment draw state (visibility, opacity, image, skin, draw order) →
+//   per-attachment draw state (visibility, opacity, tint, image, skin, draw order) →
 //   mesh vertices (deform keys + skinning).
 import { TIME_EPSILON, samplePose, sampleKeys } from './animation.ts';
 import type { Mat, Vec } from './math.ts';
 import { apply } from './math.ts';
+import type { Rgba } from './color.ts';
+import { clamp01, setupColor } from './color.ts';
 import { applyConstraints } from './constraints.ts';
 import { meshUvs, meshWorldVertices } from './mesh.ts';
 import { attachmentWorld, computeWorld } from './skeleton.ts';
-import type { Animation, Attachment, ImageAsset, LocalPose, Project } from './types.ts';
+import type { Animation, Attachment, BlendMode, ImageAsset, LocalPose, Project } from './types.ts';
 
 export interface EvalOptions {
   /** Active skin id (null/undefined = no skin). */
@@ -25,6 +27,9 @@ export interface AttachmentFrame {
   image: ImageAsset | undefined;
   visible: boolean;
   opacity: number;
+  /** v3 tint [r, g, b, a] (0..1); a multiplies opacity when drawn. */
+  color: Rgba;
+  blend: BlendMode;
   /** World matrix of the image quad (image centred on its origin). */
   world: Mat;
   /** World-space mesh vertex positions [x0,y0,…] (mesh attachments only). */
@@ -80,8 +85,9 @@ export function evaluate(project: Project, anim: Animation | null, time: number,
     const visKey = steppedAt(st?.visible, time);
     const vis = visKey ? visKey.value[0] >= 0.5 : !att.hidden;
     const opacity = st?.opacity?.length ? sampleKeys(st.opacity, time, [att.opacity])[0] : att.opacity;
+    const color = (st?.color?.length ? sampleKeys(st.color, time, setupColor(att)) : setupColor(att)).map(clamp01) as Rgba;
     const w = attachmentWorld(att, world);
-    const frame: AttachmentFrame = { att, image: imageById.get(imageId), visible: vis, opacity: Math.min(1, Math.max(0, opacity)), world: w };
+    const frame: AttachmentFrame = { att, image: imageById.get(imageId), visible: vis, opacity: Math.min(1, Math.max(0, opacity)), color, blend: att.blend ?? 'normal', world: w };
     if (att.mesh && frame.image) {
       const deform = st?.deform?.length ? sampleKeys(st.deform, time, new Array(att.mesh.points.length).fill(0)) : undefined;
       const setupIm = imageById.get(att.imageId) ?? frame.image;
@@ -116,7 +122,7 @@ export interface Bounds {
 export function frameBounds(frame: Frame, b: Bounds | null = null): Bounds | null {
   let out = b ? { ...b } : null;
   for (const f of frame.attachments) {
-    if (!f.visible || f.opacity <= 0 || !f.image) continue;
+    if (!f.visible || f.opacity * f.color[3] <= 0 || !f.image) continue;
     for (const q of attachmentPoints(f)) {
       if (!out) out = { minX: q.x, minY: q.y, maxX: q.x, maxY: q.y };
       else {

@@ -15,6 +15,7 @@ import {
   deletePath,
   keyConstraint,
   keyDrawOrderStep,
+  keySlotColor,
   keySlotImage,
   keySlotScalar,
   slotValues,
@@ -25,6 +26,30 @@ import { newId } from '../model/types.ts';
 import { setBoneInherit } from '../model/skeleton.ts';
 import type { App } from './app.ts';
 import { append, h, numberField } from './dom.ts';
+import type { Rgba } from '../model/color.ts';
+import { formatColor, parseColor } from '../model/color.ts';
+import type { BlendMode } from '../model/types.ts';
+import { BLEND_MODES } from '../model/types.ts';
+
+/** Tint colour picker (rgb) plus tint alpha; `onCommit` gets the whole [r, g, b, a]. */
+export function tintFields(c: Rgba, testId: string, alphaTestId: string, onCommit: (c: Rgba) => void): HTMLElement {
+  const input = h('input', { type: 'color', value: formatColor(c).slice(0, 7), 'data-testid': testId, 'aria-label': 'Tint colour' });
+  input.addEventListener('change', () => {
+    const rgb = parseColor(input.value);
+    if (rgb) onCommit([rgb[0], rgb[1], rgb[2], c[3]]);
+  });
+  return h('div', { class: 'row2' },
+    h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Tint'), input),
+    numberField({ label: 'Tint alpha', value: Math.round(c[3] * 1000) / 1000, step: 0.05, min: 0, max: 1, testId: alphaTestId, onCommit: (v) => onCommit([c[0], c[1], c[2], Math.min(1, Math.max(0, v))]) }),
+  );
+}
+
+export function blendSelect(value: BlendMode, onChange: (v: BlendMode) => void): HTMLElement {
+  const el = h('select', { 'data-testid': 'att-blend', 'aria-label': 'Blend mode' }, ...BLEND_MODES.map((m) => h('option', { value: m }, m[0].toUpperCase() + m.slice(1))));
+  el.value = value;
+  el.addEventListener('change', () => onChange(el.value as BlendMode));
+  return h('label', { class: 'field', title: 'How the image combines with what is behind it: additive and screen add light (glows), multiply darkens (shadows)' }, h('span', { class: 'field-label' }, 'Blend'), el);
+}
 
 function animOf(p: Project, id: string | null): Animation | undefined {
   return p.animations.find((a) => a.id === id);
@@ -69,15 +94,16 @@ export function attachmentSlotSection(app: App, a: Attachment): HTMLElement[] {
   const t = snapToFrame(ed.time, anim.fps);
   const frame = Math.round(t * anim.fps);
   const cur = slotValues(a, anim, t);
-  const has = (ch: 'visible' | 'opacity' | 'image') => findKeyIndex(laneKeys(anim, slotLane(a.id, ch)) ?? [], t) >= 0;
+  const has = (ch: 'visible' | 'opacity' | 'image' | 'color') => findKeyIndex(laneKeys(anim, slotLane(a.id, ch)) ?? [], t) >= 0;
   const mutateAnim = (label: string, fn: (an: Animation) => void) => ed.mutate(label, (q) => fn(animOf(q, anim.id)!));
-  const toggle = (ch: 'visible' | 'opacity' | 'image') => {
+  const toggle = (ch: 'visible' | 'opacity' | 'image' | 'color') => {
     if (has(ch)) {
       mutateAnim(`Remove ${ch} key`, (an) => {
         const keys = laneKeys(an, slotLane(a.id, ch))!;
         keys.splice(findKeyIndex(keys, t), 1);
       });
     } else if (ch === 'image') mutateAnim('Key image', (an) => keySlotImage(an, a.id, t, cur.imageId));
+    else if (ch === 'color') mutateAnim('Key tint', (an) => keySlotColor(an, a.id, t, cur.color));
     else mutateAnim(`Key ${ch}`, (an) => keySlotScalar(an, a.id, ch, t, ch === 'visible' ? (cur.visible ? 1 : 0) : cur.opacity));
   };
   const visIn = h('input', { type: 'checkbox', checked: cur.visible, 'data-testid': 'slot-visible', 'aria-label': 'Visible at this frame' });
@@ -94,13 +120,17 @@ export function attachmentSlotSection(app: App, a: Attachment): HTMLElement[] {
       numberField({ label: 'Opacity', value: cur.opacity, step: 0.05, min: 0, max: 1, testId: 'slot-opacity', onCommit: (v) => mutateAnim('Key opacity', (an) => keySlotScalar(an, a.id, 'opacity', t, v)) }),
       keyToggle(has('opacity'), 'slot-key-opacity', 'opacity', () => toggle('opacity')),
     ),
+    h('div', { class: 'row-key' },
+      tintFields(cur.color, 'slot-color', 'slot-color-alpha', (c) => mutateAnim('Key tint', (an) => keySlotColor(an, a.id, t, c))),
+      keyToggle(has('color'), 'slot-key-color', 'tint', () => toggle('color')),
+    ),
     h('div', { class: 'row-key' }, h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Image'), imgSel), keyToggle(has('image'), 'slot-key-image', 'image', () => toggle('image'))),
     h('div', { class: 'group-label' }, `Draw order at frame ${frame}: ${idx + 1} of ${order.length}`),
     h('div', { class: 'row2' },
       h('button', { class: 'mini', 'data-testid': 'draw-backward', disabled: idx <= 0, title: 'Key a draw order with this attachment one step further back', onclick: () => mutateAnim('Key draw order', (an) => keyDrawOrderStep(ed.project, an, t, a.id, -1)) }, 'Key backward'),
       h('button', { class: 'mini', 'data-testid': 'draw-forward', disabled: idx >= order.length - 1, title: 'Key a draw order with this attachment one step further forward', onclick: () => mutateAnim('Key draw order', (an) => keyDrawOrderStep(ed.project, an, t, a.id, 1)) }, 'Key forward'),
     ),
-    h('p', { class: 'hint' }, 'Visibility, image and draw-order keys are stepped; opacity interpolates. Offsets stay setup data (Tab).'),
+    h('p', { class: 'hint' }, 'Visibility, image and draw-order keys are stepped; opacity and tint interpolate. Offsets stay setup data (Tab).'),
   );
   return out;
 }

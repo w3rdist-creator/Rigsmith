@@ -37,6 +37,8 @@ read-only test probe.
 | `mesh <project> --att A --grid CxR --out p2` | no | replaces A's image with a triangulated C×R grid mesh (rigid until weighted) |
 | `weights <project> --att A --out p2` + one of `--auto b1,b2 [--max-influences N]` · `--along upper,lower --band inner/outer [--side ±1] [--helper bone] [--end bone:at:band:max] [--root bone:from:to]` · `--mirror-from A2 --swap _l=_r`, and/or `[--smooth N] [--smooth-amount a]` | no | sets A's mesh weights (see below) |
 | `inherit <project> --bone B [--rotation on\|off] [--scale on\|off] [--reflection on\|off] --out p2` | no | sets a bone's inherit flags, keeping its setup placement (any flag off → v3) |
+| `tint <project> --att A [--blend normal\|additive\|screen\|multiply] [--color #rrggbb[aa]] [--anim N --at s] --out p2` | no | sets the blend mode and/or setup tint; with `--anim`/`--at` keys the colour instead (any non-default → v3) |
+| `vertex-alpha <project> --att A --out p2` + one of `--radial cx,cy,inner,outer [--invert]` · `--set i=a[,i=a…]` · `--clear` | no | per-vertex alpha on a mesh attachment: radial fade in image px (1 inside `inner`, 0 beyond `outer`), single vertices, or back to opaque (v3) |
 | `constrain <project> --bone B --out p2` + one of `--copy-rotation SRC [--factor 0.5] [--offset 0] [--mitre k:max]` · `--aim deg\|hold [--relative-to bone]`, and `[--name n] [--mix 1]` | no | adds a transform constraint (file becomes v3) |
 
 Authoring commands validate the result with the editor's reader before writing and
@@ -88,6 +90,12 @@ then only uses CLI commands: `add-image` ×15, `skin` ×3, `set-mix`, `validate`
 on this Chrome for Testing build (other Chrome builds may encode PNG bytes differently).
 
 ## Verified by
+
+`npm test` (`tests/unit/blend-tint.test.ts`): `tint` and `vertex-alpha` as subprocesses —
+blend + setup tint, a keyed tint and a radial fade equal the model functions; usage errors
+exit 2, invalid requests exit 1. `npm run test:e2e` (`tests/e2e/r4-color.e2e.test.ts`):
+every blend mode, a tint, interpolated tint keys and vertex alpha render within 2/255 of the
+independent reference compositor.
 
 `npm test` (`tests/unit/transform-constraints.test.ts`): `constrain` as a subprocess — a mitred
 half-angle helper and a held aim written as v3 exactly as requested; usage errors exit 2,

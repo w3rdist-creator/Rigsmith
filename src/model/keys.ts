@@ -2,7 +2,7 @@
 // seam). A lane is one keyed property; every key object has a `time` in seconds.
 //
 // Lane ids:  b:<boneId>:<translate|rotate|scale>   bone channels
-//            s:<attachmentId>:<visible|opacity|image|deform>   slot (attachment) channels
+//            s:<attachmentId>:<visible|opacity|image|deform|color>   slot (attachment) channels
 //            c:<constraintId>:<mix|position|angle> constraint channels
 //            d                                    draw order
 //
@@ -15,7 +15,7 @@ import type { Animation, BoneTrack, Channel, ConstraintTrack, Project, SlotTrack
 import { CHANNELS, emptyTrack } from './types.ts';
 
 export type SlotChannel = keyof SlotTrack;
-export const SLOT_CHANNELS: readonly SlotChannel[] = ['visible', 'opacity', 'image', 'deform'];
+export const SLOT_CHANNELS: readonly SlotChannel[] = ['visible', 'opacity', 'image', 'deform', 'color'];
 export type ConstraintChannel = keyof ConstraintTrack;
 
 export interface KeyRef {

@@ -20,7 +20,7 @@ function rulerSpacing(pitch: number): { tick: number; label: number } {
   return { tick: steps.find((s) => s * pitch >= 4) ?? 1000, label: steps.find((s) => s * pitch >= 36) ?? 1000 };
 }
 
-const CH_LABEL: Record<string, string> = { translate: 'translate', rotate: 'rotate', scale: 'scale', visible: 'visible', opacity: 'opacity', image: 'image', deform: 'deform', mix: 'mix', position: 'position', angle: 'angle' };
+const CH_LABEL: Record<string, string> = { translate: 'translate', rotate: 'rotate', scale: 'scale', visible: 'visible', opacity: 'opacity', image: 'image', deform: 'deform', color: 'colour', mix: 'mix', position: 'position', angle: 'angle' };
 
 interface Row {
   lane: string;
@@ -97,7 +97,7 @@ export class Timeline {
     }
     for (const a of p.attachments) {
       const st = anim.slots?.[a.id];
-      const chans = (['visible', 'opacity', 'image', 'deform'] as const).filter((ch) => st?.[ch]?.length || (a.id === selAtt && ch !== 'deform') || (a.id === selAtt && ch === 'deform' && a.mesh));
+      const chans = (['visible', 'opacity', 'color', 'image', 'deform'] as const).filter((ch) => st?.[ch]?.length || (a.id === selAtt && ch !== 'deform') || (a.id === selAtt && ch === 'deform' && a.mesh));
       for (const ch of chans) rows.push({ lane: slotLane(a.id, ch), owner: a.name, ch, selected: a.id === selAtt, onLabel: () => ed.select({ kind: 'attachment', id: a.id }) });
     }
     const selC = ed.selection?.kind === 'constraint' ? ed.selection.id : null;

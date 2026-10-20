@@ -143,8 +143,8 @@ export function keysBeyondEnd(anim: Animation): number {
     for (const k of keys ?? []) if (k.time > anim.duration + TIME_EPSILON) n++;
   };
   for (const t of Object.values(anim.tracks)) for (const keys of [t.translate, t.rotate, t.scale]) count(keys);
-  for (const s of Object.values(anim.slots ?? {})) for (const keys of [s.visible, s.opacity, s.image, s.deform]) count(keys);
-  for (const c of Object.values(anim.constraints ?? {})) for (const keys of [c.mix, c.position]) count(keys);
+  for (const s of Object.values(anim.slots ?? {})) for (const keys of [s.visible, s.opacity, s.image, s.deform, s.color]) count(keys);
+  for (const c of Object.values(anim.constraints ?? {})) for (const keys of [c.mix, c.position, c.angle]) count(keys);
   count(anim.drawOrder);
   return n;
 }

@@ -8,6 +8,10 @@
 // triangle containing it, each triangle contributes its subsample coverage × one
 // bilinear texture tap at the pixel centre through its own barycentric map (the quad
 // model above), and the mesh is composited once with the attachment opacity.
+// v3 colour: the tint (setup `#rrggbbaa` or sampled colour keys) multiplies each sample's
+// rgb and the opacity; a mesh's vertex alpha is interpolated (barycentric) at the pixel
+// centre through each owning triangle's map; blend modes use the W3C compositing
+// formulas (additive = plus-lighter, clamped; screen and multiply = separable blends).
 import type { Decoded } from './png-decode.ts';
 import { decodePng } from './png-decode.ts';
 
@@ -169,8 +173,10 @@ export function composite(project: any, anim: any | null, t: number, images: Map
     // Stepped channels show the setup value before their first key.
     const vk = stepped(st?.visible, t);
     const visible = vk ? vk.value[0] >= 0.5 : !a.hidden;
-    const opacity = slotOverride?.opacity.get(a.id) ?? (st?.opacity?.length ? sampleTrack(st.opacity, t, [a.opacity])[0] : a.opacity);
+    const tint = refTint(a, st, t);
+    const opacity = (slotOverride?.opacity.get(a.id) ?? (st?.opacity?.length ? sampleTrack(st.opacity, t, [a.opacity])[0] : a.opacity)) * tint[3];
     if (!visible || opacity <= 0) continue;
+    const fx: Fx = { tint, blend: a.blend ?? 'normal' };
     let imageId = stepped(st?.image, t)?.imageId ?? a.imageId;
     // Skin rule (independent restatement): an entry without `from` stands in for the
     // setup image, an entry with `from` for that keyed image.
@@ -182,10 +188,10 @@ export function composite(project: any, anim: any | null, t: number, images: Map
     const base = a.boneId ? worlds.get(a.boneId)! : ([1, 0, 0, 1, 0, 0] as M);
     if (a.mesh) {
       setup ??= boneWorlds(project, null, 0);
-      compositeMesh(acc, w, h, view, a, st, t, project, worlds, setup, meta, img, opacity, slotOverride?.deform.get(a.id));
+      compositeMesh(acc, w, h, view, a, st, t, project, worlds, setup, meta, img, opacity, slotOverride?.deform.get(a.id), fx);
       continue;
     }
-    quad(acc, w, h, mul(view, mul(base, trs(a.x, a.y, a.rotation, a.scaleX, a.scaleY))), meta, img, opacity);
+    quad(acc, w, h, mul(view, mul(base, trs(a.x, a.y, a.rotation, a.scaleX, a.scaleY))), meta, img, opacity, fx);
   }
   return toImage(acc, w, h);
 }
@@ -201,7 +207,39 @@ function toImage(acc: Float64Array, w: number, h: number): RefImage {
 }
 
 /** Source-over of one image quad (image centred on the origin of `m`) into a premultiplied float buffer. */
-function quad(acc: Float64Array, w: number, h: number, m: M, meta: { width: number; height: number }, img: Decoded, opacity: number): void {
+type Fx = { tint: number[]; blend: string };
+const PLAIN: Fx = { tint: [1, 1, 1, 1], blend: 'normal' };
+
+/** Setup tint (#rrggbbaa / #rrggbb) or sampled colour keys, channels 0..1. */
+export function refTint(a: any, st: any, t: number): number[] {
+  const hex = typeof a.color === 'string' ? a.color : '#ffffffff';
+  const setup = [1, 3, 5, 7].map((i) => (i < hex.length ? parseInt(hex.slice(i, i + 2), 16) / 255 : 1));
+  const c = st?.color?.length ? sampleTrack(st.color, t, setup) : setup;
+  return c.map((v: number) => Math.min(1, Math.max(0, v)));
+}
+
+/** Composites a premultiplied source (rgb already premultiplied, alpha sa) into acc[o..o+3]. */
+function blendInto(acc: Float64Array, o: number, src: number[], sa: number, mode: string): void {
+  const ba = acc[o + 3];
+  if (mode === 'additive') {
+    for (let c = 0; c < 3; c++) acc[o + c] = Math.min(1, acc[o + c] + src[c]);
+    acc[o + 3] = Math.min(1, ba + sa);
+    return;
+  }
+  if (mode === 'screen' || mode === 'multiply') {
+    for (let c = 0; c < 3; c++) {
+      const Cs = sa > 0 ? src[c] / sa : 0, Cb = ba > 0 ? acc[o + c] / ba : 0;
+      const B = mode === 'screen' ? Cb + Cs - Cb * Cs : Cb * Cs;
+      acc[o + c] = src[c] * (1 - ba) + acc[o + c] * (1 - sa) + sa * ba * B;
+    }
+    acc[o + 3] = sa + ba * (1 - sa);
+    return;
+  }
+  for (let c = 0; c < 3; c++) acc[o + c] = src[c] + acc[o + c] * (1 - sa);
+  acc[o + 3] = sa + ba * (1 - sa);
+}
+
+function quad(acc: Float64Array, w: number, h: number, m: M, meta: { width: number; height: number }, img: Decoded, opacity: number, fx: Fx = PLAIN): void {
   const im = inv(m);
   const hw = meta.width / 2, hh = meta.height / 2;
   // Screen bounding box of the quad.
@@ -226,9 +264,7 @@ function quad(acc: Float64Array, w: number, h: number, m: M, meta: { width: numb
       const s = bilinear(img, u, v);
       const k = (cov / 16) * opacity;
       const o = (py * w + px) * 4;
-      const sa = s[3] * k;
-      for (let c = 0; c < 3; c++) acc[o + c] = s[c] * k + acc[o + c] * (1 - sa);
-      acc[o + 3] = sa + acc[o + 3] * (1 - sa);
+      blendInto(acc, o, [s[0] * k * fx.tint[0], s[1] * k * fx.tint[1], s[2] * k * fx.tint[2]], s[3] * k, fx.blend);
     }
   }
 }
@@ -277,7 +313,7 @@ export function meshScreenVertices(a: any, st: any, t: number, project: any, wor
   return out;
 }
 
-function compositeMesh(acc: Float64Array, w: number, h: number, view: M, a: any, st: any, t: number, project: any, worlds: Map<string, M>, setup: Map<string, M>, meta: any, img: Decoded, opacity: number, deform?: number[]): void {
+function compositeMesh(acc: Float64Array, w: number, h: number, view: M, a: any, st: any, t: number, project: any, worlds: Map<string, M>, setup: Map<string, M>, meta: any, img: Decoded, opacity: number, deform?: number[], fx: Fx = PLAIN): void {
   const mesh = a.mesh;
   const setupMeta = project.images.find((i: any) => i.id === a.imageId);
   const v = meshScreenVertices(a, st, t, project, worlds, setup, view, deform);
@@ -298,6 +334,9 @@ function compositeMesh(acc: Float64Array, w: number, h: number, view: M, a: any,
   // Per triangle: the affine map screen → texture (u = A·x + B·y + C), from barycentrics.
   const nt = mesh.triangles.length / 3;
   const tex = new Float64Array(nt * 6);
+  // Per triangle: vertex alpha as an affine function of the screen point (x, y).
+  const alf = new Float64Array(nt * 3);
+  const va: number[] | undefined = mesh.alphas;
   // Topmost (last-listed) triangle per subsample, −1 = none.
   const owner = new Int32Array(bw * S * bh * S).fill(-1);
   const p = mesh.points;
@@ -310,6 +349,12 @@ function compositeMesh(acc: Float64Array, w: number, h: number, view: M, a: any,
     // l1 = ((x−ax)(cy−ay) − (cx−ax)(y−ay))/area, l2 = ((bx−ax)(y−ay) − (x−ax)(by−ay))/area
     const l1x = (cy - ay) / area, l1y = -(cx - ax) / area, l1c = (-ax * (cy - ay) + (cx - ax) * ay) / area;
     const l2x = -(by - ay) / area, l2y = (bx - ax) / area, l2c = (-(bx - ax) * ay + ax * (by - ay)) / area;
+    if (va) {
+      const [a0, a1, a2] = [va[i0], va[i1], va[i2]];
+      alf[3 * k] = (a1 - a0) * l1x + (a2 - a0) * l2x;
+      alf[3 * k + 1] = (a1 - a0) * l1y + (a2 - a0) * l2y;
+      alf[3 * k + 2] = a0 + (a1 - a0) * l1c + (a2 - a0) * l2c;
+    }
     for (let c = 0; c < 2; c++) {
       const q0 = p[2 * i0 + c] * (c ? kv : ku), q1 = p[2 * i1 + c] * (c ? kv : ku), q2 = p[2 * i2 + c] * (c ? kv : ku);
       tex[6 * k + 3 * c] = (q1 - q0) * l1x + (q2 - q0) * l2x;
@@ -349,12 +394,12 @@ function compositeMesh(acc: Float64Array, w: number, h: number, view: M, a: any,
       for (const [k, n] of counts) {
         const [u, vv] = uvAt(k, X0 + px + 0.5, Y0 + py + 0.5);
         const s = bilinear(img, u * tx - 0.5, vv * ty - 0.5);
-        for (let c = 0; c < 4; c++) col[c] += (s[c] * n) / (S * S);
+        const cx = X0 + px + 0.5, cy = Y0 + py + 0.5;
+        const vAlpha = va ? Math.min(1, Math.max(0, alf[3 * k] * cx + alf[3 * k + 1] * cy + alf[3 * k + 2])) : 1;
+        for (let c = 0; c < 4; c++) col[c] += (s[c] * n * vAlpha) / (S * S);
       }
       const o = ((Y0 + py) * w + X0 + px) * 4;
-      const sa = col[3] * opacity;
-      for (let c = 0; c < 3; c++) acc[o + c] = col[c] * opacity + acc[o + c] * (1 - sa);
-      acc[o + 3] = sa + acc[o + 3] * (1 - sa);
+      blendInto(acc, o, [col[0] * opacity * fx.tint[0], col[1] * opacity * fx.tint[1], col[2] * opacity * fx.tint[2]], col[3] * opacity, fx.blend);
     }
   }
 }

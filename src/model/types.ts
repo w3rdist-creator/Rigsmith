@@ -76,7 +76,17 @@ export interface Mesh {
   hull: number;
   /** Optional skinning: one influence list per vertex. Absent = rigid on the attachment's bone. */
   weights?: VertexWeights[];
+  /**
+   * v3: per-vertex alpha 0..1 (one per vertex), interpolated across each triangle and
+   * multiplied into the texture (e.g. a knee-pit crease that fades in as the knee bends).
+   * Absent = every vertex 1.
+   */
+  alphas?: number[];
 }
+
+/** v3: how an attachment composites onto what is behind it. */
+export type BlendMode = 'normal' | 'additive' | 'screen' | 'multiply';
+export const BLEND_MODES: readonly BlendMode[] = ['normal', 'additive', 'screen', 'multiply'];
 
 export interface Attachment {
   id: string;
@@ -95,6 +105,13 @@ export interface Attachment {
   hidden?: boolean;
   /** v2: textured mesh instead of a flat quad. */
   mesh?: Mesh;
+  /** v3: blend mode (absent = normal). */
+  blend?: BlendMode;
+  /**
+   * v3: tint `#rrggbbaa` multiplied into every texel (rgb) and into the opacity (aa).
+   * Absent = `#ffffffff`. Keyable with slot `color` keys.
+   */
+  color?: string;
 }
 
 export type Interp = 'linear' | 'step' | 'smooth' | 'bezier';
@@ -145,6 +162,8 @@ export interface SlotTrack {
   image?: ImageKey[];
   /** Mesh deform: value = per-vertex offsets [dx0,dy0,…] in image pixels. */
   deform?: Key[];
+  /** v3: tint, value [r, g, b, a] each 0..1 (see Attachment.color). */
+  color?: Key[];
 }
 
 /** v2: animated constraint properties. */
