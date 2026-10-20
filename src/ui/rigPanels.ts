@@ -22,6 +22,7 @@ import {
 } from '../model/rigOps.ts';
 import type { Animation, Attachment, Bone, IkConstraint, PathConstraint, Project, TransformConstraint } from '../model/types.ts';
 import { newId } from '../model/types.ts';
+import { setBoneInherit } from '../model/skeleton.ts';
 import type { App } from './app.ts';
 import { append, h, numberField } from './dom.ts';
 
@@ -151,6 +152,23 @@ export function boneRigSection(app: App, b: Bone): HTMLElement[] {
     ),
     h('button', { class: 'mini', 'data-testid': 'tc-add-aim', title: 'Hold this bone at its current screen angle (e.g. a prop that stays level while the hand moves)', onclick: () => addTc('aim') }, '+ Aim (hold angle)'),
   );
+  if (ed.mode === 'setup') {
+    // Inherit flags (v3): which parts of the parent's transform this bone follows.
+    const ikChild = p.ik?.some((k) => k.bones.length === 2 && k.bones[1] === b.id) ?? false;
+    const inh = { rotation: true, scale: true, reflection: true, ...b.inherit };
+    const flag = (key: 'rotation' | 'scale' | 'reflection', label: string, hint: string) => {
+      const el = checkbox(label, inh[key], `bone-inherit-${key}`, (v) => app.guard(() => ed.mutate(`Inherit ${key}`, (q) => setBoneInherit(q, b.id, { [key]: v }))), ikChild ? 'The second bone of an IK chain always inherits its parent fully.' : hint);
+      if (ikChild) (el.querySelector('input') as HTMLInputElement).disabled = true;
+      return el;
+    };
+    if (b.parentId)
+      out.push(
+        h('div', { class: 'group-label' }, 'Inherit from parent'),
+        flag('rotation', 'Rotation', 'Off: the bone keeps its own screen angle when its parent turns (its position still follows).'),
+        flag('scale', 'Scale', 'Off: a squashed or stretched parent does not squash, shear or shorten this bone.'),
+        flag('reflection', 'Reflection', 'Off: the bone stays unmirrored under a mirrored parent.'),
+      );
+  }
   if (ed.mode === 'setup')
     out.push(checkbox('Pivot mode (Move tool moves only this origin)', ed.pivotMode, 'pivot-mode', (v) => {
       ed.pivotMode = v;

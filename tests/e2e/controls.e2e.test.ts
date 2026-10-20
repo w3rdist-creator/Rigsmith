@@ -295,6 +295,7 @@ describe('cutout dialog extras', () => {
     const before = await exportPng('ext-before.png');
     await page.getByTestId('att-cutout').click();
     const c = page.getByTestId('cutout-canvas');
+    await c.waitFor({ state: 'visible' }); // the dialog lays out before its box is read
     const box = (await c.boundingBox())!;
     const s = Number(await c.getAttribute('data-scale')), ox = Number(await c.getAttribute('data-ox')), oy = Number(await c.getAttribute('data-oy'));
     const at = (x: number, y: number) => ({ x: box.x + ox + x * s, y: box.y + oy + y * s });

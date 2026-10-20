@@ -3,7 +3,7 @@
 // draw-order key must list each attachment exactly once — and this pass guarantees an
 // edited project always re-opens. Returns human-readable notes for what it changed.
 import { normalizeWeights } from './meshOps.ts';
-import { isAncestorOrSelf } from './skeleton.ts';
+import { hasInheritFlags, isAncestorOrSelf } from './skeleton.ts';
 import type { Project } from './types.ts';
 import { SEQUENCE_MAX_REPEAT } from './types.ts';
 
@@ -18,6 +18,7 @@ export function repairReferences(p: Project): string[] {
     p.ik = p.ik.filter((k) => {
       if (!boneIds.has(k.target) || k.bones.some((b) => !boneIds.has(b))) return false;
       if (k.bones.length === 2 && p.bones.find((b) => b.id === k.bones[1])?.parentId !== k.bones[0]) return false;
+      if (k.bones.length === 2 && p.bones.some((b) => b.id === k.bones[1] && hasInheritFlags(b))) return false;
       return !k.bones.some((b) => isAncestorOrSelf(p.bones, b, k.target));
     });
     if (p.ik.length !== before) notes.push(`${before - p.ik.length} IK constraint(s) removed (their bones changed).`);

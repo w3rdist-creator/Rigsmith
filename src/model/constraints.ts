@@ -41,7 +41,7 @@
 import { sampleKeys } from './animation.ts';
 import type { Mat, Vec } from './math.ts';
 import { angleOf, apply, applyLinear, DEG, determinant, identity, invert } from './math.ts';
-import { computeWorld } from './skeleton.ts';
+import { computeWorld, hasInheritFlags, parentLinear } from './skeleton.ts';
 import type { Animation, Bone, IkConstraint, LocalPose, PathConstraint, PathShape, Project, TransformConstraint } from './types.ts';
 
 const EPS = 1e-9;
@@ -128,7 +128,10 @@ export function solveIk(bones: readonly Bone[], pose: Map<string, LocalPose>, ik
   const p: Vec = { x: wp.tx, y: wp.ty };
   const local1 = pose.get(pId)!;
   const base1 = local1.rotation;
-  const parent1 = parentWorldOf(bones, world, pId);
+  // Bone 1's axes live in its parent's linear part filtered by its inherit flags (v3);
+  // its origin is placed by the full parent, so the target is taken relative to it.
+  const flagged1 = hasInheritFlags(pBone);
+  const parent1 = flagged1 ? parentLinear(bones, world, pId) : parentWorldOf(bones, world, pId);
 
   const cBone = cId ? bones.find((b) => b.id === cId) : undefined;
   if (!cBone || !world.get(cId) || !pose.has(cId)) {
@@ -139,13 +142,18 @@ export function solveIk(bones: readonly Bone[], pose: Map<string, LocalPose>, ik
     setRotation(pose, pId, base1 + mix * (solved - base1));
     return;
   }
+  if (hasInheritFlags(cBone)) return; // bone 2 must inherit fully (the validator enforces it)
   if (Math.hypot(t.x - p.x, t.y - p.y) < 1e-6) return; // degenerate: target on the chain root — leave the pose as keyed
   if (Math.abs(determinant(parent1)) < 1e-12) return; // collapsed parent: no local solution
   const local2 = pose.get(cId)!;
   const base2 = local2.rotation;
   // Parent-local space: shoulder o, target q relative to o.
-  const tl = apply(invert(parent1), t);
-  const q: Vec = { x: tl.x - local1.x, y: tl.y - local1.y };
+  let q: Vec;
+  if (flagged1) q = applyLinear(invert(parent1), { x: t.x - p.x, y: t.y - p.y });
+  else {
+    const tl = apply(invert(parent1), t);
+    q = { x: tl.x - local1.x, y: tl.y - local1.y };
+  }
   const D = Math.hypot(q.x, q.y);
   const chain: Chain = { sx: local1.scaleX, sy: local1.scaleY, ex: local2.x, ey: local2.y, k: local2.scaleX * cBone.length };
   const { ex, ey, k } = chain;
@@ -347,10 +355,11 @@ export function solvePath(bones: readonly Bone[], pose: Map<string, LocalPose>, 
     const sample = table.at(position * table.length + i * pc.spacing);
     const parent = parentWorldOf(bones, world, id);
     const local = apply(invert(parent), sample.point);
+    const frame = parentLinear(bones, world, id);
     const next: LocalPose = { ...cur, x: cur.x + mix * (local.x - cur.x), y: cur.y + mix * (local.y - cur.y) };
     if (pc.rotate) {
       const dir = rotate({ x: 1, y: 0 }, sample.tangent + pc.rotateOffset);
-      const solved = nearTurn(cur.rotation, localRotationFor(parent, dir, cur));
+      const solved = nearTurn(cur.rotation, localRotationFor(frame, dir, cur));
       next.rotation = cur.rotation + mix * (solved - cur.rotation);
     }
     pose.set(id, next);
@@ -374,7 +383,7 @@ export function solveTransform(bones: readonly Bone[], pose: Map<string, LocalPo
   } else {
     const rel = tc.relativeTo ? world.get(tc.relativeTo) : undefined;
     if (tc.relativeTo && !rel) return;
-    const parent = parentWorldOf(bones, world, tc.bone);
+    const parent = parentLinear(bones, world, tc.bone);
     if (Math.abs(determinant(parent)) < 1e-12) return;
     target = localRotationFor(parent, rotate({ x: 1, y: 0 }, angleDeg + (rel ? angleOf(rel) : 0)), cur);
   }

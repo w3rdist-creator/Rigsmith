@@ -11,7 +11,7 @@ import { safeName } from '../src/render/sequence.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
 import type { TransformRequest, WeightRequest } from './lib/rigsmith-api.ts';
-import { ApiError, EXIT, addImage, addTransform, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
+import { ApiError, EXIT, addImage, addTransform, setInherit, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
 
 const USAGE = `rigsmith <command> [options]
   validate <project.rig.json>
@@ -39,7 +39,8 @@ const USAGE = `rigsmith <command> [options]
           [--smooth <passes>] [--smooth-amount 0.5]          (alone: smooth existing weights)
   constrain <project> --bone <bone> --out <project> [--name <n>] [--mix 1] (one of:)
           --copy-rotation <source> [--factor 0.5] [--offset 0] [--mitre <k>:<max>]
-          --aim <degrees|hold> [--relative-to <bone>]`;
+          --aim <degrees|hold> [--relative-to <bone>]
+  inherit <project> --bone <bone> [--rotation on|off] [--scale on|off] [--reflection on|off] --out <project>`;
 
 type Args = { _: string[]; flags: Record<string, string[]> };
 
@@ -255,6 +256,20 @@ async function main(): Promise<Record<string, unknown>> {
       const res = setWeights(p, need('att'), req, passes !== undefined ? { passes, amount: num('smooth-amount') } : undefined);
       writeProject(out, p);
       return { outputs: [out], attachment: flag('att'), mode: req.kind, ...(passes !== undefined ? { smoothed: passes } : {}), ...res };
+    }
+    case 'inherit': {
+      const out = need('out');
+      const change: Record<string, boolean> = {};
+      for (const k of ['rotation', 'scale', 'reflection']) {
+        const v = flag(k);
+        if (v === undefined) continue;
+        if (v !== 'on' && v !== 'off') usage(`--${k} must be on or off (got “${v}”).`);
+        change[k] = v === 'on';
+      }
+      if (!Object.keys(change).length) usage('inherit: give at least one of --rotation, --scale or --reflection.');
+      const inherit = setInherit(p, need('bone'), change);
+      writeProject(out, p);
+      return { outputs: [out], bone: flag('bone'), inherit };
     }
     case 'constrain': {
       const out = need('out');

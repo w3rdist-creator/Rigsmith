@@ -157,6 +157,20 @@ image, skin, draw order) → mesh vertices.
 - **Path constraints**: arc-length table (32 samples per cubic segment); bone *i* sits at
   `position·L + i·spacing`; open paths clamp, closed paths wrap; `rotate` aligns the
   bone's +x with the tangent plus `rotateOffset`; `mix` blends translation/rotation.
+- **Inherit flags** (v3, `Bone.inherit`, absent = all on): a bone's origin is always
+  placed by its parent's full world matrix M; its axes take M's linear part filtered by
+  the flags. M is factored as R(θ)·K·F: F a left↔right mirror when det M < 0 (else
+  identity), R(θ) the rotation to the world x axis of M·F, K upper triangular with a
+  positive diagonal (scale and shear). `rotation`, `scale` and `reflection` set to false
+  drop R, K and F respectively. So a scaled parent no longer shears or shortens a bone
+  that does not inherit scale (a squashed hips keep the IK leg's reach), and a rig
+  mirrored with root scaleX −1 stays the exact mirror image under any flags that keep
+  reflection. Without rotation, a parent's reflection is applied as a left↔right mirror
+  (a root scaleY −1 then mirrors the bone left↔right instead of up↕down). Solvers and
+  tools use the filtered frame for angles and the full parent for positions. The second
+  bone of a two-bone IK chain must inherit fully (validator, editor and CLI refuse
+  otherwise; the IK length formula assumes it). Default bones compose exactly as before
+  (no factoring), and flags are written only when one is off (v3).
 - **Transform constraints** (v3, `TransformConstraint`): run after IK and paths, so they
   read the solved pose (a knee helper follows the IK knee). `rotation`: local rotation =
   `angle + factor · bend`, bend = the source's world angle minus its parent's (wrapped to

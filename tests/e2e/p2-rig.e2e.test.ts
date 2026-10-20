@@ -458,6 +458,50 @@ describe('transform constraints (rotation fraction, aim)', () => {
   });
 });
 
+describe('inherit flags', () => {
+  const ang = (m: M) => (Math.atan2(m[1], m[0]) * 180) / Math.PI;
+  const wrapD = (d: number) => ((((d + 180) % 360) + 360) % 360) - 180;
+
+  it('turning off rotation keeps the head where it is; then it ignores the torso sway; the IK forearm cannot drop flags', async () => {
+    await demo();
+    await page.getByTestId('mode-setup').click();
+    await page.getByTestId('tree-bone-head').click();
+    const head = await boneId('head'), torso = await boneId('torso');
+    const w0 = await worlds();
+    const u0 = (await state()).undo;
+    await page.getByTestId('bone-inherit-rotation').uncheck();
+    assert.equal((await state()).undo, u0 + 1, 'one undo step');
+    const b = (await project()).bones.find((x: any) => x.id === head);
+    assert.deepEqual(b.inherit, { rotation: false, scale: true, reflection: true });
+    const w1 = await worlds();
+    for (let k = 0; k < 6; k++) near(w1[head][k], w0[head][k], 1e-6, 'setup placement kept');
+    await page.getByTestId('mode-animate').click();
+    const torsoAngles: number[] = [];
+    for (const f of [4, 12]) {
+      await gotoFrame(f);
+      const w = await worlds();
+      const local = Number(await page.getByTestId('bone-rotation').inputValue());
+      near(wrapD(ang(w[head]) - local), 0, 0.01, `frame ${f}: the head's screen angle is its own rotation`);
+      torsoAngles.push(ang(w[torso]));
+    }
+    assert.ok(Math.abs(torsoAngles[0] - torsoAngles[1]) > 1, 'the torso did sway');
+    await page.getByTestId('mode-setup').click();
+    await page.getByTestId('bone-inherit-rotation').check();
+    assert.equal((await project()).bones.find((x: any) => x.id === head).inherit, undefined, 'all on = default, not stored');
+    await page.getByTestId('bone-inherit-scale').uncheck();
+    await page.getByTestId('bone-inherit-reflection').uncheck();
+    assert.deepEqual((await project()).bones.find((x: any) => x.id === head).inherit, { rotation: true, scale: false, reflection: false });
+    await page.keyboard.press('Control+z');
+    await page.keyboard.press('Control+z');
+    await page.getByTestId('tree-bone-forearm-front').click();
+    await page.getByTestId('ik-add-2').click();
+    await page.getByTestId('tree-bone-forearm-front').click();
+    assert.equal(await page.getByTestId('bone-inherit-scale').isDisabled(), true, 'IK bone 2 keeps full inheritance');
+    await page.getByTestId('tree-bone-arm-front').click();
+    assert.equal(await page.getByTestId('bone-inherit-scale').isDisabled(), false, 'IK bone 1 may drop flags');
+  });
+});
+
 describe('cutout tools and pivot mode', () => {
   let limbUrl = '';
   it('cuts a forearm out of one limb image with overlap and a joint bone — non-destructive, pixel-identical in place', async () => {
@@ -471,6 +515,7 @@ describe('cutout tools and pivot mode', () => {
     const before = await exportPng('cut-before.png');
     await page.getByTestId('att-cutout').click();
     const canvas = page.getByTestId('cutout-canvas');
+    await canvas.waitFor({ state: 'visible' }); // the dialog lays out before its box is read
     const box = (await canvas.boundingBox())!;
     const geo = { s: Number(await canvas.getAttribute('data-scale')), ox: Number(await canvas.getAttribute('data-ox')), oy: Number(await canvas.getAttribute('data-oy')) };
     const at = (x: number, y: number) => ({ x: box.x + geo.ox + x * geo.s, y: box.y + geo.oy + y * geo.s });
@@ -526,6 +571,7 @@ describe('cutout tools and pivot mode', () => {
     const n0 = (await project()).images.length;
     await page.getByTestId('att-cutout').click();
     const canvas = page.getByTestId('cutout-canvas');
+    await canvas.waitFor({ state: 'visible' }); // the dialog lays out before its box is read
     const box = (await canvas.boundingBox())!;
     const s = Number(await canvas.getAttribute('data-scale')), ox = Number(await canvas.getAttribute('data-ox')), oy = Number(await canvas.getAttribute('data-oy'));
     await page.mouse.click(box.x + ox + 20 * s, box.y + oy + 10 * s);
@@ -535,6 +581,7 @@ describe('cutout tools and pivot mode', () => {
     assert.equal((await project()).images.length, n0, 'cancel: nothing added');
     await page.getByTestId('att-cutout').click();
     await page.getByTestId('cut-mode-rect').click();
+    await page.getByTestId('cutout-canvas').waitFor({ state: 'visible' });
     const c2 = (await page.getByTestId('cutout-canvas').boundingBox())!;
     await drag({ x: c2.x + ox + 30 * s, y: c2.y + oy + 8 * s }, { x: c2.x + ox + 60 * s, y: c2.y + oy + 36 * s });
     await page.getByTestId('cut-bone').uncheck();
@@ -597,6 +644,7 @@ describe('persistence', () => {
     await page.getByTestId('mode-setup').click();
     await page.getByTestId('att-cutout').click();
     const canvas = page.getByTestId('cutout-canvas');
+    await canvas.waitFor({ state: 'visible' }); // the dialog lays out before its box is read
     const box = (await canvas.boundingBox())!;
     for (const [fx, fy] of [[0.3, 0.3], [0.7, 0.3], [0.5, 0.6]]) await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
     await page.getByTestId('cut-bone').uncheck();

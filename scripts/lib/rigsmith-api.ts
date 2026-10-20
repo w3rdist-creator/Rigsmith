@@ -26,7 +26,8 @@ import { setMixRule } from '../../src/model/mix.ts';
 import { addAimConstraint, addRotationConstraint, constraintNames } from '../../src/model/rigOps.ts';
 import { dataUrlBytes, decodePngExact, encodePngExact } from '../../src/model/png.ts';
 import { addSkin, setSkinEntry } from '../../src/model/skinOps.ts';
-import type { ClipSequence, ImageAsset, Project } from '../../src/model/types.ts';
+import type { BoneInherit, ClipSequence, ImageAsset, Project } from '../../src/model/types.ts';
+import { setBoneInherit } from '../../src/model/skeleton.ts';
 import { newId } from '../../src/model/types.ts';
 import { parseStepList } from '../../src/model/clipSequence.ts';
 import { buildZip } from '../../src/model/zip.ts';
@@ -197,6 +198,17 @@ export function addTransform(p: Project, req: TransformRequest): { name: string;
   tc.mix = req.mix;
   if (req.name) tc.name = req.name;
   return { name: tc.name, kind: tc.kind, angle: tc.angle };
+}
+
+/** Sets a bone's inherit flags by name (the bone keeps its setup placement on screen). */
+export function setInherit(p: Project, boneName: string, change: Partial<BoneInherit>): BoneInherit {
+  const id = boneNamed(p, boneName);
+  try {
+    setBoneInherit(p, id, change);
+  } catch (e) {
+    fail((e as Error).message);
+  }
+  return { rotation: true, scale: true, reflection: true, ...p.bones.find((b) => b.id === id)!.inherit };
 }
 
 function boneNamed(p: Project, name: string): string {

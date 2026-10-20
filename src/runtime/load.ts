@@ -68,7 +68,7 @@ function convertRuntime(raw: unknown): Project {
     if (!set.has(n)) throw new RuntimeError(`Unknown ${what} “${n}”.`);
     return n;
   };
-  const bones: Bone[] = rt.bones.map((b) => ({ id: b.name, name: b.name, parentId: b.parent === null ? null : need(boneNames, b.parent, 'parent bone'), x: b.x, y: b.y, rotation: b.rotation, scaleX: b.scaleX, scaleY: b.scaleY, length: b.length, color: '#8aa0ff' }));
+  const bones: Bone[] = rt.bones.map((b) => ({ id: b.name, name: b.name, parentId: b.parent === null ? null : need(boneNames, b.parent, 'parent bone'), x: b.x, y: b.y, rotation: b.rotation, scaleX: b.scaleX, scaleY: b.scaleY, length: b.length, color: '#8aa0ff', ...(b.inherit ? { inherit: { ...b.inherit } } : {}) }));
   const imgList = rt.images ?? rt.attachments.map((a) => ({ name: a.image, width: a.width, height: a.height }));
   const images: ImageAsset[] = [];
   for (const im of imgList) if (!images.some((x) => x.id === im.name)) images.push({ id: im.name, name: im.name, mime: '', width: im.width, height: im.height, dataUrl: '' });

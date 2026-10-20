@@ -6,7 +6,7 @@ import { angleOf } from './math.ts';
 import type { Mat, Vec } from './math.ts';
 import { apply, applyLinear, identity, invert, multiply, fromTRS } from './math.ts';
 import { drawOrderAt, steppedAt } from './evaluate.ts';
-import { attachmentWorld, computeWorld, isAncestorOrSelf, localFromWorld } from './skeleton.ts';
+import { attachmentWorld, boneLocalFromWorld, computeWorld, hasInheritFlags, isAncestorOrSelf, localFromWorld, parentLinear } from './skeleton.ts';
 import type { Animation, Attachment, Bone, ImageAsset, IkConstraint, PathConstraint, PathShape, Project, TransformConstraint } from './types.ts';
 import { makeBone, uniqueName } from './ops.ts';
 
@@ -97,6 +97,7 @@ export function addIk(project: Project, endBoneId: string, twoBone: boolean, ids
   if (!end) return null;
   const chain = twoBone ? (end.parentId ? [end.parentId, end.id] : null) : [end.id];
   if (!chain) return null;
+  if (twoBone && hasInheritFlags(end)) return null; // bone 2 of a chain must inherit fully
   const world = computeWorld(project.bones);
   const tip = apply(world.get(end.id)!, { x: end.length, y: 0 });
   const top = topAncestor(project.bones, chain[0]);
@@ -121,8 +122,8 @@ function bendOf(project: Project, chain: string[]): boolean {
   const cb = project.bones.find((b) => b.id === chain[1])!;
   const tip = apply(c, { x: cb.length, y: 0 });
   const cross = (tip.x - p.tx) * (c.ty - p.ty) - (tip.y - p.ty) * (c.tx - p.tx);
-  const parent = project.bones.find((b) => b.id === chain[0])!.parentId;
-  const pm = (parent && w.get(parent)) || identity();
+  // The frame bone 1's rotation lives in (its parent's linear part, filtered by its inherit flags).
+  const pm = parentLinear(project.bones, w, chain[0]);
   const mirrored = pm.a * pm.d - pm.b * pm.c < 0;
   return (cross >= 0) !== mirrored;
 }
@@ -234,7 +235,7 @@ export function moveBonePivot(project: Project, boneId: string, x: number, y: nu
   const newWorld = computeWorld(project.bones).get(boneId)!;
   const childShift = new Map<string, Vec>();
   for (const c of project.bones.filter((b) => b.parentId === boneId)) {
-    const l = localFromWorld(newWorld, before.get(c.id)!);
+    const l = boneLocalFromWorld(c, newWorld, before.get(c.id)!);
     childShift.set(c.id, { x: l.x - c.x, y: l.y - c.y });
     Object.assign(c, { x: round3(l.x), y: round3(l.y), rotation: l.rotation, scaleX: l.scaleX, scaleY: l.scaleY });
   }

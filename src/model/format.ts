@@ -1,4 +1,4 @@
-import { findCycles, isAncestorOrSelf } from './skeleton.ts';
+import { findCycles, hasInheritFlags, isAncestorOrSelf } from './skeleton.ts';
 import type {
   Animation,
   Attachment,
@@ -68,6 +68,7 @@ export function v2Features(p: Project): string[] {
 /** Lists the v3 features a project uses; non-empty ⇒ written as v3, which a v2 reader rejects. */
 export function v3Features(p: Project): string[] {
   const f = new Set<string>();
+  if (p.bones.some(hasInheritFlags)) f.add('bone inherit flags');
   if (p.transformConstraints?.length) f.add('transform constraints');
   for (const an of p.animations) if (an.constraints && Object.values(an.constraints).some((c) => c.angle?.length)) f.add('constraint angle keys');
   return [...f];
@@ -118,7 +119,11 @@ export function toFileObject(project: Project): Project {
     format: FORMAT_ID,
     version: requiredVersion(project),
     name: project.name,
-    bones: project.bones,
+    bones: project.bones.map((b) => {
+      if (b.inherit === undefined) return b;
+      const { inherit, ...rest } = b;
+      return hasInheritFlags(b) ? { ...rest, inherit: { rotation: inherit.rotation, scale: inherit.scale, reflection: inherit.reflection } } : rest;
+    }),
     images: project.images,
     attachments: project.attachments.map((a) => {
       const { hidden, mesh, ...base } = a;
@@ -373,6 +378,15 @@ export function validateProject(raw: unknown): ParseResult {
       length: c.num(b, 'length', w, 0),
       color: typeof b.color === 'string' ? b.color : '#8fd3c8',
     });
+    if (b.inherit !== undefined) {
+      v3only('bone inherit flags', w);
+      if (!isObj(b.inherit)) c.fail(`${w}.inherit must be an object`);
+      else {
+        const inh = { rotation: c.bool(b.inherit, 'rotation', `${w}.inherit`, true), scale: c.bool(b.inherit, 'scale', `${w}.inherit`, true), reflection: c.bool(b.inherit, 'reflection', `${w}.inherit`, true) };
+        // All flags on is the default: not stored, so the project re-saves at the lowest version.
+        if (!inh.rotation || !inh.scale || !inh.reflection) bones[bones.length - 1].inherit = inh;
+      }
+    }
   });
   for (const b of bones) {
     if (b.parentId !== null && !boneIds.has(b.parentId)) c.fail(`Bone "${b.name}" references missing parent "${b.parentId}"`);
@@ -439,6 +453,7 @@ export function validateProject(raw: unknown): ParseResult {
     if (chain.length < 1 || chain.length > 2 || chain.length !== (k.bones as unknown[]).length) c.fail(`${w}.bones must list 1 or 2 bone ids`);
     for (const b of chain) if (!boneIds.has(b)) c.fail(`${w} references missing bone "${b}"`);
     if (chain.length === 2 && bones.find((b) => b.id === chain[1])?.parentId !== chain[0]) c.fail(`${w}: the second bone must be a child of the first`);
+    if (chain.length === 2 && bones.some((b) => b.id === chain[1] && hasInheritFlags(b))) c.fail(`${w}: the second bone must inherit its parent's full transform (clear its inherit flags)`);
     const target = c.str(k, 'target', w);
     if (!boneIds.has(target)) c.fail(`${w} references missing target bone "${target}"`);
     else if (acyclic && chain.some((b) => isAncestorOrSelf(bones, b, target))) c.fail(`${w}: the target must not be (a child of) a constrained bone`);

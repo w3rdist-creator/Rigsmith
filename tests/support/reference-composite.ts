@@ -99,9 +99,35 @@ export function worldsFromLocal(project: any, local: Map<string, { x: number; y:
     const b = pending.splice(i, 1)[0];
     const l = local.get(b.id) ?? b;
     const m = trs(l.x, l.y, l.rotation, l.scaleX, l.scaleY);
-    out.set(b.id, b.parentId ? mul(out.get(b.parentId)!, m) : m);
+    out.set(b.id, b.parentId ? childWorld(out.get(b.parentId)!, b.inherit, m) : m);
   }
   return out;
+}
+
+/**
+ * Inherit flags (docs/architecture.md → Inherit flags): the origin always goes through the
+ * full parent; the axes go through the parent's linear part with the dropped parts removed.
+ * Restated with projections: X' = parent x column (negated when the parent mirrors), u =
+ * X'/|X'|, v = u turned +90°; rotation = the basis (u, v); scale/shear = X' and the y column
+ * written in (u, v); a kept reflection negates the result's x column.
+ */
+export function childWorld(P: M, inherit: any, L: M): M {
+  if (!inherit || (inherit.rotation && inherit.scale && inherit.reflection)) return mul(P, L);
+  const det = P[0] * P[3] - P[1] * P[2];
+  const X = det < 0 ? [-P[0], -P[1]] : [P[0], P[1]], Y = [P[2], P[3]];
+  const len = Math.hypot(X[0], X[1]);
+  const u = len > 1e-12 ? [X[0] / len, X[1] / len] : [1, 0], v = [-u[1], u[0]];
+  // Columns of the inherited linear part, built up as [col x, col y].
+  let cx: number[], cy: number[];
+  if (inherit.rotation && inherit.scale) [cx, cy] = [X, Y];
+  else if (inherit.rotation) [cx, cy] = [u, v];
+  else if (inherit.scale) [cx, cy] = [[len, 0], [Y[0] * u[0] + Y[1] * u[1], Y[0] * v[0] + Y[1] * v[1]]];
+  else [cx, cy] = [[1, 0], [0, 1]];
+  if (det < 0 && inherit.reflection) cx = [-cx[0], -cx[1]];
+  const lin: M = [cx[0], cx[1], cy[0], cy[1], 0, 0];
+  const o = mul(P, [1, 0, 0, 1, L[4], L[5]]);
+  const axes = mul(lin, [L[0], L[1], L[2], L[3], 0, 0]);
+  return [axes[0], axes[1], axes[2], axes[3], o[4], o[5]];
 }
 
 /** Blended continuous slot channels (a mixed frame): opacity and mesh deform per attachment id. */

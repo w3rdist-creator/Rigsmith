@@ -22,7 +22,8 @@ rounded.
 {
   "format": "rigsmith.runtime", "version": 2, "name": "…",
   "images": [{ "name": "torso.png", "width": 40, "height": 90 }],          // v2
-  "bones": [{ "name", "parent": null | "name", "x", "y", "rotation", "scaleX", "scaleY", "length" }],
+  "bones": [{ "name", "parent": null | "name", "x", "y", "rotation", "scaleX", "scaleY", "length",
+              "inherit"?: { "rotation", "scale", "reflection" } }],              // inherit: v3, only when a flag is off
   "attachments": [{                                                       // array order = setup draw order (back first)
     "name", "bone": null | "name", "image": "torso.png", "width", "height",
     "x", "y", "rotation", "scaleX", "scaleY", "opacity",
@@ -67,8 +68,8 @@ Baked data lets a consumer play without an interpolator: `frames` samples at `i 
 (`frames = duration·fps` for loops, which omit the repeat of frame 0; `+1` for one-shots).
 Bakes ignore skins and mixes (evaluate from keys for those).
 
-**Version 3** is version 2 plus `transformConstraints` and `angle` constraint keys
-(rules: `docs/architecture.md` → Transform constraints). It is written only when the rig
+**Version 3** is version 2 plus `transformConstraints`, `angle` constraint keys and bone
+`inherit` flags (rules: `docs/architecture.md` → Transform constraints, Inherit flags). It is written only when the rig
 uses them; a v2-only consumer can still play a v3 file's `baked` data, which already
 includes the constraints.
 

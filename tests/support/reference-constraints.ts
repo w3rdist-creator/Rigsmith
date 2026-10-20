@@ -25,7 +25,7 @@
 //   constraints solved on the blended local pose; visibility, image and draw order from
 //   the newest entry with w ≥ 0.5; opacity and deform blended along the chain.
 import type { M } from './reference-composite.ts';
-import { sampleTrack, worldsFromLocal } from './reference-composite.ts';
+import { childWorld, sampleTrack, worldsFromLocal } from './reference-composite.ts';
 
 export interface Local { x: number; y: number; rotation: number; scaleX: number; scaleY: number }
 
@@ -65,6 +65,17 @@ const parentWorld = (project: any, worlds: Map<string, M>, id: string): M => {
   return (pid && worlds.get(pid)) || [1, 0, 0, 1, 0, 0];
 };
 
+/** The linear frame a bone's rotation lives in: its parent's axes as the bone inherits them (inherit flags). */
+const frameOf = (project: any, worlds: Map<string, M>, id: string): M => {
+  const b = project.bones.find((x: any) => x.id === id);
+  const m = childWorld(parentWorld(project, worlds, id), b?.inherit, [1, 0, 0, 1, 0, 0]);
+  return [m[0], m[1], m[2], m[3], 0, 0];
+};
+const flagged = (project: any, id: string) => {
+  const i = project.bones.find((x: any) => x.id === id)?.inherit;
+  return !!i && !(i.rotation && i.scale && i.reflection);
+};
+
 /** Local rotation (degrees) that points the bone's +x along world direction (dx, dy). */
 function aimRotation(parent: M, dx: number, dy: number, local: Local): number {
   const [lx, ly] = linear(invert(parent), dx, dy);
@@ -77,7 +88,7 @@ export function solveIkRef(project: any, pose: Map<string, Local>, ik: any, mix:
   const worlds = worldsFromLocal(project, pose);
   const tw = worlds.get(ik.target)!, w1 = worlds.get(p1)!;
   const l1 = pose.get(p1)!;
-  const parent = parentWorld(project, worlds, p1);
+  const parent = flagged(project, p1) ? frameOf(project, worlds, p1) : parentWorld(project, worlds, p1);
   const keep = (id: string, solved: number) => {
     const l = pose.get(id)!;
     const near = l.rotation + wrap180(solved - l.rotation);
@@ -94,8 +105,8 @@ export function solveIkRef(project: any, pose: Map<string, Local>, ik: any, mix:
   const l2 = pose.get(p2)!;
   const child = project.bones.find((b: any) => b.id === p2);
   // Parent-local space: shoulder at l1.(x,y), target q relative to it.
-  const [tx, ty] = xform(invert(parent), tw[4], tw[5]);
-  const qx = tx - l1.x, qy = ty - l1.y;
+  // With inherit flags the shoulder's axes live in its filtered frame: q = frame⁻¹ · (target − shoulder).
+  const [qx, qy] = flagged(project, p1) ? xform(invert(parent), tw[4] - w1[4], tw[5] - w1[5]) : ((t) => [t[0] - l1.x, t[1] - l1.y])(xform(invert(parent), tw[4], tw[5]));
   const D = Math.hypot(qx, qy);
   const s = l1.scaleX; // uniform: S1 = s·I (s < 0 = a half turn)
   const k = l2.scaleX * child.length;
@@ -200,7 +211,7 @@ export function solvePathRef(project: any, pose: Map<string, Local>, pc: any, po
     const next = { ...cur, x: cur.x + mix * (lx - cur.x), y: cur.y + mix * (ly - cur.y) };
     if (pc.rotate) {
       const a = (at.tangent + pc.rotateOffset) * RAD;
-      const solved = aimRotation(parent, Math.cos(a), Math.sin(a), cur);
+      const solved = aimRotation(frameOf(project, worlds, id), Math.cos(a), Math.sin(a), cur);
       next.rotation = cur.rotation + mix * wrap180(solved - cur.rotation);
     }
     pose.set(id, next);
@@ -228,7 +239,7 @@ export function solveTransformRef(project: any, pose: Map<string, Local>, tc: an
   } else {
     const ref = tc.relativeTo ? worlds.get(tc.relativeTo) : null;
     const a = (angle + (ref ? deg(ref[0], ref[1]) : 0)) * RAD;
-    solved = aimRotation(parentWorld(project, worlds, tc.bone), Math.cos(a), Math.sin(a), cur);
+    solved = aimRotation(frameOf(project, worlds, tc.bone), Math.cos(a), Math.sin(a), cur);
   }
   const next = { ...cur, rotation: cur.rotation + mix * wrap180(solved - cur.rotation) };
   if (scaleY !== null) next.scaleY = cur.scaleY + mix * (scaleY - cur.scaleY);

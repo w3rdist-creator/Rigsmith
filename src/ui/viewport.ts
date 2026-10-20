@@ -9,7 +9,7 @@ import { PathTable, pathWorldMatrix } from '../model/constraints.ts';
 import { snapToFrame } from '../model/animation.ts';
 import { bindAll, deformAt, keyDeform, moveMeshPoint, paintVertex, vertexJacobian, worldDeltaToLocal } from '../model/meshOps.ts';
 import { moveBonePivot } from '../model/rigOps.ts';
-import { attachmentWorld, boneTip, computeWorld, parentWorld, toLocal, topoOrder } from '../model/skeleton.ts';
+import { attachmentWorld, boneTip, computeWorld, parentLinear, parentWorld, toLocal, topoOrder } from '../model/skeleton.ts';
 import type { Bone, PathShape, Project } from '../model/types.ts';
 import { cloneProject, newId } from '../model/types.ts';
 import { drawFrame } from '../render/draw.ts';
@@ -302,7 +302,7 @@ export class Viewport {
         const m = world.get(target!.id);
         const pose = ed.pose().get(target!.id);
         if (!m || !pose) return null;
-        const pw = parentWorld(ed.project.bones, world, target!.id);
+        const pw = parentLinear(ed.project.bones, world, target!.id);
         return { origin: { x: m.tx, y: m.ty }, m, rot: pose.rotation, sx: pose.scaleX, sy: pose.scaleY, parentDet: determinant(pw) };
       }
       const a = ed.project.attachments.find((x) => x.id === target!.id);
@@ -479,7 +479,7 @@ export class Viewport {
         const bone = ed.project.bones.find((b) => b.id === d.id);
         if (!bone) return;
         const world = ed.world();
-        const pw = parentWorld(ed.project.bones, world, d.id);
+        const pw = parentLinear(ed.project.bones, world, d.id);
         const len = Math.hypot(wp.x - d.start.x, wp.y - d.start.y);
         const worldAng = Math.atan2(wp.y - d.start.y, wp.x - d.start.x) * (180 / Math.PI);
         let rot = worldAng - angleOf(pw);

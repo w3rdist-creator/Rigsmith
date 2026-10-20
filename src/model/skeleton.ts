@@ -1,6 +1,6 @@
 import type { Mat, Vec } from './math.ts';
 import { apply, applyLinear, decompose, fromTRS, identity, invert, multiply } from './math.ts';
-import type { Attachment, Bone, LocalPose, Project } from './types.ts';
+import type { Attachment, Bone, BoneInherit, LocalPose, Project } from './types.ts';
 
 export function boneById(bones: readonly Bone[], id: string | null | undefined): Bone | undefined {
   if (!id) return undefined;
@@ -83,16 +83,62 @@ export function localMatrix(p: LocalPose): Mat {
   return fromTRS(p.x, p.y, p.rotation, p.scaleX, p.scaleY);
 }
 
+/** True when the bone drops some part of its parent's transform (v3 inherit flags). */
+export function hasInheritFlags(b: Pick<Bone, 'inherit'>): boolean {
+  const i = b.inherit;
+  return !!i && (!i.rotation || !i.scale || !i.reflection);
+}
+
+const linearOf = (m: Mat): Mat => ({ a: m.a, b: m.b, c: m.c, d: m.d, tx: 0, ty: 0 });
+
 /**
- * World matrix per bone: world(bone) = world(parent) · local(bone).
- * `pose` overrides setup values (used for animation); missing entries use setup.
+ * Linear part (translation 0) a bone takes from its parent's world matrix M.
+ * Without flags: M's linear part. Otherwise M is factored as R(θ) · K · F, where F is a
+ * left↔right mirror when det M < 0 (else identity), R(θ) the rotation of M·F's x axis
+ * (the world x-axis angle) and K upper triangular with a positive diagonal (scale and
+ * shear); a flag set to false drops its factor. Reflection is always a left↔right mirror,
+ * so a rig mirrored with scaleX −1 stays the exact mirror image with any flags.
+ */
+export function inheritedLinear(parent: Mat, inherit: Bone['inherit']): Mat {
+  if (!inherit || (inherit.rotation && inherit.scale && inherit.reflection)) return linearOf(parent);
+  const flip = parent.a * parent.d - parent.b * parent.c < 0;
+  const na = flip ? -parent.a : parent.a, nb = flip ? -parent.b : parent.b;
+  const sx = Math.hypot(na, nb);
+  let cos = 1, sin = 0;
+  let k: Mat = { a: na, b: nb, c: parent.c, d: parent.d, tx: 0, ty: 0 };
+  if (sx > 1e-12) {
+    cos = na / sx;
+    sin = nb / sx;
+    k = { a: sx, b: 0, c: cos * parent.c + sin * parent.d, d: (na * parent.d - nb * parent.c) / sx, tx: 0, ty: 0 };
+  }
+  let m = identity();
+  if (inherit.rotation) m = { a: cos, b: sin, c: -sin, d: cos, tx: 0, ty: 0 };
+  if (inherit.scale) m = multiply(m, k);
+  if (flip && inherit.reflection) m = multiply(m, { a: -1, b: 0, c: 0, d: 1, tx: 0, ty: 0 });
+  return m;
+}
+
+/**
+ * World matrix of a bone under `parent`: its origin is always placed by the full parent
+ * matrix; its axes take the parent's linear part filtered by the inherit flags.
+ */
+export function composeChild(parent: Mat, bone: Pick<Bone, 'inherit'>, local: Mat): Mat {
+  if (!hasInheritFlags(bone)) return multiply(parent, local);
+  const o = apply(parent, { x: local.tx, y: local.ty });
+  const lin = multiply(inheritedLinear(parent, bone.inherit), linearOf(local));
+  return { ...lin, tx: o.x, ty: o.y };
+}
+
+/**
+ * World matrix per bone: world(bone) = world(parent) · local(bone) (composeChild with
+ * inherit flags). `pose` overrides setup values (used for animation); missing entries use setup.
  */
 export function computeWorld(bones: readonly Bone[], pose?: ReadonlyMap<string, LocalPose>): Map<string, Mat> {
   const world = new Map<string, Mat>();
   for (const b of topoOrder(bones)) {
     const local = localMatrix(pose?.get(b.id) ?? b);
     const parent = b.parentId ? world.get(b.parentId) : undefined;
-    world.set(b.id, parent ? multiply(parent, local) : local);
+    world.set(b.id, parent ? composeChild(parent, b, local) : local);
   }
   return world;
 }
@@ -100,6 +146,16 @@ export function computeWorld(bones: readonly Bone[], pose?: ReadonlyMap<string, 
 export function parentWorld(bones: readonly Bone[], world: ReadonlyMap<string, Mat>, boneId: string): Mat {
   const b = boneById(bones, boneId);
   return (b?.parentId && world.get(b.parentId)) || identity();
+}
+
+/**
+ * The linear frame a bone's local rotation and scale live in (its parent's linear part
+ * filtered by the bone's inherit flags). Use it for angles; use parentWorld for positions.
+ */
+export function parentLinear(bones: readonly Bone[], world: ReadonlyMap<string, Mat>, boneId: string): Mat {
+  const b = boneById(bones, boneId);
+  const parent = (b?.parentId && world.get(b.parentId)) || identity();
+  return b && hasInheritFlags(b) ? inheritedLinear(parent, b.inherit) : linearOf(parent);
 }
 
 export function attachmentWorld(att: Attachment, world: ReadonlyMap<string, Mat>): Mat {
@@ -124,6 +180,14 @@ export function toLocal(parent: Mat, worldPoint: Vec): Vec {
 export function localFromWorld(parent: Mat, targetWorld: Mat): LocalPose {
   const t = decompose(multiply(invert(parent), targetWorld));
   return { x: t.x, y: t.y, rotation: t.rotation, scaleX: t.scaleX, scaleY: t.scaleY };
+}
+
+/** localFromWorld for a bone with inherit flags: position under the full parent, axes under its filtered linear part. */
+export function boneLocalFromWorld(bone: Pick<Bone, 'inherit'>, parent: Mat, targetWorld: Mat): LocalPose {
+  if (!hasInheritFlags(bone)) return localFromWorld(parent, targetWorld);
+  const o = apply(invert(parent), { x: targetWorld.tx, y: targetWorld.ty });
+  const t = decompose(multiply(invert(inheritedLinear(parent, bone.inherit)), linearOf(targetWorld)));
+  return { x: o.x, y: o.y, rotation: t.rotation, scaleX: t.scaleX, scaleY: t.scaleY };
 }
 
 export function childrenOf(bones: readonly Bone[], id: string | null): Bone[] {
@@ -153,6 +217,26 @@ export class CycleError extends Error {
 }
 
 /**
+ * Sets which parts of its parent's transform a bone inherits (v3). The bone keeps its
+ * setup-pose world placement (its local transform is recomputed); its keys are unchanged.
+ * Refused for the second bone of a two-bone IK chain, which must inherit fully.
+ */
+export function setBoneInherit(project: Project, boneId: string, change: Partial<BoneInherit>): void {
+  const bone = boneById(project.bones, boneId);
+  if (!bone) throw new Error(`Unknown bone ${boneId}`);
+  const next: BoneInherit = { rotation: true, scale: true, reflection: true, ...bone.inherit, ...change };
+  const flagged = !next.rotation || !next.scale || !next.reflection;
+  if (flagged && project.ik?.some((k) => k.bones.length === 2 && k.bones[1] === boneId)) {
+    throw new Error(`“${bone.name}” is the second bone of an IK chain, which must inherit its parent's full transform.`);
+  }
+  const world = computeWorld(project.bones);
+  const parent = bone.parentId ? world.get(bone.parentId) : undefined;
+  if (flagged) bone.inherit = next;
+  else delete bone.inherit;
+  if (parent) Object.assign(bone, boneLocalFromWorld(bone, parent, world.get(boneId)!));
+}
+
+/**
  * Reparents a bone in the setup pose. With keepWorld the bone stays visually where it
  * is (its local transform is recomputed under the new parent). Throws CycleError if
  * the change would make the bone its own ancestor.
@@ -168,7 +252,7 @@ export function reparentBone(project: Project, boneId: string, newParentId: stri
     const world = computeWorld(project.bones);
     const boneWorld = world.get(boneId) ?? identity();
     const newParent = (newParentId && world.get(newParentId)) || identity();
-    Object.assign(bone, localFromWorld(newParent, boneWorld));
+    Object.assign(bone, newParentId === null ? localFromWorld(identity(), boneWorld) : boneLocalFromWorld(bone, newParent, boneWorld));
   }
   bone.parentId = newParentId;
 }
@@ -184,7 +268,7 @@ export function deleteBone(project: Project, boneId: string): void {
   const newParentId = bone.parentId;
   const newParent = (newParentId && world.get(newParentId)) || identity();
   for (const child of childrenOf(project.bones, boneId)) {
-    Object.assign(child, localFromWorld(newParent, world.get(child.id) ?? identity()));
+    Object.assign(child, newParentId === null ? localFromWorld(identity(), world.get(child.id) ?? identity()) : boneLocalFromWorld(child, newParent, world.get(child.id) ?? identity()));
     child.parentId = newParentId;
   }
   for (const att of project.attachments) {

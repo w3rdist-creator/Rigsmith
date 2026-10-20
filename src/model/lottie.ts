@@ -21,6 +21,7 @@ import { frameWarnings, requestGeometry } from './sequence.ts';
 import type { Bounds } from './evaluate.ts';
 import { evaluate, frameBounds } from './evaluate.ts';
 import type { Animation, Curve, Key, Project, ProjectFrame } from './types.ts';
+import { hasInheritFlags } from './skeleton.ts';
 
 export interface LottieDiagnostic {
   level: 'error' | 'note';
@@ -39,6 +40,7 @@ export function lottieDiagnostics(project: Project, anim: Animation): LottieDiag
   const out: LottieDiagnostic[] = [];
   const err = (feature: string, item: string, message: string) => out.push({ level: 'error', feature, item, message });
   for (const k of project.ik ?? []) err('IK constraint', k.name, `IK “${k.name}” is solved at runtime; Lottie has no IK. Not exported. Rigsmith has no command that bakes IK into keys: to export this rig, delete the IK constraint and key the chain’s rotations by hand.`);
+  for (const b of project.bones) if (hasInheritFlags(b)) err('inherit flags', b.name, `Bone “${b.name}” does not inherit its parent's full transform; Lottie parenting always does. Not exported.`);
   for (const k of project.transformConstraints ?? []) err('transform constraint', k.name, `Transform constraint “${k.name}” is solved at runtime; Lottie has no equivalent. Not exported.`);
   for (const k of project.pathConstraints ?? []) err('path constraint', k.name, `Path constraint “${k.name}” has no Lottie equivalent. Not exported.`);
   for (const a of project.attachments) if (a.mesh) err('mesh', a.name, `“${a.name}” is a mesh; Lottie image layers cannot deform. Not exported.`);

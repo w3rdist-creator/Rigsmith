@@ -23,6 +23,18 @@ export interface Bone {
   /** Visual length along the bone's local +x axis. */
   length: number;
   color: string;
+  /**
+   * v3: what the bone takes from its parent besides position (absent = everything). A
+   * flag set to false drops that part of the parent's transform (see inheritedLinear).
+   * Written only when a flag is false.
+   */
+  inherit?: BoneInherit;
+}
+
+export interface BoneInherit {
+  rotation: boolean;
+  scale: boolean;
+  reflection: boolean;
 }
 
 /** How a derived image was produced from another one (v2, cutout tools). */

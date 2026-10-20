@@ -11,7 +11,7 @@ import { frameCount } from './animation.ts';
 import { evaluate } from './evaluate.ts';
 import { v3Features } from './format.ts';
 import { angleOf, round } from './math.ts';
-import { topoOrder } from './skeleton.ts';
+import { hasInheritFlags, topoOrder } from './skeleton.ts';
 import type { Curve, Interp, Key, PathNode, Project } from './types.ts';
 
 export const RUNTIME_FORMAT_ID = 'rigsmith.runtime';
@@ -31,7 +31,8 @@ export interface RuntimeExport {
   name: string;
   /** v2: every image an attachment, key or skin can show (name = atlas region name). */
   images: { name: string; width: number; height: number }[];
-  bones: { name: string; parent: string | null; x: number; y: number; rotation: number; scaleX: number; scaleY: number; length: number }[];
+  /** v3: `inherit` only on bones with a flag off (see Bone.inherit). */
+  bones: { name: string; parent: string | null; x: number; y: number; rotation: number; scaleX: number; scaleY: number; length: number; inherit?: { rotation: boolean; scale: boolean; reflection: boolean } }[];
   attachments: {
     name: string; bone: string | null; image: string; width: number; height: number; x: number; y: number; rotation: number; scaleX: number; scaleY: number; opacity: number;
     /** v2: hidden in the setup pose. */
@@ -140,6 +141,7 @@ export function exportRuntime(project: Project): RuntimeExport {
       scaleX: b.scaleX,
       scaleY: b.scaleY,
       length: b.length,
+      ...(hasInheritFlags(b) ? { inherit: { ...b.inherit! } } : {}),
     })),
     attachments: project.attachments.map((a) => {
       const im = imageOf.get(a.imageId);
