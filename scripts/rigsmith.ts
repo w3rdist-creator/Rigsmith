@@ -8,6 +8,7 @@ import path from 'node:path';
 import type { MissingPolicy } from '../src/model/mix.ts';
 import type { Project, ProjectFrame } from '../src/model/types.ts';
 import { safeName } from '../src/render/sequence.ts';
+import { resolveLimits } from '../src/model/sequence.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
 import type { TransformRequest, VertexAlphaRequest, WeightRequest } from './lib/rigsmith-api.ts';
@@ -26,6 +27,11 @@ const USAGE = `rigsmith <command> [options]
   set-sequence <project> --name <sequence> --steps "idle*2,greeting,idle" [--loop] --out <project>
   frame: --frame project|fit|<x,y,width,height>  (default fit: each export fits its animation)
          --frame-from <other.rig.json>           (use that project's frame, e.g. to align two versions)
+  render options (render, mix, media, sequence):
+         --max-frames N        raise the 2000-frame cap (at most 20000)
+         --max-megapixels M    raise the 600-megapixel total cap (at most 6000)
+         --profile-dir <dir>   where the headless browser's throw-away profile goes
+                               (default .hermes/browser-profiles/cli; env RIGSMITH_PROFILE_DIR)
   add-image <project> --file <image.png> [--name <name>] --out <project>
   replace-image <project> --image <name> --file <image.png> [--allow-resize] --out <project>
   skin <project> --name <skin> [--set attachment=image ...] [--keyed attachment:fromImage=image ...] --out <project>
@@ -164,13 +170,16 @@ async function main(): Promise<Record<string, unknown>> {
       if (bgFlag !== undefined && !/^#[0-9a-f]{6}$/i.test(bgFlag)) usage(`--background must be #rrggbb (got “${bgFlag}”).`);
       const asSequence = cmd === 'render' || (cmd === 'media' && !flag('from'));
       const frame = frameOption(p);
+      const limits = { maxFrames: num('max-frames'), maxMegapixels: num('max-megapixels') };
+      const lim = resolveLimits(limits);
+      if (!lim.ok) usage(lim.errors.join(' '));
       const req =
         cmd === 'sequence'
-          ? { kind: 'clips' as const, sequence: need('name'), skin: flag('skin') ?? null, fps: num('fps'), scale: num('scale'), padding: num('padding'), frame }
+          ? { kind: 'clips' as const, sequence: need('name'), skin: flag('skin') ?? null, fps: num('fps'), scale: num('scale'), padding: num('padding'), frame, limits }
           : asSequence
-          ? { kind: 'sequence' as const, anim: need('anim'), skin: flag('skin') ?? null, fps: num('fps'), start: num('start'), end: num('end'), scale: num('scale'), padding: num('padding'), frame }
-          : { kind: 'mix' as const, from: need('from'), to: need('to'), at: num('at') ?? usage('--at is required.'), duration: num('duration'), missing: (flag('missing') ?? 'setup') as MissingPolicy, skin: flag('skin') ?? null, fps: num('fps'), scale: num('scale'), padding: num('padding'), frame };
-      const r = await withRenderer((rd) => rd.render(p, req, { onProgress: progress, isCancelled: () => cancelled }));
+          ? { kind: 'sequence' as const, anim: need('anim'), skin: flag('skin') ?? null, fps: num('fps'), start: num('start'), end: num('end'), scale: num('scale'), padding: num('padding'), frame, limits }
+          : { kind: 'mix' as const, from: need('from'), to: need('to'), at: num('at') ?? usage('--at is required.'), duration: num('duration'), missing: (flag('missing') ?? 'setup') as MissingPolicy, skin: flag('skin') ?? null, fps: num('fps'), scale: num('scale'), padding: num('padding'), frame, limits };
+      const r = await withRenderer((rd) => rd.render(p, req, { onProgress: progress, isCancelled: () => cancelled }), { profileDir: flag('profile-dir') });
       process.stderr.write('\n');
       for (const w of r.warnings) process.stderr.write(`warning: ${w}\n`);
       if (format !== 'zip') {

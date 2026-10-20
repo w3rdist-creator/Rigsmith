@@ -33,8 +33,11 @@ export function sampleKeys(keys: readonly Key[], t: number, fallback: readonly n
   const k0 = keys[lo];
   const k1 = keys[hi];
   const span = k1.time - k0.time;
-  const alpha = span > 0 ? easeFor(k0.interp, (t - k0.time) / span, k0.curve) : 0;
-  return k0.value.map((v, i) => lerp(v, k1.value[i] ?? v, alpha));
+  const u = span > 0 ? (t - k0.time) / span : 0;
+  const alpha = span > 0 ? easeFor(k0.interp, u, k0.curve) : 0;
+  // Per-axis translate easing (v3): component 1 (y) follows interpY/curveY.
+  const alphaY = k0.interpY && span > 0 ? easeFor(k0.interpY, u, k0.curveY) : alpha;
+  return k0.value.map((v, i) => lerp(v, k1.value[i] ?? v, i === 1 ? alphaY : alpha));
 }
 
 /** Local pose of a bone at time t: keyed channels override the setup pose. */
@@ -93,6 +96,21 @@ export function setInterp(key: Key, interp: Interp, curve?: Curve): void {
   key.interp = interp;
   if (interp === 'bezier') key.curve = (curve ?? key.curve ?? [1 / 3, 1 / 3, 2 / 3, 2 / 3]).slice() as Curve;
   else delete key.curve;
+}
+
+/**
+ * Sets (or with null clears) a translate key's separate y interpolation; `curveY` is kept
+ * only for bezier. x keeps `interp`/`curve`.
+ */
+export function setInterpY(key: Key, interp: Interp | null, curve?: Curve): void {
+  if (!interp) {
+    delete key.interpY;
+    delete key.curveY;
+    return;
+  }
+  key.interpY = interp;
+  if (interp === 'bezier') key.curveY = (curve ?? key.curveY ?? [1 / 3, 1 / 3, 2 / 3, 2 / 3]).slice() as Curve;
+  else delete key.curveY;
 }
 
 /** Inserts a key object (any keyed type with a time) keeping the list sorted by time. */

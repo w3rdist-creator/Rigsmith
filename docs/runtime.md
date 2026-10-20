@@ -59,6 +59,8 @@ rounded.
 
 `Key = { "time", "value": [..], "interp": "linear" | "step" | "smooth" | "bezier", "curve"?: [x1, y1, x2, y2] }`
 (the interpolation applies to the segment leaving the key; `curve` only on bezier keys).
+v3, translate keys only: `"interpY"` (+ `"curveY"` when it is bezier) eases the y component
+separately; x keeps `interp`/`curve`. Absent = y follows `interp`.
 
 Evaluation rules are those of the editor (`docs/architecture.md`): local pose from keys
 (stepped channels show setup before their first key; interpolated channels hold their
@@ -75,7 +77,7 @@ Baked data lets a consumer play without an interpolator: `frames` samples at `i 
 Bakes ignore skins and mixes (evaluate from keys for those).
 
 **Version 3** is version 2 plus `transformConstraints`, `angle` constraint keys, bone
-`inherit` flags, attachment `blend` and `color`, slot `color` keys, mesh `alphas` and mesh `bind`
+`inherit` flags, attachment `blend` and `color`, slot `color` keys, mesh `alphas`, mesh `bind` and translate keys' `interpY`/`curveY`
 (rules: `docs/architecture.md` → Transform constraints, Inherit flags, Blend, tint and
 vertex alpha). It is written only when the rig uses them; a v2-only consumer can still
 play a v3 file's `baked` data, which already includes the constraints (but must draw the

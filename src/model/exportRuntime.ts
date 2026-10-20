@@ -25,6 +25,9 @@ export interface RuntimeKey {
   interp: Interp;
   /** v2: bezier handles [x1, y1, x2, y2]. */
   curve?: Curve;
+  /** v3, translate keys: the y component's own interpolation (and bezier handles). */
+  interpY?: Interp;
+  curveY?: Curve;
 }
 
 export interface RuntimeExport {
@@ -84,7 +87,7 @@ export interface RuntimeExport {
 // exactly), so a player evaluating from keys reproduces the editor exactly; only the
 // baked per-frame data is rounded.
 const conv = (ks: readonly Key[] | undefined): RuntimeKey[] =>
-  (ks ?? []).map((k) => ({ time: k.time, value: k.value.slice(), interp: k.interp, ...(k.curve ? { curve: [...k.curve] as Curve } : {}) }));
+  (ks ?? []).map((k) => ({ time: k.time, value: k.value.slice(), interp: k.interp, ...(k.curve ? { curve: [...k.curve] as Curve } : {}), ...(k.interpY ? { interpY: k.interpY } : {}), ...(k.curveY ? { curveY: [...k.curveY] as Curve } : {}) }));
 
 /**
  * Names must be unique per kind for name references to be unambiguous; returns the

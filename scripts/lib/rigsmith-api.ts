@@ -9,7 +9,7 @@
 // network socket is opened) and loads `render.html` — a dedicated render entry, not the
 // editor. The browser is always closed before `withRenderer` returns or throws.
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
 import type { AtlasMeta, AtlasOptions } from '../../src/model/atlas.ts';
@@ -410,13 +410,25 @@ export interface Renderer {
   render(p: Project, req: PrepareRequest, opts?: { onProgress?: (done: number, total: number) => void; isCancelled?: () => boolean }): Promise<SequenceResult>;
 }
 
-export async function withRenderer<T>(fn: (r: Renderer) => Promise<T>, opts: { profile?: string } = {}): Promise<T> {
+/**
+ * `profileDir` (or RIGSMITH_PROFILE_DIR): a directory outside the editor checkout for the
+ * browser profile; a fresh `rigsmith-profile-*` folder is made in it and removed afterwards.
+ * Without it the profile is `.hermes/browser-profiles/<profile>` (cleared on each run).
+ */
+export async function withRenderer<T>(fn: (r: Renderer) => Promise<T>, opts: { profile?: string; profileDir?: string } = {}): Promise<T> {
   const dist = path.join(ROOT, 'dist');
   if (!existsSync(path.join(dist, 'render.html'))) throw new ApiError('dist/render.html is missing — run `npm run build` first.', undefined, EXIT.environment);
   if (!existsSync(CHROME)) throw new ApiError(`Chrome for Testing not found at ${CHROME} (set RIGSMITH_CFT).`, undefined, EXIT.environment);
-  const profile = path.join(ROOT, '.hermes/browser-profiles', opts.profile ?? 'cli');
-  rmSync(profile, { recursive: true, force: true });
-  mkdirSync(profile, { recursive: true });
+  const outside = opts.profileDir ?? process.env.RIGSMITH_PROFILE_DIR;
+  let profile: string;
+  if (outside) {
+    mkdirSync(outside, { recursive: true });
+    profile = mkdtempSync(path.join(path.resolve(outside), 'rigsmith-profile-'));
+  } else {
+    profile = path.join(ROOT, '.hermes/browser-profiles', opts.profile ?? 'cli');
+    rmSync(profile, { recursive: true, force: true });
+    mkdirSync(profile, { recursive: true });
+  }
   const ctx = await chromium.launchPersistentContext(profile, {
     executablePath: CHROME,
     headless: true,
@@ -463,6 +475,7 @@ export async function withRenderer<T>(fn: (r: Renderer) => Promise<T>, opts: { p
     return await fn(renderer);
   } finally {
     await ctx.close();
+    if (outside) rmSync(profile, { recursive: true, force: true });
   }
 }
 

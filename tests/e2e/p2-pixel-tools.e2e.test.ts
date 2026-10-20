@@ -73,10 +73,20 @@ async function openCutout(): Promise<(x: number, y: number, mods?: ('Shift')[]) 
   await page.getByTestId('att-cutout').click();
   const canvas = page.getByTestId('cutout-canvas');
   await canvas.waitFor();
-  const box = (await canvas.boundingBox())!;
-  const s = Number(await canvas.getAttribute('data-scale')), ox = Number(await canvas.getAttribute('data-ox')), oy = Number(await canvas.getAttribute('data-oy'));
+  // The dialog re-renders (a new canvas) when the speck count arrives and after each
+  // click, so the geometry is read fresh for every click, never from a stale element.
   await page.waitForFunction(() => !/Counting/.test(document.querySelector('[data-testid="cut-speck-count"]')?.textContent ?? 'Counting'));
+  const geometry = async () => {
+    for (let tries = 0; tries < 20; tries++) {
+      const box = await canvas.boundingBox().catch(() => null);
+      const attrs = await canvas.evaluate((c) => [c.dataset.scale, c.dataset.ox, c.dataset.oy].map(Number)).catch(() => null);
+      if (box && attrs && attrs.every(Number.isFinite)) return { box, s: attrs[0], ox: attrs[1], oy: attrs[2] };
+      await page.waitForTimeout(50);
+    }
+    throw new Error('cutout canvas geometry unavailable');
+  };
   return async (x, y, mods = []) => {
+    const { box, s, ox, oy } = await geometry();
     for (const m of mods) await page.keyboard.down(m);
     await page.mouse.click(box.x + ox + (x + 0.5) * s, box.y + oy + (y + 0.5) * s);
     for (const m of mods) await page.keyboard.up(m);

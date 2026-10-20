@@ -48,6 +48,7 @@ export function lottieDiagnostics(project: Project, anim: Animation): LottieDiag
   for (const a of project.attachments) if (a.blend && a.blend !== 'normal') err('blend mode', a.name, `“${a.name}” uses the ${a.blend} blend mode; this exporter writes normal layers only. Not exported.`);
   for (const a of project.attachments) if (a.color && !isWhite(setupColor(a))) err('tint', a.name, `“${a.name}” is tinted; Lottie image layers have no tint in this subset. Not exported.`);
   if (anim.drawOrder?.length) err('draw-order keys', anim.name, `“${anim.name}” keys the draw order; Lottie layer order is fixed. Not exported.`);
+  for (const [id, tr] of Object.entries(anim.tracks)) if (tr.translate.some((k) => k.interpY)) err('per-axis easing', project.bones.find((b) => b.id === id)?.name ?? id, 'Separate x / y easing on a translate key is not exported in this Lottie subset (one easing per keyframe). Not exported.');
   for (const [id, st] of Object.entries(anim.slots ?? {})) if (st.color?.length) err('colour keys', project.attachments.find((a) => a.id === id)?.name ?? id, 'Colour keys have no equivalent in this Lottie subset. Not exported.');
   for (const [id, st] of Object.entries(anim.slots ?? {})) if (st.deform?.length) err('deform keys', project.attachments.find((a) => a.id === id)?.name ?? id, 'Deform keys need meshes. Not exported.');
   if (anim.constraints && Object.keys(anim.constraints).length) err('constraint keys', anim.name, 'Constraint keys have no Lottie equivalent.');

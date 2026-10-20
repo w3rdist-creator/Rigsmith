@@ -127,6 +127,10 @@ fileIn.addEventListener('change', async () => {
 
 function prepare(): void {
   if (!player) return;
+  // A running loop holds the old clip's frames and timing: stop it, and restart on the new
+  // clip once it is prepared (showcase 1 R1: switching clips mid-play froze the player).
+  const wasPlaying = !!raf;
+  stop();
   const r = state.mixTo ? player.prepareMix(state.anim, state.mixTo, state.mixAt, state.skin || null) : player.prepare(state.anim, state.skin || null);
   if (!r.ok) {
     clearView();
@@ -140,6 +144,7 @@ function prepare(): void {
   index = Math.min(index, setup.frames.length - 1);
   slider.max = String(setup.frames.length - 1);
   show();
+  if (wasPlaying) play();
 }
 
 function show(): void {
@@ -187,6 +192,11 @@ slider.addEventListener('input', () => {
 playBtn.addEventListener('click', () => {
   if (!setup) return;
   if (raf) return stop();
+  play();
+});
+
+function play(): void {
+  if (!setup) return;
   playBtn.textContent = 'Pause';
   const s = setup;
   const fps = s.anim.fps;
@@ -207,7 +217,7 @@ playBtn.addEventListener('click', () => {
     raf = requestAnimationFrame(tick);
   };
   raf = requestAnimationFrame(tick);
-});
+}
 
 Object.defineProperty(window, '__rigsmithPlayer', {
   value: Object.freeze({

@@ -56,7 +56,7 @@ export function loadRuntime(raw: unknown): Project {
 const copy = <T>(v: T): T => (Array.isArray(v) ? (v.slice() as T) : v);
 
 const keys = (ks: RuntimeKey[] | undefined): Key[] =>
-  (ks ?? []).map((k) => ({ time: k.time, value: copy(k.value), interp: k.interp, ...(k.curve ? { curve: copy(k.curve) as Key['curve'] } : {}) }));
+  (ks ?? []).map((k) => ({ time: k.time, value: copy(k.value), interp: k.interp, ...(k.curve ? { curve: copy(k.curve) as Key['curve'] } : {}), ...(k.interpY ? { interpY: k.interpY } : {}), ...(k.curveY ? { curveY: copy(k.curveY) as Key['curve'] } : {}) }));
 
 function convertRuntime(raw: unknown): Project {
   const rt = raw as RuntimeExport;

@@ -148,6 +148,13 @@ export interface Key {
   interp: Interp;
   /** v2: present iff interp === 'bezier'. */
   curve?: Curve;
+  /**
+   * v3, translate keys only: the y component's own interpolation from this key (x keeps
+   * `interp`/`curve`), e.g. a hop that rises fast and lands slow while moving at a steady x.
+   */
+  interpY?: Interp;
+  /** v3: present iff interpY === 'bezier'. */
+  curveY?: Curve;
 }
 
 export interface BoneTrack {

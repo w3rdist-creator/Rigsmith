@@ -30,6 +30,30 @@ export const SEQUENCE_LIMITS = {
   maxTotalPixels: 600_000_000,
 };
 
+export type SequenceLimits = typeof SEQUENCE_LIMITS;
+
+/**
+ * Hard ceilings for the command-line overrides (--max-frames / --max-megapixels): the
+ * editor keeps the defaults; a batch render may raise them up to these, never beyond.
+ */
+export const LIMIT_CEILINGS = { maxFrames: 20_000, maxTotalPixels: 6_000_000_000 };
+
+/** Defaults with the given overrides applied, or the reasons they are refused. */
+export function resolveLimits(over: { maxFrames?: number; maxMegapixels?: number } = {}): { ok: true; limits: SequenceLimits } | { ok: false; errors: string[] } {
+  const errors: string[] = [];
+  const limits = { ...SEQUENCE_LIMITS };
+  if (over.maxFrames !== undefined) {
+    if (!Number.isInteger(over.maxFrames) || over.maxFrames < 1 || over.maxFrames > LIMIT_CEILINGS.maxFrames) errors.push(`The frame limit must be a whole number from 1 to ${LIMIT_CEILINGS.maxFrames}.`);
+    else limits.maxFrames = over.maxFrames;
+  }
+  if (over.maxMegapixels !== undefined) {
+    const px = over.maxMegapixels * 1e6;
+    if (!(px >= 1e6) || px > LIMIT_CEILINGS.maxTotalPixels) errors.push(`The total-size limit must be from 1 to ${LIMIT_CEILINGS.maxTotalPixels / 1e6} megapixels.`);
+    else limits.maxTotalPixels = Math.floor(px);
+  }
+  return errors.length ? { ok: false, errors } : { ok: true, limits };
+}
+
 /** Last valid export frame for an animation at `fps` (see endpoint policy above). */
 export function lastExportFrame(anim: Animation, fps: number): number {
   const n = Math.max(1, Math.round(anim.duration * fps));
@@ -40,7 +64,7 @@ export function defaultRequest(anim: Animation): SequenceRequest {
   return { fps: anim.fps, start: 0, end: lastExportFrame(anim, anim.fps), scale: 1, padding: 4 };
 }
 
-export function planSequence(anim: Animation | null, req: SequenceRequest): { ok: true; plan: SequencePlan } | { ok: false; errors: string[] } {
+export function planSequence(anim: Animation | null, req: SequenceRequest, limits: SequenceLimits = SEQUENCE_LIMITS): { ok: true; plan: SequencePlan } | { ok: false; errors: string[] } {
   const errors: string[] = [];
   if (!anim) return { ok: false, errors: ['Choose an animation to export (the project has none).'] };
   if (!Number.isInteger(req.fps) || req.fps < 1 || req.fps > 240) errors.push('FPS must be a whole number from 1 to 240.');
@@ -57,7 +81,7 @@ export function planSequence(anim: Animation | null, req: SequenceRequest): { ok
   if (errors.length) return { ok: false, errors };
   const frames: number[] = [];
   for (let f = req.start; f <= req.end; f++) frames.push(f);
-  if (frames.length > SEQUENCE_LIMITS.maxFrames) return { ok: false, errors: [`${frames.length} frames is more than the ${SEQUENCE_LIMITS.maxFrames}-frame limit; export a shorter range or a lower FPS.`] };
+  if (frames.length > limits.maxFrames) return { ok: false, errors: [`${frames.length} frames is more than the ${limits.maxFrames}-frame limit; export a shorter range or a lower FPS.`] };
   return { ok: true, plan: { frames, times: frames.map((f) => Math.min(anim.duration, f / req.fps)), lastFrame: last } };
 }
 
@@ -127,14 +151,14 @@ export function fitFrameToAnimations(project: Project, sample: (anim: Animation,
 }
 
 /** `range`: the export has a start/end range to shorten (single animations; mixes and sequences do not). */
-export function checkCapacity(geo: SequenceGeometry, frames: number, range = true): string[] {
+export function checkCapacity(geo: SequenceGeometry, frames: number, range = true, limits: SequenceLimits = SEQUENCE_LIMITS): string[] {
   const e: string[] = [];
-  if (geo.width > SEQUENCE_LIMITS.maxSide || geo.height > SEQUENCE_LIMITS.maxSide) e.push(`Frames would be ${geo.width}×${geo.height} px; the limit is ${SEQUENCE_LIMITS.maxSide} px per side. Lower the scale.`);
-  else if (geo.width * geo.height > SEQUENCE_LIMITS.maxFramePixels) e.push(`Frames would be ${geo.width}×${geo.height} px (over ${SEQUENCE_LIMITS.maxFramePixels / 1e6} megapixels). Lower the scale.`);
-  else if (geo.width * geo.height * frames > SEQUENCE_LIMITS.maxTotalPixels) {
+  if (geo.width > limits.maxSide || geo.height > limits.maxSide) e.push(`Frames would be ${geo.width}×${geo.height} px; the limit is ${limits.maxSide} px per side. Lower the scale.`);
+  else if (geo.width * geo.height > limits.maxFramePixels) e.push(`Frames would be ${geo.width}×${geo.height} px (over ${limits.maxFramePixels / 1e6} megapixels). Lower the scale.`);
+  else if (geo.width * geo.height * frames > limits.maxTotalPixels) {
     // The command-line renderer runs this same check, so it is not a way around the limit.
-    const fit = Math.floor(SEQUENCE_LIMITS.maxTotalPixels / (geo.width * geo.height));
-    e.push(`${frames} frames of ${geo.width}×${geo.height} px is too large to export (over ${SEQUENCE_LIMITS.maxTotalPixels / 1e6} megapixels in total; the command-line renderer has the same limit). At this size at most ${fit} frames fit. Lower the scale${range ? ', FPS or range' : ' or FPS'}.`);
+    const fit = Math.floor(limits.maxTotalPixels / (geo.width * geo.height));
+    e.push(`${frames} frames of ${geo.width}×${geo.height} px is too large to export (over ${limits.maxTotalPixels / 1e6} megapixels in total; ${limits.maxTotalPixels === SEQUENCE_LIMITS.maxTotalPixels ? 'the command-line renderer has the same limit' : 'the --max-megapixels limit'}). At this size at most ${fit} frames fit. Lower the scale${range ? ', FPS or range' : ' or FPS'}.`);
   }
   return e;
 }

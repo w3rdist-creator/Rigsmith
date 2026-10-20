@@ -46,6 +46,22 @@ read-only test probe.
 Authoring commands validate the result with the editor's reader before writing and
 never modify their input file unless `--out` names it.
 
+### Options shared by the rendering commands (`render`, `mix`, `media`, `sequence`; `lottie` takes `[frame]` too)
+
+| Option | Meaning |
+|---|---|
+| `--frame fit` | default: each export is cropped to its own animation's bounds plus `--padding` |
+| `--frame project` | the project's fixed frame (editor: Project ▸ Frame); exit 1 if the project has none. Art outside the frame is clipped with a warning on stderr and in the JSON `warnings` |
+| `--frame x,y,width,height` | an explicit fixed frame in world units (width and height ≥ 1) |
+| `--frame-from other.rig.json` | the frame saved in another project, e.g. to render two versions of a character pixel-aligned; not together with `--frame` |
+| `--max-frames N` | raises the 2000-frame cap for this run (1–20000) |
+| `--max-megapixels M` | raises the 600-megapixel total-size cap (sum of all frame pixels; 1–6000). The per-frame caps (8192 px per side, 40 megapixels) stay. Values beyond the ceilings exit 2 |
+| `--profile-dir DIR` | puts the headless browser's profile in a fresh `rigsmith-profile-*` folder inside DIR, removed when the command ends (also `RIGSMITH_PROFILE_DIR`); without it the profile is `.hermes/browser-profiles/cli` in the checkout |
+
+Raised caps hold every frame in memory: about 4 bytes per pixel before the ZIP or
+encoder, so 6000 megapixels needs tens of gigabytes. The editor's export dialogs always
+use the defaults.
+
 ### Limb weights (`weights --along`)
 
 One continuous limb image bends as a round tube. With `s` = distance along the upper
@@ -65,7 +81,8 @@ Top stays on for `--end` / `--root`; each Smooth click is one pass at 0.5).
 
 `withRenderer` (API) starts headless **Chrome for Testing** (path from `RIGSMITH_CFT`,
 default: the machine's CfT 155 build) with a profile under
-`.hermes/browser-profiles/cli`, serves the built `dist/` through request interception
+`.hermes/browser-profiles/cli` (or a throw-away folder under `--profile-dir` /
+`RIGSMITH_PROFILE_DIR`), serves the built `dist/` through request interception
 (origin `http://rigsmith.invalid`; no port is opened and every other request is refused)
 and loads `render.html`, a dedicated render entry that holds no editor state. It renders
 with the same code as the editor's export dialogs and returns PNG frames one by one; the

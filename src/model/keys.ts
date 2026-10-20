@@ -11,7 +11,7 @@
 // Moved keys are computed from the gesture's start state, so a key passed over during a
 // drag reappears unless the drop finally lands on it.
 import { TIME_EPSILON, findKeyIndex, insertSorted } from './animation.ts';
-import type { Animation, BoneTrack, Channel, ConstraintTrack, Project, SlotTrack } from './types.ts';
+import type { Animation, BoneTrack, Channel, ConstraintTrack, Key, Project, SlotTrack } from './types.ts';
 import { CHANNELS, emptyTrack } from './types.ts';
 
 export type SlotChannel = keyof SlotTrack;
@@ -202,6 +202,12 @@ export function pasteKeys(anim: Animation, clip: KeyClipboard, time: number, ret
     if (hit >= 0) keys.splice(hit, 1);
     const k = cloneKey(it.key);
     k.time = t;
+    // Per-axis easing exists only on translate keys (a pasted clipboard file may say otherwise).
+    const target = parseLane(lane);
+    if (!(target?.kind === 'bone' && target.channel === 'translate') && 'interpY' in k) {
+      delete (k as Key).interpY;
+      delete (k as Key).curveY;
+    }
     insertSorted(keys, k);
     refs.push({ lane, time: t });
   }

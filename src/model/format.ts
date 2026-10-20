@@ -82,6 +82,7 @@ export function v3Features(p: Project): string[] {
   for (const an of p.animations) {
     if (an.constraints && Object.values(an.constraints).some((c) => c.angle?.length)) f.add('constraint angle keys');
     if (an.slots && Object.values(an.slots).some((s) => s.color?.length)) f.add('colour keys');
+    if (Object.values(an.tracks).some((tr) => tr.translate.some((k) => k.interpY))) f.add('per-axis translate easing');
   }
   return [...f];
 }
@@ -95,6 +96,10 @@ const nonEmpty = <T>(xs: T[] | undefined): T[] | undefined => (xs && xs.length ?
 function writeKey(k: Key): Key {
   const out: Key = { time: k.time, value: k.value, interp: k.interp };
   if (k.interp === 'bezier' && k.curve) out.curve = k.curve;
+  if (k.interpY) {
+    out.interpY = k.interpY;
+    if (k.interpY === 'bezier' && k.curveY) out.curveY = k.curveY;
+  }
   return out;
 }
 
@@ -256,7 +261,8 @@ export function parseProject(text: string): ParseResult {
 }
 
 /** Validates a key list (sorted, arity, interpolation). Shared by every keyed channel. */
-function readKeys(c: Checker, list: unknown, where: string, arity: number | ((k: number[]) => string | null), version: number): Key[] {
+/** `perAxis`: translate keys, which may carry a separate y interpolation (v3). */
+function readKeys(c: Checker, list: unknown, where: string, arity: number | ((k: number[]) => string | null), version: number, perAxis = false): Key[] {
   const out: Key[] = [];
   if (list === undefined) return out;
   if (!Array.isArray(list)) {
@@ -291,6 +297,21 @@ function readKeys(c: Checker, list: unknown, where: string, arity: number | ((k:
     } else if (k.curve !== undefined) {
       c.fail(`${kw}.curve is only allowed on bezier keys`);
     }
+    if (k.interpY !== undefined) {
+      const iy = k.interpY as Interp;
+      if (!perAxis) c.fail(`${kw}.interpY is only allowed on translate keys`);
+      else if (version < 3) c.fail(`${kw}.interpY (per-axis translate easing) requires project version 3`);
+      else if (!INTERPS.includes(iy)) c.fail(`${kw}.interpY "${String(iy)}" is not supported`);
+      else {
+        key.interpY = iy;
+        if (iy === 'bezier') {
+          const cv = k.curveY;
+          if (!Array.isArray(cv) || cv.length !== 4 || !cv.every(isFiniteNum)) c.fail(`${kw}.curveY must be [x1, y1, x2, y2] finite numbers`);
+          else if (cv[0] < 0 || cv[0] > 1 || cv[2] < 0 || cv[2] > 1) c.fail(`${kw}.curveY x handles must lie in [0, 1] (time must not run backwards)`);
+          else key.curveY = cv.slice() as Curve;
+        } else if (k.curveY !== undefined) c.fail(`${kw}.curveY is only allowed when interpY is bezier`);
+      }
+    } else if (k.curveY !== undefined) c.fail(`${kw}.curveY needs interpY`);
     out.push(key);
   });
   return out;
@@ -616,7 +637,7 @@ export function validateProject(raw: unknown): ParseResult {
             c.fail(`${tw}.${ch} must be an array`);
             continue;
           }
-          track[ch] = readKeys(c, tr[ch], `${tw}.${ch}`, CHANNEL_ARITY[ch], version);
+          track[ch] = readKeys(c, tr[ch], `${tw}.${ch}`, CHANNEL_ARITY[ch], version, ch === 'translate');
         }
         tracks[boneId] = track;
       }

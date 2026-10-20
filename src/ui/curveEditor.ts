@@ -1,6 +1,8 @@
 // Curve editor: shows the easing of the segment leaving the primary selected key, with
 // two draggable Bezier handles, numeric handle fields and presets. Edits apply to every
 // selected key that has an interpolation. A handle drag is one undo step; Esc cancels.
+// Translate keys can ease y separately (“Separate Y”); the axis menu picks which curve
+// is shown and edited.
 import { CURVE_PRESETS, clampCurve, curveFor, evalCurve } from '../model/curve.ts';
 import { laneKeys, parseLane, sameRef } from '../model/keys.ts';
 import type { Curve, Key } from '../model/types.ts';
@@ -19,6 +21,8 @@ export class CurveEditor {
   private timeline: Timeline;
   private canvas: HTMLCanvasElement | null = null;
   private drag: { handle: 1 | 2; pointerId: number; moved: boolean } | null = null;
+  /** Which easing the editor shows and edits: x (the key's own) or a translate key's separate y. */
+  private axis: 'x' | 'y' = 'x';
 
   constructor(app: App, timeline: Timeline) {
     this.app = app;
@@ -27,7 +31,7 @@ export class CurveEditor {
   }
 
   /** The primary key if it is curve-capable, plus its segment's end time. */
-  private target(): { key: Key; next: { time: number } | undefined; label: string } | null {
+  private target(): { key: Key; next: { time: number } | undefined; label: string; translate: boolean } | null {
     const ed = this.app.ed;
     const anim = ed.anim();
     const ref = ed.keySel;
@@ -38,7 +42,12 @@ export class CurveEditor {
     const info = parseLane(ref.lane);
     const owner = info && info.kind === 'bone' ? ed.project.bones.find((b) => b.id === info.id)?.name : info && info.kind === 'slot' ? ed.project.attachments.find((a) => a.id === info.id)?.name : info && info.kind === 'constraint' ? info.id : 'key';
     const ch = info && info.kind !== 'draw' ? info.channel : '';
-    return { key: keys[i] as Key, next: keys[i + 1], label: `${owner ?? ''} ${ch}` };
+    return { key: keys[i] as Key, next: keys[i + 1], label: `${owner ?? ''} ${ch}`, translate: info?.kind === 'bone' && info.channel === 'translate' };
+  }
+
+  /** The easing being edited: the y easing when the axis is y and the key has one. */
+  private eased(key: Key): { interp: Key['interp']; curve?: Curve } {
+    return this.axis === 'y' && key.interpY ? { interp: key.interpY, curve: key.curveY } : { interp: key.interp, curve: key.curve };
   }
 
   private toPx(x: number, y: number): { x: number; y: number } {
@@ -59,7 +68,10 @@ export class CurveEditor {
       root.append(h('div', { class: 'panel-head' }, h('h2', {}, 'Curve')), h('p', { class: 'hint' }, 'Select a key to edit the easing of the segment that leaves it. Drag the handles above/below the lines to overshoot or anticipate.'));
       return root;
     }
-    const curve = curveFor(t.key.interp, t.key.curve);
+    // A key without its own y easing is edited as one curve.
+    if (!t.translate || !t.key.interpY) this.axis = 'x';
+    const e = this.eased(t.key);
+    const curve = curveFor(e.interp, e.curve);
     const f0 = Math.round(t.key.time * anim.fps);
     const f1 = t.next ? Math.round(t.next.time * anim.fps) : null;
     const preset = h('select', { 'data-testid': 'curve-preset', 'aria-label': 'Curve preset' },
@@ -67,7 +79,7 @@ export class CurveEditor {
       ...Object.keys(CURVE_PRESETS).map((n) => h('option', { value: n }, n)),
       h('option', { value: 'step' }, 'step (hold)'),
     );
-    preset.addEventListener('change', () => preset.value && this.app.applyCurvePreset(preset.value));
+    preset.addEventListener('change', () => preset.value && this.app.applyCurvePreset(preset.value, this.axis));
     const canvas = h('canvas', { class: 'curve-canvas', 'data-testid': 'curve-editor', width: W * 2, height: H * 2, style: `width:${W}px;height:${H}px`, 'aria-label': 'Easing curve. Drag the round handles.' });
     this.canvas = canvas;
     this.attach(canvas);
@@ -76,16 +88,34 @@ export class CurveEditor {
       numberField({ label, value: c[i], step: 0.05, min: i % 2 === 0 ? 0 : undefined, max: i % 2 === 0 ? 1 : undefined, testId: `curve-${['x1', 'y1', 'x2', 'y2'][i]}`, onCommit: (v) => {
         const next = c.slice() as Curve;
         next[i] = v;
-        this.app.setCurveForSelection(clampCurve(next), 'Edit curve');
+        this.app.setCurveForSelection(clampCurve(next), this.axis === 'y' ? 'Edit curve (y)' : 'Edit curve', this.axis);
       } });
     root.append(
       h('div', { class: 'panel-head' }, h('h2', {}, 'Curve'), h('span', { class: 'dim', 'data-testid': 'curve-segment' }, `${t.label} · f${f0}${f1 !== null ? `→f${f1}` : ' (last key)'}`)),
       canvas,
-      h('div', { class: 'curve-fields' }, preset, h('span', { class: 'dim' }, t.key.interp)),
+      ...(t.translate ? [this.axisRow(t.key)] : []),
+      h('div', { class: 'curve-fields' }, preset, h('span', { class: 'dim', 'data-testid': 'curve-interp' }, e.interp)),
       h('div', { class: 'curve-fields' }, field(0, 'x1'), field(1, 'y1'), field(2, 'x2'), field(3, 'y2')),
     );
     this.draw();
     return root;
+  }
+
+  /** Translate keys: “Separate Y” and, when on, which axis's curve is shown and edited. */
+  private axisRow(key: Key): HTMLElement {
+    const split = !!key.interpY;
+    const box = h('input', { type: 'checkbox', checked: split, 'data-testid': 'curve-split-y', 'aria-label': 'Separate Y easing' });
+    box.addEventListener('change', () => {
+      this.axis = box.checked ? 'y' : 'x';
+      this.app.splitTranslateY(box.checked);
+    });
+    const axis = h('select', { 'data-testid': 'curve-axis', 'aria-label': 'Curve axis', disabled: !split }, h('option', { value: 'x' }, split ? 'X' : 'X and Y'), h('option', { value: 'y' }, 'Y'));
+    axis.value = this.axis;
+    axis.addEventListener('change', () => {
+      this.axis = axis.value === 'y' ? 'y' : 'x';
+      this.timeline.render();
+    });
+    return h('div', { class: 'curve-fields' }, h('label', { class: 'inline', title: 'Ease y separately from x (e.g. a hop: fast rise, slow landing, steady x)' }, box, 'Separate Y'), axis);
   }
 
   private draw(): void {
@@ -108,7 +138,8 @@ export class CurveEditor {
       g.stroke();
     }
     g.setLineDash([]);
-    const curve = curveFor(t.key.interp, t.key.curve);
+    const e = this.eased(t.key);
+    const curve = curveFor(e.interp, e.curve);
     g.strokeStyle = '#ffd166';
     g.lineWidth = 2;
     g.beginPath();
@@ -158,7 +189,8 @@ export class CurveEditor {
     canvas.addEventListener('pointerdown', (e) => {
       const t = this.target();
       if (!t || e.button !== 0) return;
-      const c = curveFor(t.key.interp, t.key.curve) ?? CURVE_PRESETS.linear;
+      const ez = this.eased(t.key);
+      const c = curveFor(ez.interp, ez.curve) ?? CURVE_PRESETS.linear;
       const s = local(e);
       const d1 = Math.hypot(s.x - this.toPx(c[0], c[1]).x, s.y - this.toPx(c[0], c[1]).y);
       const d2 = Math.hypot(s.x - this.toPx(c[2], c[3]).x, s.y - this.toPx(c[2], c[3]).y);
@@ -180,11 +212,12 @@ export class CurveEditor {
         y = Math.round(y * 20) / 20;
       }
       y = Math.min(2, Math.max(-1, y));
-      const c = (curveFor(t.key.interp, t.key.curve) ?? CURVE_PRESETS.linear).slice() as Curve;
+      const ez = this.eased(t.key);
+      const c = (curveFor(ez.interp, ez.curve) ?? CURVE_PRESETS.linear).slice() as Curve;
       if (d.handle === 1) [c[0], c[1]] = [x, y];
       else [c[2], c[3]] = [x, y];
       d.moved = true;
-      ed.gestureMutate((p) => this.app.applyCurveTo(p, clampCurve(c).map((v) => Math.round(v * 1000) / 1000) as Curve));
+      ed.gestureMutate((p) => this.app.applyCurveTo(p, clampCurve(c).map((v) => Math.round(v * 1000) / 1000) as Curve, this.axis));
       this.draw();
     });
     const end = (e: PointerEvent) => {
@@ -193,7 +226,7 @@ export class CurveEditor {
       this.drag = null;
       this.timeline.interacting = false;
       if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
-      if (d.moved) ed.endGesture('Edit curve handle');
+      if (d.moved) ed.endGesture(this.axis === 'y' ? 'Edit curve handle (y)' : 'Edit curve handle');
       else ed.cancelGesture();
       this.timeline.render();
     };

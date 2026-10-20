@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { BrowserContext, Page } from 'playwright-core';
@@ -261,6 +261,27 @@ describe('rendering (headless Chrome for Testing via render.html)', () => {
     // Only this checkout's CLI profile: other Rigsmith checkouts on the machine may be rendering.
     const ps = spawnSync('pgrep', ['-f', `${ROOT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.hermes/browser-profiles/cli([^-]|$)`], { encoding: 'utf8' });
     assert.equal(ps.stdout.trim(), '', 'the CLI browser is closed');
+  });
+
+  it('limits and profile (R12): --max-frames / --max-megapixels bounded by the ceilings; --profile-dir keeps the browser profile out of the checkout', () => {
+    const few = cli('render', RIG, '--anim', 'wave', '--max-frames', '5', '--out', path.join(OUT, 'l1.zip'));
+    assert.equal(few.code, 1);
+    assert.match(few.json.errors.join(' '), /more than the 5-frame limit/);
+    for (const bad of [['--max-frames', '0'], ['--max-frames', '20001'], ['--max-megapixels', '6001']]) {
+      const r = cli('render', RIG, '--anim', 'wave', ...bad, '--out', path.join(OUT, 'l1.zip'));
+      assert.equal(r.code, 2, bad.join(' '));
+    }
+    const tight = cli('render', RIG, '--anim', 'wave', '--max-megapixels', '1', '--out', path.join(OUT, 'l1.zip'));
+    assert.equal(tight.code, 1);
+    assert.match(tight.json.errors.join(' '), /over 1 megapixels in total; the --max-megapixels limit/);
+    assert.ok(!existsSync(path.join(OUT, 'l1.zip')));
+    const dir = path.join(OUT, 'profiles');
+    rmSync(dir, { recursive: true, force: true });
+    const ok = cli('render', RIG, '--anim', 'wave', '--max-frames', '4000', '--profile-dir', dir, '--out', path.join(OUT, 'l2.zip'));
+    assert.equal(ok.code, 0, JSON.stringify(ok.json));
+    assert.deepEqual(readdirSync(dir), [], 'the throw-away profile is removed');
+    assert.equal(cli('render', RIG, '--anim', 'wave', '--out', path.join(OUT, 'l3.zip')).code, 0);
+    assert.equal(sha(path.join(OUT, 'l2.zip')), sha(path.join(OUT, 'l3.zip')), 'limits do not change the pixels');
   });
 
   it('frame (RV-003): --frame project / x,y,w,h / --frame-from match the editor project-frame export; clips with a warning', async () => {

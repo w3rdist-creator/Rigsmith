@@ -521,6 +521,39 @@ describe('reference player', () => {
     assert.match(await player.getByTestId('player-frame-label').innerText(), /^frame \d+ \/ 29 · /);
   });
 
+  it('switching clips while playing keeps playing the new clip (showcase 1 R1); pause still works', async () => {
+    const errorsBefore = pageErrors.length;
+    await player.getByTestId('player-time').fill('0');
+    await player.getByTestId('player-play').click();
+    await player.waitForFunction(() => (window as any).__rigsmithPlayer.state().index >= 2);
+    // wave (looping) → rest (0.5 s, one-shot): rest must play on from here to its last frame.
+    await player.getByTestId('player-anim').selectOption({ label: 'rest' });
+    const frames = (await playerProbe<any>(player, 'state')).frames;
+    const seen = new Set<number>();
+    for (let i = 0; i < 40; i++) {
+      const s = await playerProbe<any>(player, 'state');
+      assert.equal(s.anim, 'rest');
+      assert.ok(s.index < frames, `index ${s.index} within the new clip (${frames} frames)`);
+      seen.add(s.index);
+      if (!s.playing) break;
+      await player.waitForTimeout(25);
+    }
+    assert.ok(seen.size > 3, `the new clip advances (${[...seen].join(',')})`);
+    const end = await playerProbe<any>(player, 'state');
+    assert.deepEqual([end.playing, end.index], [false, frames - 1], 'the one-shot clip plays to its end and stops');
+    assert.match(await player.getByTestId('player-frame-label').innerText(), new RegExp(`^frame ${frames - 1} / ${frames - 1} · `));
+    // Back to the looping clip mid-play; pause still pauses.
+    await player.getByTestId('player-time').fill('0');
+    await player.getByTestId('player-play').click();
+    await player.getByTestId('player-anim').selectOption({ label: 'wave' });
+    await player.waitForFunction(() => (window as any).__rigsmithPlayer.state().index > 5);
+    assert.equal((await playerProbe<any>(player, 'state')).playing, true);
+    await player.getByTestId('player-play').click();
+    assert.equal((await playerProbe<any>(player, 'state')).playing, false);
+    assert.equal(await player.getByTestId('player-play').innerText(), 'Play');
+    assert.deepEqual(pageErrors.slice(errorsBefore), [], 'no page errors');
+  });
+
   it('atlas bleed measured: bleed 0 and padding 0 vs bleed 1; loose images match exactly', async () => {
     const wave = sequence(files.wave);
     await loadPlayer([files.runtime, ...unpackAtlas(files.atlas0, 'atlas-p2-b0')]);

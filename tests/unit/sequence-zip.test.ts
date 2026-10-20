@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { checkCapacity, defaultRequest, lastExportFrame, planSequence, sequenceGeometry } from '../../src/model/sequence.ts';
+import { LIMIT_CEILINGS, SEQUENCE_LIMITS, checkCapacity, defaultRequest, lastExportFrame, planSequence, resolveLimits, sequenceGeometry } from '../../src/model/sequence.ts';
 import { buildZip, crc32 } from '../../src/model/zip.ts';
 import type { Animation } from '../../src/model/types.ts';
 import { readZip } from '../support/zip-read.ts';
@@ -73,4 +73,23 @@ test('ZIP writer: CRC matches zlib, archive reads back with an independent reade
   assert.deepEqual([...back[0].data], [1, 2, 3]);
   assert.equal(back[1].data.toString('utf8'), 'hello rigsmith');
   assert.equal(back[2].data.length, 0);
+});
+
+test('R12 render limits: overrides within the ceilings reach planSequence and checkCapacity; defaults unchanged', () => {
+  assert.deepEqual(resolveLimits(), { ok: true, limits: SEQUENCE_LIMITS });
+  const r = resolveLimits({ maxFrames: 5000, maxMegapixels: 1500 });
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.limits.maxFrames, 5000);
+  assert.equal(r.limits.maxTotalPixels, 1.5e9);
+  assert.equal(r.limits.maxSide, SEQUENCE_LIMITS.maxSide, 'per-frame caps are not raisable');
+  for (const bad of [{ maxFrames: 0 }, { maxFrames: 2.5 }, { maxFrames: LIMIT_CEILINGS.maxFrames + 1 }, { maxMegapixels: 0.5 }, { maxMegapixels: NaN }, { maxMegapixels: LIMIT_CEILINGS.maxTotalPixels / 1e6 + 1 }]) assert.equal(resolveLimits(bad).ok, false, JSON.stringify(bad));
+  const long = anim(true, 100, 30);
+  const req = { ...defaultRequest(long), end: 2999 };
+  assert.equal(planSequence(long, req).ok, false, '3000 frames is over the default');
+  assert.equal(planSequence(long, req, r.limits).ok, true);
+  const g = { width: 1000, height: 1000, originX: 0, originY: 0, scale: 1 };
+  assert.equal(checkCapacity(g, 700).length, 1);
+  assert.deepEqual(checkCapacity(g, 700, true, r.limits), []);
+  assert.match(checkCapacity(g, 1600, true, r.limits)[0], /over 1500 megapixels in total; the --max-megapixels limit/);
 });

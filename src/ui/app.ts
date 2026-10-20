@@ -1,7 +1,7 @@
 // Application wiring: actions shared by the toolbar, panels, timeline and shortcuts.
 import { Editor } from '../editor/store.ts';
 import type { Tool } from '../editor/store.ts';
-import { findKeyIndex, keysBeyondEnd, removeKey, setInterp, snapToFrame } from '../model/animation.ts';
+import { findKeyIndex, keysBeyondEnd, removeKey, setInterp, setInterpY, snapToFrame } from '../model/animation.ts';
 import { CURVE_PRESETS } from '../model/curve.ts';
 import type { KeyRef } from '../model/keys.ts';
 import { allLanes, boneLane, closeLoopSeam, copyKeys, deleteKeys, findKey, laneKeys, parseLane, pasteKeys, sameRef, shiftKeys } from '../model/keys.ts';
@@ -545,28 +545,60 @@ export class App {
     return out;
   }
 
-  setInterpForSelection(interp: Key['interp']): void {
+  /** Selected bone translate keys (the only keys with a separate y easing). */
+  private translateKeys(a: Animation): Key[] {
+    const out: Key[] = [];
+    for (const r of this.ed.keySels) {
+      const info = parseLane(r.lane);
+      if (info?.kind !== 'bone' || info.channel !== 'translate') continue;
+      const k = findKey(a, r);
+      if (k) out.push(k as Key);
+    }
+    return out;
+  }
+
+  /**
+   * `axis` 'y': the separate y easing of the selected translate keys (other keys are left
+   * alone); 'x': the key's own interpolation (x, and y unless it has its own).
+   */
+  setInterpForSelection(interp: Key['interp'], axis: 'x' | 'y' = 'x'): void {
     const n = this.ed.keySels.length;
-    this.mutateAnim(n > 1 ? `Interpolation of ${n} keys` : 'Change interpolation', (a) => {
-      for (const k of this.curveKeys(a)) setInterp(k, interp);
+    this.mutateAnim(n > 1 ? `Interpolation of ${n} keys${axis === 'y' ? ' (y)' : ''}` : `Change interpolation${axis === 'y' ? ' (y)' : ''}`, (a) => {
+      if (axis === 'y') for (const k of this.translateKeys(a)) setInterpY(k, interp);
+      else for (const k of this.curveKeys(a)) setInterp(k, interp);
     });
   }
 
   /** Writes a curve onto every selected curve-capable key (used inside gestures too). */
-  applyCurveTo(p: Project, curve: Curve): void {
+  applyCurveTo(p: Project, curve: Curve, axis: 'x' | 'y' = 'x'): void {
     const a = p.animations.find((x) => x.id === this.ed.animId);
-    if (a) for (const k of this.curveKeys(a)) setInterp(k, 'bezier', curve);
+    if (!a) return;
+    if (axis === 'y') for (const k of this.translateKeys(a)) setInterpY(k, 'bezier', curve);
+    else for (const k of this.curveKeys(a)) setInterp(k, 'bezier', curve);
   }
 
-  setCurveForSelection(curve: Curve, label: string): void {
-    this.ed.mutate(label, (p) => this.applyCurveTo(p, curve));
+  setCurveForSelection(curve: Curve, label: string, axis: 'x' | 'y' = 'x'): void {
+    this.ed.mutate(label, (p) => this.applyCurveTo(p, curve, axis));
   }
 
-  applyCurvePreset(name: string): void {
-    if (name === 'step') return this.setInterpForSelection('step');
+  applyCurvePreset(name: string, axis: 'x' | 'y' = 'x'): void {
+    if (name === 'step') return this.setInterpForSelection('step', axis);
     const c = CURVE_PRESETS[name];
-    if (c) this.setCurveForSelection(c, `Curve preset ${name}`);
-    this.status(`Applied “${name}” easing to ${this.ed.keySels.length} key(s).`);
+    if (c) this.setCurveForSelection(c, `Curve preset ${name}${axis === 'y' ? ' (y)' : ''}`, axis);
+    this.status(`Applied “${name}” easing to ${this.ed.keySels.length} key(s)${axis === 'y' ? ' (y only)' : ''}.`);
+  }
+
+  /**
+   * Separate y easing on/off for the selected translate keys. On: y starts as a copy of
+   * the key's easing (nothing moves until it is edited); off: y follows x again.
+   */
+  splitTranslateY(on: boolean): void {
+    this.mutateAnim(on ? 'Separate Y easing' : 'Join X / Y easing', (a) => {
+      for (const k of this.translateKeys(a)) {
+        if (!on) setInterpY(k, null);
+        else if (!k.interpY) setInterpY(k, k.interp, k.curve);
+      }
+    });
   }
 
   nudgeKeys(frames: number): void {

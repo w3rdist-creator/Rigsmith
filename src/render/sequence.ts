@@ -3,7 +3,7 @@
 import type { Bounds, Frame } from '../model/evaluate.ts';
 import { evaluate, frameBounds } from '../model/evaluate.ts';
 import type { Mat } from '../model/math.ts';
-import type { SequenceGeometry, SequencePlan, SequenceRequest } from '../model/sequence.ts';
+import type { SequenceGeometry, SequenceLimits, SequencePlan, SequenceRequest } from '../model/sequence.ts';
 import { SEQUENCE_LIMITS, checkCapacity, frameWarnings, planSequence, requestGeometry } from '../model/sequence.ts';
 import type { ScheduledStep } from '../model/clipSequence.ts';
 import { scheduleSequence } from '../model/clipSequence.ts';
@@ -33,30 +33,30 @@ export type Prepared = { ok: true; setup: SequenceSetup } | { ok: false; errors:
  * A transition (mix plan) as a one-shot sequence: frames 0..⌊length·fps⌋ at `fps`,
  * one stable canvas size (the fixed `frame` when given), named "<first>-to-<last>".
  */
-export function prepareMixSequence(project: Project, mix: MixPlan, fps: number, skinId: string | null, scale = 1, padding = 4, frame: ProjectFrame | null = null): Prepared {
+export function prepareMixSequence(project: Project, mix: MixPlan, fps: number, skinId: string | null, scale = 1, padding = 4, frame: ProjectFrame | null = null, limits: SequenceLimits = SEQUENCE_LIMITS): Prepared {
   const length = planLength(project, mix);
   const names = mix.entries.map((e) => project.animations.find((a) => a.id === e.animId)?.name ?? '?');
   if (!(length > 0) || names.includes('?')) return { ok: false, errors: ['Choose animations for the transition.'] };
   if (!Number.isInteger(fps) || fps < 1 || fps > 240) return { ok: false, errors: ['FPS must be a whole number from 1 to 240.'] };
   const last = Math.floor(length * fps + 1e-9);
-  return prepareMixFrames(project, mix, fps, last + 1, { id: 'mix', name: names.join('-to-'), loop: false, duration: length }, skinId, scale, padding, frame);
+  return prepareMixFrames(project, mix, fps, last + 1, { id: 'mix', name: names.join('-to-'), loop: false, duration: length }, skinId, scale, padding, frame, limits);
 }
 
 /**
  * A saved clip sequence (src/model/clipSequence.ts) as one sequence: frames
  * 0 … total−1 at `fps`, sampled with the same mix evaluator as the Mix dialog.
  */
-export function prepareClipSequence(project: Project, seq: ClipSequence, fps: number, skinId: string | null, scale = 1, padding = 4, frame: ProjectFrame | null = null): Prepared {
+export function prepareClipSequence(project: Project, seq: ClipSequence, fps: number, skinId: string | null, scale = 1, padding = 4, frame: ProjectFrame | null = null, limits: SequenceLimits = SEQUENCE_LIMITS): Prepared {
   const r = scheduleSequence(project, seq, fps);
   if (!r.ok) return r;
-  if (r.schedule.totalFrames > SEQUENCE_LIMITS.maxFrames) return { ok: false, errors: [`${r.schedule.totalFrames} frames is more than the ${SEQUENCE_LIMITS.maxFrames}-frame limit; lower the repeats or the FPS.`] };
+  if (r.schedule.totalFrames > limits.maxFrames) return { ok: false, errors: [`${r.schedule.totalFrames} frames is more than the ${limits.maxFrames}-frame limit; lower the repeats or the FPS.`] };
   const total = r.schedule.totalFrames;
-  const prepared = prepareMixFrames(project, r.schedule.plan, fps, total, { id: 'sequence', name: seq.name, loop: seq.loop, duration: total / fps }, skinId, scale, padding, frame);
+  const prepared = prepareMixFrames(project, r.schedule.plan, fps, total, { id: 'sequence', name: seq.name, loop: seq.loop, duration: total / fps }, skinId, scale, padding, frame, limits);
   if (prepared.ok) prepared.setup.schedule = r.schedule.steps;
   return prepared;
 }
 
-function prepareMixFrames(project: Project, mix: MixPlan, fps: number, count: number, id: { id: string; name: string; loop: boolean; duration: number }, skinId: string | null, scale: number, padding: number, frame: ProjectFrame | null): Prepared {
+function prepareMixFrames(project: Project, mix: MixPlan, fps: number, count: number, id: { id: string; name: string; loop: boolean; duration: number }, skinId: string | null, scale: number, padding: number, frame: ProjectFrame | null, limits: SequenceLimits): Prepared {
   if (!(scale > 0) || scale > 8) return { ok: false, errors: ['Scale must be greater than 0 and at most 8.'] };
   const frames = Array.from({ length: count }, (_, f) => f);
   const times = frames.map((f) => f / fps);
@@ -65,23 +65,23 @@ function prepareMixFrames(project: Project, mix: MixPlan, fps: number, count: nu
   for (const f of evaluated) b = frameBounds(f, b);
   if (!b) return { ok: false, errors: ['Nothing visible to export: attach at least one visible image.'] };
   const geometry = requestGeometry(b, scale, padding, frame);
-  const cap = checkCapacity(geometry, evaluated.length, false);
+  const cap = checkCapacity(geometry, evaluated.length, false, limits);
   if (cap.length) return { ok: false, errors: cap };
   const anim: Animation = { id: id.id, name: id.name, duration: id.duration, fps, loop: id.loop, tracks: {} };
   return { ok: true, setup: { anim, plan: { times, frames, lastFrame: count - 1 }, geometry, frames: evaluated, warnings: frameWarnings(b, frame, `“${anim.name}”`) } };
 }
 
 /** Validates the request, samples every frame and computes one stable canvas size. */
-export function prepareSequence(project: Project, animId: string | null, req: SequenceRequest, skinId?: string | null): Prepared {
+export function prepareSequence(project: Project, animId: string | null, req: SequenceRequest, skinId?: string | null, limits: SequenceLimits = SEQUENCE_LIMITS): Prepared {
   const anim = project.animations.find((a) => a.id === animId) ?? null;
-  const r = planSequence(anim, req);
+  const r = planSequence(anim, req, limits);
   if (!r.ok) return r;
   const frames = r.plan.times.map((t) => evaluate(project, anim, t, { skinId }));
   let b: Bounds | null = null;
   for (const f of frames) b = frameBounds(f, b);
   if (!b) return { ok: false, errors: ['Nothing visible to export: attach at least one visible image.'] };
   const geometry = requestGeometry(b, req.scale, req.padding, req.frame);
-  const cap = checkCapacity(geometry, frames.length);
+  const cap = checkCapacity(geometry, frames.length, true, limits);
   if (cap.length) return { ok: false, errors: cap };
   return { ok: true, setup: { anim: anim!, plan: r.plan, geometry, frames, warnings: frameWarnings(b, req.frame, `“${anim!.name}”`) } };
 }

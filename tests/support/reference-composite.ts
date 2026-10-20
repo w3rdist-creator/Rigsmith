@@ -58,8 +58,10 @@ export function sampleTrack(keys: any[] | undefined, t: number, fallback: number
   while (keys[i + 1].time <= t) i++;
   const a = keys[i], b = keys[i + 1];
   const u = (t - a.time) / (b.time - a.time);
-  const e = a.interp === 'step' ? 0 : a.interp === 'smooth' ? u * u * (3 - 2 * u) : a.interp === 'bezier' ? bezierEase(a.curve, u) : u;
-  return a.value.map((v: number, k: number) => v + (b.value[k] - v) * e);
+  const ease = (interp: string, curve: any) => (interp === 'step' ? 0 : interp === 'smooth' ? u * u * (3 - 2 * u) : interp === 'bezier' ? bezierEase(curve, u) : u);
+  const e = ease(a.interp, a.curve);
+  const ey = a.interpY ? ease(a.interpY, a.curveY) : e;
+  return a.value.map((v: number, k: number) => v + (b.value[k] - v) * (k === 1 ? ey : e));
 }
 
 function stepped(keys: any[] | undefined, t: number): any {
