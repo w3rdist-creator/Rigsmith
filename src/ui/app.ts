@@ -1,5 +1,6 @@
 // Application wiring: actions shared by the toolbar, panels, timeline and shortcuts.
 import { smearAnimation } from '../model/smear.ts';
+import { addPaintedView, type PaintedViewFit, type PaintedViewImages } from '../model/views.ts';
 import { Editor } from '../editor/store.ts';
 import type { Tool } from '../editor/store.ts';
 import { findKeyIndex, insertSorted, keysBeyondEnd, removeKey, setInterp, setInterpY, snapToFrame } from '../model/animation.ts';
@@ -445,6 +446,25 @@ export class App {
       const [a] = p.attachments.splice(i, 1);
       p.attachments.splice(j, 0, a);
     });
+  }
+
+  /** Alpha registration decodes images asynchronously; commit only against the unchanged editor. */
+  async addView(setId: string, name: string, images: PaintedViewImages, fit: PaintedViewFit): Promise<void> {
+    const original = JSON.stringify(this.ed.project);
+    const work = cloneProject(this.ed.project);
+    this.status(`Registering view “${name}”…`);
+    try {
+      await addPaintedView(work, setId, name, images, fit);
+      if (JSON.stringify(this.ed.project) !== original || this.ed.mode !== 'setup') return this.status('View not added: the editor changed during registration. Try Add view again.');
+      this.ed.mutate(`Add view ${name}`, (p) => {
+        p.viewSets = work.viewSets;
+        p.attachments = work.attachments;
+        p.animations = work.animations;
+      });
+      this.status(`Added view “${name}”: fitted by ${fit.fit ?? 'height'}, scale ${fit.scale ?? 1}.`);
+    } catch (e) {
+      this.error('View not added', [(e as Error).message]);
+    }
   }
 
   // ---- Animation ---------------------------------------------------------------------

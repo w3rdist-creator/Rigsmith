@@ -14,6 +14,7 @@ import { applyClip, exportClip, formatClipSpec, lintClip, parseClipText } from '
 import type { ClipMode, ClipSpec } from '../src/model/clipSpec.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import { smearAnimation } from '../src/model/smear.ts';
+import { addPaintedView, createViewSet, keyView, keyViewOnBlink, setEyes, viewOf, viewSet } from '../src/model/views.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
 import type { TransformRequest, VertexAlphaRequest, WeightRequest } from './lib/rigsmith-api.ts';
 import { ApiError, EXIT, addImage, addIkNamed, addSpringNamed, bakeSpringsCmd, bakeConstraintsCmd, setEmitter, setMask, addTransform, setBind, setInherit, setTint, setVertexAlpha, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
@@ -65,6 +66,10 @@ const USAGE = `rigsmith <command> [options]
           (FX socket: the game spawns the particle recipe at the attachment; key the rate with key --channel rate)
   mask <project> --att <attachment> (--to <mask attachment> | --clear) --out <project>
           (clipping mask: the attachment shows only inside the mask's shape, e.g. pupils in an eye)
+  views-create <project> --bone <id|name> --name <set> [--atts <a,b>] --out <project>
+  views-add <project> --set <id|name> --name <view> --open <PNG|imageId> [--half <PNG|imageId>] [--closed <PNG|imageId>] [--fit height|width] [--scale 1] [--anchor bottom|center] --out <project>
+  views-eyes <project> --set <id|name> --view <id|name> --att <id|name> --open <imageId> --closed <imageId> [--half <imageId>] --out <project>
+  view-key <project> --set <id|name> --view <id|name> --anim <id|name> --at <seconds> [--on-blink] --out <project>
   smear <project> --anim <name> --att <a,b> [--min-px 40] [--samples 10] [--strength 0.6] --out <project>
           (fast frames: add motion-smeared copies of the images and key the swaps)
   bake-springs <project> --out <project>   (springs → per-frame rotate keys; needed for Lottie)
@@ -502,6 +507,63 @@ async function main(): Promise<Record<string, unknown>> {
       const res = setMask(p, need('att'), flag('clear') !== undefined ? null : need('to'));
       writeProject(out, p);
       return { outputs: [out], attachment: flag('att'), ...res };
+    }
+    case 'views-create':
+    case 'views-add':
+    case 'views-eyes':
+    case 'view-key': {
+      const out = need('out');
+      const attachment = (value: string) => p.attachments.find((a) => a.id === value || a.name === value)?.id
+        ?? fail1(`No attachment named or identified by “${value}”.`);
+      try {
+        if (cmd === 'views-create') {
+          const name = need('name').trim();
+          if (!name) usage('--name must not be empty.');
+          const bone = p.bones.find((b) => b.id === need('bone') || b.name === flag('bone'))
+            ?? fail1(`No bone named or identified by “${flag('bone')}”.`);
+          const ids = flag('atts')?.split(',').map((s) => attachment(s.trim()));
+          const set = createViewSet(p, bone.id, name, ids);
+          writeProject(out, p);
+          return { outputs: [out], set: set.id, view: set.views[0].id };
+        }
+        const set = viewSet(p, need('set'));
+        if (cmd === 'views-add') {
+          const name = need('name');
+          const fit = flag('fit') ?? 'height', anchor = flag('anchor') ?? 'bottom';
+          const scale = num('scale') ?? 1;
+          if (fit !== 'height' && fit !== 'width') usage('--fit must be height or width.');
+          if (anchor !== 'bottom' && anchor !== 'center') usage('--anchor must be bottom or center.');
+          if (!(scale > 0)) usage('--scale must be above 0.');
+          const image = async (value: string) => p.images.find((im) => im.id === value)?.id
+            ?? (await addImage(p, value)).id;
+          const open = await image(need('open'));
+          const half = flag('half') === undefined ? undefined : await image(need('half'));
+          const closed = flag('closed') === undefined ? undefined : await image(need('closed'));
+          const r = await addPaintedView(p, set.id, name, { open, ...(half ? { half } : {}), ...(closed ? { closed } : {}) }, { fit, anchor, scale });
+          writeProject(out, p);
+          return { outputs: [out], set: set.id, view: r.view.id, attachment: r.attachment.id };
+        }
+        const view = viewOf(set, need('view'));
+        if (cmd === 'views-eyes') {
+          const half = flag('half');
+          setEyes(p, set.id, view.id, { attachment: attachment(need('att')), open: need('open'), closed: need('closed'), ...(half ? { half } : {}) });
+          writeProject(out, p);
+          return { outputs: [out], set: set.id, view: view.id };
+        }
+        const anim = p.animations.find((a) => a.id === need('anim') || a.name === flag('anim'))
+          ?? fail1(`No animation named or identified by “${flag('anim')}”.`);
+        need('at');
+        const time = num('at')!;
+        if (time < 0 || time > anim.duration) usage('--at must be seconds within the animation duration.');
+        let frame = Math.round(time * anim.fps);
+        if (flag('on-blink')) frame = keyViewOnBlink(p, anim, set.id, view.id, frame);
+        else keyView(p, anim, set.id, view.id, frame);
+        writeProject(out, p);
+        return { outputs: [out], set: set.id, view: view.id, animation: anim.name, frame, time: frame / anim.fps };
+      } catch (e) {
+        if (e instanceof ApiError) throw e;
+        fail1((e as Error).message);
+      }
     }
     case 'smear': {
       const out = need('out');

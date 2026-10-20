@@ -333,6 +333,73 @@ describe('clip specs (R6)', () => {
   });
 });
 
+describe('painted views CLI (R10)', () => {
+  function created(label: string): string {
+    const out = path.join(OUT, `views-${label}.rig.json`);
+    const r = cli('views-create', RIG, '--bone', 'upper', '--name', 'head', '--atts', 'a_upper', '--out', out);
+    assert.equal(r.code, 0, JSON.stringify(r.json));
+    return out;
+  }
+  function project(file: string) {
+    const p = parseProject(readFileSync(file, 'utf8'));
+    assert.ok(p.ok);
+    return p.project;
+  }
+  it('views-create accepts ids/names and preserves output on a duplicate-set failure', () => {
+    const out = created('create');
+    assert.deepEqual(project(out).viewSets![0].views[0].attachments, ['a_upper']);
+    const before = readFileSync(out, 'utf8');
+    assert.equal(cli('views-create', out, '--bone', 'upper', '--name', 'again', '--out', out).code, 1);
+    assert.equal(readFileSync(out, 'utf8'), before);
+    const bad = path.join(OUT, 'views-create-bad.json');
+    assert.equal(cli('views-create', RIG, '--bone', 'missing', '--name', 'head', '--out', bad).code, 1);
+    assert.ok(!existsSync(bad));
+  });
+  it('views-add imports PNGs or reuses image ids; invalid fitting writes nothing', () => {
+    const input = created('add-input'), out = path.join(OUT, 'views-added.rig.json');
+    const png = path.join(OUT, 'painted-view.png');
+    writeFileSync(png, encodePng(16, 24, new Uint8Array(16 * 24 * 4).fill(255)));
+    const r = cli('views-add', input, '--set', 'head', '--name', '34', '--open', png, '--closed', 'i_arm2', '--scale', '0.88', '--out', out);
+    assert.equal(r.code, 0, JSON.stringify(r.json));
+    const p = project(out), view = p.viewSets![0].views[1];
+    assert.equal(view.eyes!.closed, 'i_arm2');
+    assert.equal(p.attachments.find((a) => a.id === view.attachments[0])!.hidden, true);
+    assert.equal(p.images.length, richProject().images.length + 1);
+    assert.equal(cli('views-add', out, '--set', 'head', '--name', 'side', '--open', 'i_arm', '--out', out).code, 0);
+    const bad = path.join(OUT, 'views-add-bad.json');
+    for (const [option, value] of [['fit', 'depth'], ['anchor', 'top'], ['scale', '0']])
+      assert.equal(cli('views-add', input, '--set', 'head', '--name', 'bad', '--open', 'i_arm', `--${option}`, value, '--out', bad).code, 2);
+    assert.equal(cli('views-add', input, '--set', 'missing', '--name', 'bad', '--open', 'i_arm', '--out', bad).code, 1);
+    assert.ok(!existsSync(bad));
+  });
+  it('views-eyes configures base eyes and rejects attachments outside the view without output', () => {
+    const input = created('eyes-input'), out = path.join(OUT, 'views-eyes.rig.json');
+    const args = ['--set', 'head', '--view', 'base', '--open', 'i_arm', '--half', 'i_arm2_alt', '--closed', 'i_arm2'];
+    const r = cli('views-eyes', input, ...args, '--att', 'upper', '--out', out);
+    assert.equal(r.code, 0, JSON.stringify(r.json));
+    assert.deepEqual(project(out).viewSets![0].views[0].eyes, { attachment: 'a_upper', open: 'i_arm', half: 'i_arm2_alt', closed: 'i_arm2' });
+    const bad = path.join(OUT, 'views-eyes-bad.json');
+    assert.equal(cli('views-eyes', input, ...args, '--att', 'a_torso', '--out', bad).code, 1);
+    assert.ok(!existsSync(bad));
+  });
+  it('view-key uses seconds, can find a blink, and refuses a missing blink without output', () => {
+    const out = created('key');
+    assert.equal(cli('views-add', out, '--set', 'head', '--name', '34', '--open', 'i_arm', '--closed', 'i_arm2', '--out', out).code, 0);
+    const r = cli('view-key', out, '--set', 'head', '--view', '34', '--anim', 'wave', '--at', '0.2', '--out', out);
+    assert.equal(r.code, 0, JSON.stringify(r.json));
+    assert.equal(r.json.frame, 6);
+    const p = project(out), id = p.viewSets![0].views[1].attachments[0];
+    assert.deepEqual(p.animations.find((a) => a.name === 'wave')!.slots![id].visible!.map((k) => [k.time, k.value[0]]), [[0, 0], [0.2, 1]]);
+    const blink = cli('view-key', out, '--set', 'head', '--view', 'base', '--anim', 'wave', '--at', '0.2', '--on-blink', '--out', out);
+    assert.equal(blink.code, 0, JSON.stringify(blink.json));
+    assert.equal(blink.json.frame, 6);
+    const bad = path.join(OUT, 'view-key-bad.json');
+    assert.equal(cli('view-key', out, '--set', 'head', '--view', '34', '--anim', 'wave', '--at', '0.5', '--on-blink', '--out', bad).code, 1);
+    assert.equal(cli('view-key', out, '--set', 'head', '--view', '34', '--anim', 'wave', '--at', '-1', '--out', bad).code, 2);
+    assert.ok(!existsSync(bad));
+  });
+});
+
 describe('rendering (headless Chrome for Testing via render.html)', () => {
   it('render: byte-identical to the editor UI sequence export (plain, skin, sub-range)', async () => {
     for (const [label, args, ui] of [

@@ -221,6 +221,15 @@ tint, image, skin, draw order) → mesh vertices.
   stepped slot image swap, with the clip's own image keyed back on the next slow frame, so
   every exporter and player shows it with no new format feature. Attachments are chosen
   explicitly: smearing a feature that rides on an unsmeared mesh would tear it apart.
+- **View sets** (R10, `src/model/views.ts`): optional `Project.viewSets` authoring
+  metadata groups separately painted views on one bone. The base can contain multiple
+  attachments; each added painting is fitted to their union setup alpha bounds (alpha
+  above 24), anchored at the chin or centre, and inserted above the topmost base member
+  in setup and keyed draw orders. This is an art swap, not a mesh morph. Switching writes
+  ordinary stepped visibility and eye-image keys; next-blink searches the view visible
+  at each candidate frame. Runtime export omits the metadata, while the ordinary keys
+  and attachments carry playback through existing exporters. Files without views keep
+  their existing serialization.
 - **Blend, tint and vertex alpha** (v3, `Attachment.blend`, `Attachment.color`, slot
   `color` keys, `Mesh.alphas`): `blend` is `normal` (absent), `additive`, `screen` or
   `multiply` and maps to the canvas operations `source-over`, `lighter`, `screen` and

@@ -36,6 +36,9 @@ import type {
   VertexWeights,
   EventKey,
   SpringConstraint,
+  View,
+  ViewEyes,
+  ViewSet,
 } from './types.ts';
 import { BLEND_MODES, CHANNEL_ARITY, CHANNELS, EVENT_NAME, FORMAT_ID, FORMAT_VERSION, FRAME_MAX_SIDE, INTERPS, SEQUENCE_MAX_REPEAT } from './types.ts';
 
@@ -80,6 +83,7 @@ export function v3Features(p: Project): string[] {
   if (p.bones.some(hasInheritFlags)) f.add('bone inherit flags');
   if (p.transformConstraints?.length) f.add('transform constraints');
   if (p.springs?.length) f.add('springs');
+  if (p.viewSets?.length) f.add('view sets');
   for (const a of p.attachments) {
     if (a.blend && a.blend !== 'normal') f.add('blend modes');
     if (a.color && !isWhite(setupColor(a))) f.add('tint colours');
@@ -194,6 +198,21 @@ export function toFileObject(project: Project): Project {
   const seqs = nonEmpty(project.sequences);
   if (seqs) out.sequences = seqs.map((q) => ({ id: q.id, name: q.name, steps: q.steps.map((st) => ({ animId: st.animId, repeat: st.repeat })), loop: q.loop }));
   if (project.frame) out.frame = { x: project.frame.x, y: project.frame.y, width: project.frame.width, height: project.frame.height };
+  const viewSets = nonEmpty(project.viewSets);
+  if (viewSets) out.viewSets = viewSets.map((s) => ({
+    id: s.id, name: s.name, boneId: s.boneId,
+    views: s.views.map((v) => {
+      const view: View = { id: v.id, name: v.name, attachments: v.attachments.slice() };
+      if (v.eyes) {
+        view.eyes = {
+          attachment: v.eyes.attachment, open: v.eyes.open,
+          ...(v.eyes.half !== undefined ? { half: v.eyes.half } : {}),
+          closed: v.eyes.closed,
+        };
+      }
+      return view;
+    }),
+  }));
   return out;
 }
 
@@ -349,7 +368,7 @@ function sortedTimes(c: Checker, list: { time: number }[], where: string): void 
 }
 
 /** Every top-level field this version reads and writes. */
-const TOP_LEVEL_KEYS: readonly string[] = ['format', 'version', 'name', 'bones', 'images', 'attachments', 'animations', 'ik', 'paths', 'pathConstraints', 'transformConstraints', 'springs', 'skins', 'mixes', 'sequences', 'frame'];
+const TOP_LEVEL_KEYS: readonly string[] = ['format', 'version', 'name', 'bones', 'images', 'attachments', 'animations', 'ik', 'paths', 'pathConstraints', 'transformConstraints', 'springs', 'skins', 'mixes', 'sequences', 'frame', 'viewSets'];
 
 export function validateProject(raw: unknown): ParseResult {
   const c = new Checker();
@@ -531,6 +550,68 @@ export function validateProject(raw: unknown): ParseResult {
   attachments.forEach((att, i) => {
     if (att.clip === undefined) return;
     for (const e of clipProblems(attachments, att, att.clip)) c.fail(`attachments[${i}].clip: ${e}`);
+  });
+
+  // View metadata does not override Attachment.hidden. Creation helpers establish
+  // base/nonbase setup visibility; parsing preserves later manual visibility edits.
+  const viewSets: ViewSet[] = [];
+  const viewSetsRaw = c.optArr(raw, 'viewSets', 'project');
+  if (viewSetsRaw) v3only('view sets', 'project');
+  const viewSetIds = new Set<string>();
+  const viewIds = new Set<string>();
+  viewSetsRaw?.forEach((s, i) => {
+    const w = `viewSets[${i}]`;
+    if (!isObj(s)) return c.fail(`${w} must be an object`);
+    const id = c.str(s, 'id', w);
+    if (!id.trim()) c.fail(`${w}.id must not be empty`);
+    if (viewSetIds.has(id)) c.fail(`${w}.id "${id}" is duplicated`);
+    viewSetIds.add(id);
+    const boneId = c.str(s, 'boneId', w);
+    if (!boneIds.has(boneId)) c.fail(`${w} references missing bone "${boneId}"`);
+    const views: View[] = [];
+    const viewsRaw = c.arr(s, 'views', w);
+    if (!viewsRaw.length) c.fail(`${w}.views must contain a base view`);
+    const members = new Set<string>();
+    viewsRaw.forEach((v, vi) => {
+      const vw = `${w}.views[${vi}]`;
+      if (!isObj(v)) return c.fail(`${vw} must be an object`);
+      const viewId = c.str(v, 'id', vw);
+      if (!viewId.trim()) c.fail(`${vw}.id must not be empty`);
+      if (viewIds.has(viewId)) c.fail(`${vw}.id "${viewId}" is duplicated`);
+      viewIds.add(viewId);
+      const attachmentIds: string[] = [];
+      const membersRaw = c.arr(v, 'attachments', vw);
+      if (!membersRaw.length) c.fail(`${vw}.attachments must not be empty`);
+      membersRaw.forEach((attachmentId, ai) => {
+        const aw = `${vw}.attachments[${ai}]`;
+        if (typeof attachmentId !== 'string') return c.fail(`${aw} must be a string`);
+        if (!attIds.has(attachmentId)) c.fail(`${aw} references missing attachment "${attachmentId}"`);
+        if (members.has(attachmentId)) c.fail(`${aw}: attachment "${attachmentId}" appears more than once in this view set`);
+        members.add(attachmentId);
+        attachmentIds.push(attachmentId);
+      });
+      const view: View = { id: viewId, name: c.str(v, 'name', vw), attachments: attachmentIds };
+      if (v.eyes !== undefined) {
+        const ew = `${vw}.eyes`;
+        if (!isObj(v.eyes)) c.fail(`${ew} must be an object`);
+        else {
+          const eyes: ViewEyes = {
+            attachment: c.str(v.eyes, 'attachment', ew),
+            open: c.str(v.eyes, 'open', ew),
+            closed: c.str(v.eyes, 'closed', ew),
+          };
+          if (v.eyes.half !== undefined) eyes.half = c.str(v.eyes, 'half', ew);
+          if (!attachmentIds.includes(eyes.attachment)) c.fail(`${ew}.attachment must belong to its view`);
+          for (const key of ['open', 'half', 'closed'] as const) {
+            const imageId = eyes[key];
+            if (imageId !== undefined && !imageIds.has(imageId)) c.fail(`${ew}.${key} references missing image "${imageId}"`);
+          }
+          view.eyes = eyes;
+        }
+      }
+      views.push(view);
+    });
+    viewSets.push({ id, name: c.str(s, 'name', w), boneId, views });
   });
 
   // Constraints
@@ -928,6 +1009,11 @@ export function validateProject(raw: unknown): ParseResult {
 
   const used = new Set(attachments.map((a) => a.imageId));
   for (const s of skins) for (const e of s.entries) used.add(e.imageId);
+  for (const s of viewSets) for (const v of s.views) if (v.eyes) {
+    used.add(v.eyes.open);
+    if (v.eyes.half !== undefined) used.add(v.eyes.half);
+    used.add(v.eyes.closed);
+  }
   for (const an of animations) for (const st of Object.values(an.slots ?? {})) for (const k of st.image ?? []) used.add(k.imageId);
   for (const im of images) if (im.derived) used.add(im.derived.sourceId);
   const unused = images.filter((im) => !used.has(im.id)).length;
@@ -947,6 +1033,7 @@ export function validateProject(raw: unknown): ParseResult {
   if (skinsRaw) project.skins = skins;
   if (mixRaw) project.mixes = mixes;
   if (seqRaw) project.sequences = sequences;
+  if (viewSetsRaw) project.viewSets = viewSets;
   if (frame) project.frame = frame;
   return { ok: true, warnings: c.warnings, project };
 }

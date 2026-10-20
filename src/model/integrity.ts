@@ -58,6 +58,25 @@ export function repairReferences(p: Project): string[] {
     p.springs = p.springs.map((s) => ({ ...s, bones: s.bones.filter((b) => boneIds.has(b)) })).filter((s) => s.bones.length);
     if (p.springs.length !== before) notes.push(`${before - p.springs.length} spring(s) removed (their bones were deleted).`);
   }
+  // View sets (R10): drop missing attachments and eye images; a view left empty goes, and a
+  // set whose bone is gone or whose base view emptied goes.
+  if (p.viewSets) {
+    const before = p.viewSets.length;
+    p.viewSets = p.viewSets.filter((s) => boneIds.has(s.boneId));
+    for (const s of p.viewSets) {
+      for (const v of s.views) {
+        v.attachments = v.attachments.filter((id) => attIds.has(id));
+        const e = v.eyes;
+        if (e && (!v.attachments.includes(e.attachment) || !imageIds.has(e.open) || !imageIds.has(e.closed))) delete v.eyes;
+        else if (e?.half !== undefined && !imageIds.has(e.half)) delete e.half;
+      }
+      if (s.views[0] && !s.views[0].attachments.length) s.views = [];
+      else s.views = s.views.filter((v) => v.attachments.length);
+    }
+    p.viewSets = p.viewSets.filter((s) => s.views.length);
+    if (p.viewSets.length !== before) notes.push(`${before - p.viewSets.length} view set(s) removed (their bone or base attachments were deleted).`);
+    if (!p.viewSets.length) delete p.viewSets;
+  }
   // Mesh weights: influences of missing bones are dropped and the rest renormalized; a
   // vertex left without influences goes to the attachment's bone (or, with no bone, the
   // mesh becomes rigid).

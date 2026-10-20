@@ -404,6 +404,33 @@ export interface ClipSequence {
 
 export const SEQUENCE_MAX_REPEAT = 100;
 
+/** v3: blink images for one attachment in a view. Image references are image ids. */
+export interface ViewEyes {
+  attachment: string;
+  open: string;
+  half?: string;
+  closed: string;
+}
+
+export interface View {
+  /** Unique across all view sets in the project. */
+  id: string;
+  name: string;
+  /** Nonempty; an attachment belongs to at most one view within a set. */
+  attachments: string[];
+  eyes?: ViewEyes;
+}
+
+/** v3: authoring metadata; switching views is baked into ordinary slot keys. */
+export interface ViewSet {
+  /** Unique among view sets in the project. */
+  id: string;
+  name: string;
+  boneId: string;
+  /** Nonempty; first is the base. Creation helpers show it and hide other views in setup. */
+  views: View[];
+}
+
 export interface Project {
   format: typeof FORMAT_ID;
   version: FormatVersion;
@@ -424,6 +451,8 @@ export interface Project {
   mixes?: MixRule[];
   /** v2: saved clip sequences. */
   sequences?: ClipSequence[];
+  /** v3: optional view/blink authoring metadata. */
+  viewSets?: ViewSet[];
   /** Fixed delivery frame for exports (v2; absent = each export fits its animation). */
   frame?: ProjectFrame;
 }

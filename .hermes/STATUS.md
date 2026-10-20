@@ -1,3 +1,14 @@
+WO23_R10_STATE: READY_FOR_OPERATOR_REVIEW
+Date: 2026-10-20 · Branch: r10-views · Local changes only; no commit/push/checkout.
+Phases 1–2 preserved. Views Setup/Animate controls and four visible-control e2e tests implemented.
+Fresh gates: unit 373/373, build PASS, CLI 27/27, e2e 225/225; no skipped tests.
+Raw output and evidence index: .hermes/evidence/r10-views/README.md.
+Mapo authored only through CLI: front-new → 34 at f31 → front-new at f97; 240-frame ZIP,
+8-second H.264 MP4, and two swap strips in .hermes/evidence/r10-views/.
+Copy commands succeeded to ~/Desktop/STAKE/rigsmith_r10_previews/views_feature/; the harness
+blocked post-copy comparison outside the worktree. Operator visual/reference acceptance pending.
+
+---- History: earlier project status (not the current WO-23 gate counts) ----
 TERMINAL_STATE: READY_FOR_HERMES_VERIFICATION
 Worker: claude-opus-5-5 (Fable review corrections LP-001 … LP-014 on the later priorities; no other agents/models)
 This is a worker handoff, not a certification. Status: corrections implemented, awaiting Hermes verification;

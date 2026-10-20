@@ -31,6 +31,7 @@ import { setClip } from '../model/masks.ts';
 import { EMITTER_MAX_RATE } from '../model/types.ts';
 import { newId } from '../model/types.ts';
 import { setBoneInherit } from '../model/skeleton.ts';
+import { createViewSet, currentView, keyView, keyViewOnBlink, setEyes, showViewInSetup, viewSetForBone } from '../model/views.ts';
 import type { App } from './app.ts';
 import { append, h, numberField } from './dom.ts';
 import type { Rgba } from '../model/color.ts';
@@ -186,12 +187,94 @@ function emitterSetup(app: App, a: Attachment): HTMLElement[] {
   return out;
 }
 
+// ---- Painted views -------------------------------------------------------------------------
+
+function boneViewsSection(app: App, b: Bone): HTMLElement[] {
+  const { ed } = app;
+  const p = ed.project;
+  const set = viewSetForBone(p, b.id);
+  const out: HTMLElement[] = [h('div', { class: 'group-label' }, 'Views')];
+  if (ed.mode === 'animate') {
+    const anim = ed.anim();
+    if (!set || !anim) return [];
+    for (const view of set.views) {
+      const key = (blink: boolean) => app.guard(() => {
+        let frame = Math.round(ed.time * anim.fps);
+        ed.mutate(`Show ${view.name}${blink ? ' at next blink' : ''}`, (q) => {
+          const a = q.animations.find((x) => x.id === anim.id)!;
+          if (blink) frame = keyViewOnBlink(q, a, set.id, view.id, frame);
+          else keyView(q, a, set.id, view.id, frame);
+        });
+        app.status(`Keyed view “${view.name}” at frame ${frame}${blink ? ' (closed-eye blink)' : ''}.`);
+      });
+      out.push(h('div', { class: 'row2' },
+        h('button', { class: 'mini', 'data-testid': `view-key-${view.name}`, onclick: () => key(false) }, `Show ${view.name} at playhead`),
+        h('button', { class: 'mini', 'data-testid': `view-blink-${view.name}`, onclick: () => key(true) }, `Show ${view.name} at next blink`),
+      ));
+    }
+    return out;
+  }
+  if (!set) {
+    out.push(h('button', { class: 'mini', 'data-testid': 'views-create', onclick: () => app.guard(() => {
+      ed.mutate('Make view set', (q) => void createViewSet(q, b.id, b.name));
+      app.status(`Made view set “${b.name}” from this bone’s attachments; the front view is named “base”.`);
+    }) }, 'Make view set from this bone’s attachments'));
+    return out;
+  }
+  const shown = currentView(p, null, set.id, 0);
+  for (const view of set.views) out.push(h('label', { class: 'check' },
+    h('input', { type: 'radio', name: `view-show-${set.id}`, checked: shown?.id === view.id, 'data-testid': `view-show-${view.name}`, onchange: () => app.guard(() => {
+      ed.mutate(`Preview view ${view.name}`, (q) => showViewInSetup(q, set.id, view.id));
+      app.status(`Showing view “${view.name}” in Setup; animation keys unchanged.`);
+    }) }), view.name,
+  ));
+  const imageOptions = p.images.map((im) => ({ value: im.id, label: im.name }));
+  const optionalImages = [{ value: '', label: '— none' }, ...imageOptions];
+  const images = { open: p.images[0]?.id ?? '', half: '', closed: '' };
+  let fit: 'height' | 'width' = 'height', scale = 1;
+  const name = h('input', { type: 'text', value: '', placeholder: '3/4', 'data-testid': 'views-name', 'aria-label': 'New view name' });
+  out.push(
+    h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'New view name'), name),
+    select('views-open', 'Open image', imageOptions, images.open, (v) => { images.open = v; }),
+    select('views-half', 'Half image (optional)', optionalImages, '', (v) => { images.half = v; }),
+    select('views-closed', 'Closed image (optional)', optionalImages, '', (v) => { images.closed = v; }),
+    select('views-fit', 'Fit', [{ value: 'height', label: 'Height' }, { value: 'width', label: 'Width' }], fit, (v) => { fit = v as typeof fit; }),
+    numberField({ label: 'Scale', value: scale, step: 0.01, min: 0.01, testId: 'views-scale', onCommit: (v) => { scale = v; } }),
+    h('button', { class: 'mini', 'data-testid': 'views-add', disabled: !p.images.length, onclick: () => void app.addView(set.id, name.value, {
+      open: images.open, ...(images.half ? { half: images.half } : {}), ...(images.closed ? { closed: images.closed } : {}),
+    }, { fit, scale, anchor: 'bottom' }) }, 'Add view'),
+  );
+  const eyesRoot = h('div');
+  const renderEyes = (viewId: string) => {
+    const view = set.views.find((v) => v.id === viewId)!;
+    const atts = p.attachments.filter((a) => view.attachments.includes(a.id));
+    const eyes = { attachment: view.eyes?.attachment ?? atts[0]?.id ?? '', open: view.eyes?.open ?? atts[0]?.imageId ?? '', half: view.eyes?.half ?? '', closed: view.eyes?.closed ?? '' };
+    eyesRoot.replaceChildren(
+      select('views-eyes-att', 'Blink attachment', atts.map((a) => ({ value: a.id, label: a.name })), eyes.attachment, (v) => { eyes.attachment = v; }),
+      select('views-eyes-open', 'Open eyes', imageOptions, eyes.open, (v) => { eyes.open = v; }),
+      select('views-eyes-half', 'Half eyes (optional)', optionalImages, eyes.half, (v) => { eyes.half = v; }),
+      select('views-eyes-closed', 'Closed eyes', [{ value: '', label: '— choose image' }, ...imageOptions], eyes.closed, (v) => { eyes.closed = v; }),
+      h('button', { class: 'mini', 'data-testid': 'views-eyes', onclick: () => app.guard(() => {
+        ed.mutate(`Set eyes for ${view.name}`, (q) => void setEyes(q, set.id, view.id, {
+          attachment: eyes.attachment, open: eyes.open, closed: eyes.closed, ...(eyes.half ? { half: eyes.half } : {}),
+        }));
+        app.status(`Set blink eyes for view “${view.name}”. Key closed-eye images in Animate before using “at next blink”.`);
+      }) }, 'Set eyes'),
+    );
+  };
+  const eyeView = shown ?? set.views[0];
+  out.push(h('div', { class: 'group-label' }, 'Blink eyes'),
+    select('views-eyes-view', 'View', set.views.map((v) => ({ value: v.id, label: v.name })), eyeView.id, renderEyes), eyesRoot);
+  renderEyes(eyeView.id);
+  return out;
+}
+
 // ---- Bone: IK creation, constraint membership, pivot mode -----------------------------------
 
 export function boneRigSection(app: App, b: Bone): HTMLElement[] {
   const { ed } = app;
   const p = ed.project;
-  const out: HTMLElement[] = [h('div', { class: 'group-label' }, 'Constraints')];
+  const out: HTMLElement[] = [...boneViewsSection(app, b), h('div', { class: 'group-label' }, 'Constraints')];
   const involved = [
     ...(p.ik ?? []).filter((k) => k.bones.includes(b.id) || k.target === b.id).map((k) => ({ id: k.id, name: k.name, role: k.target === b.id ? 'IK target' : 'IK chain' })),
     ...(p.pathConstraints ?? []).filter((k) => k.bones.includes(b.id)).map((k) => ({ id: k.id, name: k.name, role: 'on path' })),
