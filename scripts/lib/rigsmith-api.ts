@@ -19,6 +19,9 @@ import { exportRuntime, runtimeProblems } from '../../src/model/exportRuntime.ts
 import { parseProject, serializeProject } from '../../src/model/format.ts';
 import type { MediaFormat } from '../../src/model/media.ts';
 import { MediaCancelled, encodeAnimated, mediaErrors } from '../../src/model/media.ts';
+import type { LimbSpec } from '../../src/model/limbWeights.ts';
+import { limbWeights, mirrorWeights, smoothWeights, suffixBoneMap } from '../../src/model/limbWeights.ts';
+import { autoWeights, gridPoints, meshSummary, setMesh, triangulate } from '../../src/model/meshOps.ts';
 import { setMixRule } from '../../src/model/mix.ts';
 import { dataUrlBytes, decodePngExact, encodePngExact } from '../../src/model/png.ts';
 import { addSkin, setSkinEntry } from '../../src/model/skinOps.ts';
@@ -155,6 +158,66 @@ export function setSequence(p: Project, name: string, stepList: string, loop: bo
   const seq: ClipSequence = { id: existing?.id ?? newId('seq'), name, steps: r.steps, loop };
   p.sequences = [...(p.sequences ?? []).filter((q) => q !== existing), seq];
   return seq;
+}
+
+// ---- Meshes and weights (R1) ----------------------------------------------------------
+
+function attachmentNamed(p: Project, name: string) {
+  return p.attachments.find((a) => a.name === name) ?? fail(`No attachment named “${name}”.`);
+}
+function boneNamed(p: Project, name: string): string {
+  return p.bones.find((b) => b.name === name)?.id ?? fail(`No bone named “${name}”.`);
+}
+
+/** Replaces an attachment's mesh with an outline + cols×rows interior grid (weights and deform keys reset). */
+export function gridMesh(p: Project, attName: string, cols: number, rows: number): string {
+  if (!(Number.isInteger(cols) && Number.isInteger(rows) && cols >= 1 && rows >= 1 && cols * rows <= 4096)) fail('Grid must be whole numbers ≥ 1 with at most 4096 cells.');
+  const att = attachmentNamed(p, attName);
+  if (!att.imageId) fail(`${attName} has no image.`);
+  const im = p.images.find((i) => i.id === att.imageId)!;
+  const g = gridPoints(im.width, im.height, cols, rows);
+  let mesh;
+  try {
+    mesh = triangulate(g.hull, g.interior);
+  } catch (e) {
+    fail(`${attName}: ${(e as Error).message}`);
+  }
+  setMesh(p, att.id, mesh);
+  return meshSummary(mesh);
+}
+
+export type WeightRequest =
+  | { kind: 'auto'; bones: string[]; maxInfluences?: number }
+  | { kind: 'limb'; upper: string; lower: string; helper?: string; band: LimbSpec['band']; end?: { bone: string; at: number; band: number; max: number }; root?: { bone: string; from: number; to: number } }
+  | { kind: 'mirror'; from: string; swap: [string, string] }
+  | { kind: 'none' };
+
+/** Sets an attachment's weights (bone and attachment names, not ids), then optionally smooths them. */
+export function setWeights(p: Project, attName: string, req: WeightRequest, smooth?: { passes: number; amount?: number }): { vertices: number; maxInfluences: number } {
+  const att = attachmentNamed(p, attName);
+  if (!att.mesh) fail(`${attName} has no mesh (create one with \`mesh\` first).`);
+  try {
+    if (req.kind === 'auto') {
+      if (!req.bones.length) fail('Auto weights need at least one bone.');
+      att.mesh.weights = autoWeights(p, att, req.bones.map((b) => boneNamed(p, b)), req.maxInfluences ?? 2);
+    } else if (req.kind === 'limb') {
+      att.mesh.weights = limbWeights(p, att, {
+        upper: boneNamed(p, req.upper), lower: boneNamed(p, req.lower),
+        ...(req.helper ? { helper: boneNamed(p, req.helper) } : {}),
+        band: req.band,
+        ...(req.end ? { end: { ...req.end, bone: boneNamed(p, req.end.bone) } } : {}),
+        ...(req.root ? { root: { ...req.root, bone: boneNamed(p, req.root.bone) } } : {}),
+      });
+    } else if (req.kind === 'mirror') {
+      att.mesh.weights = mirrorWeights(attachmentNamed(p, req.from), att, suffixBoneMap(p, req.swap[0], req.swap[1]));
+    } else if (!att.mesh.weights) fail(`${attName} has no weights to smooth.`);
+    if (smooth) att.mesh.weights = smoothWeights(att, smooth.passes, smooth.amount);
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    fail(`${attName}: ${(e as Error).message}`);
+  }
+  const w = att.mesh.weights!;
+  return { vertices: w.length, maxInfluences: Math.max(...w.map((l) => l.length)) };
 }
 
 function fail(msg: string): never {

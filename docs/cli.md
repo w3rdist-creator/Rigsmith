@@ -34,9 +34,25 @@ read-only test probe.
 | `replace-image <project> --image n --file x.png [--allow-resize] --out p2` | no | swaps pixels keeping the id (attachments, keys and skins follow); a size change needs `--allow-resize` |
 | `skin <project> --name S [--set att=image …] [--keyed att:fromImage=image …] --out p2` | no | creates/extends a skin (setup-image and keyed-image entries) |
 | `set-mix <project> --from A --to B --duration S\|none --out p2` | no | stores or removes a mix rule |
+| `mesh <project> --att A --grid CxR --out p2` | no | replaces A's image with a triangulated C×R grid mesh (rigid until weighted) |
+| `weights <project> --att A --out p2` + one of `--auto b1,b2 [--max-influences N]` · `--along upper,lower --band inner/outer [--side ±1] [--helper bone] [--end bone:at:band:max] [--root bone:from:to]` · `--mirror-from A2 --swap _l=_r`, and/or `[--smooth N] [--smooth-amount a]` | no | sets A's mesh weights (see below) |
 
 Authoring commands validate the result with the editor's reader before writing and
 never modify their input file unless `--out` names it.
+
+### Limb weights (`weights --along`)
+
+One continuous limb image bends as a round tube. With `s` = distance along the upper
+bone from its origin (setup pose) and `q` = signed distance across it, the upper bone
+hands over to the lower over `smoothstep(L−B, L+B, s)` (L = upper length), where the
+half-width B runs from `outer` to `inner` across the image (`inner` on the side the
+joint folds toward: bone +y for `--side 1`, −y for `--side -1`). A `--helper` bone takes
+`4t(1−t)` on the joint line. `--end` hands up to `max` of the tip to another bone
+(wrist), `--root` keeps the top on a body bone (shoulder/hip). `--mirror-from` copies a
+twin mesh's weights vertex for vertex (same grid), renaming bones containing the
+`--swap` text. `--smooth N` runs N Laplacian passes over the triangle graph (each moves a
+vertex `--smooth-amount`, default 0.5, toward its neighbours' average; at most 4
+influences kept). The editor has the same controls under Mesh ▸ Limb weights.
 
 ## How rendering works
 
@@ -69,6 +85,12 @@ then only uses CLI commands: `add-image` ×15, `skin` ×3, `set-mix`, `validate`
 on this Chrome for Testing build (other Chrome builds may encode PNG bytes differently).
 
 ## Verified by
+
+`npm test` (`tests/unit/limb-weights.test.ts`): `mesh` / `weights` as subprocesses — the
+limb → mirror → smooth chain equals the model functions exactly; usage errors exit 2,
+invalid requests exit 1, nothing written on failure; the limb formula is recomputed
+independently per vertex.
+
 
 `npm run test:cli` (`tests/cli/cli.test.ts`): exit codes and JSON for valid/invalid/
 missing/unknown inputs; runtime = model export = editor UI export (identical bytes);

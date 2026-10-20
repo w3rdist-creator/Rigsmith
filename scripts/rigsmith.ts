@@ -10,7 +10,8 @@ import type { Project, ProjectFrame } from '../src/model/types.ts';
 import { safeName } from '../src/render/sequence.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
-import { ApiError, EXIT, addImage, atlas, encodeMedia, ffmpegEncoder, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
+import type { WeightRequest } from './lib/rigsmith-api.ts';
+import { ApiError, EXIT, addImage, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
 
 const USAGE = `rigsmith <command> [options]
   validate <project.rig.json>
@@ -28,7 +29,14 @@ const USAGE = `rigsmith <command> [options]
   add-image <project> --file <image.png> [--name <name>] --out <project>
   replace-image <project> --image <name> --file <image.png> [--allow-resize] --out <project>
   skin <project> --name <skin> [--set attachment=image ...] [--keyed attachment:fromImage=image ...] --out <project>
-  set-mix <project> --from <anim> --to <anim> --duration <s|none> --out <project>`;
+  set-mix <project> --from <anim> --to <anim> --duration <s|none> --out <project>
+  mesh <project> --att <attachment> --grid <cols>x<rows> --out <project>
+  weights <project> --att <attachment> --out <project> (one of:)
+          --auto <bone,bone,…> [--max-influences 2]
+          --along <upper,lower> [--helper <bone>] --band <inner>/<outer> [--side 1|-1]
+                  [--end <bone>:<at>:<band>:<max>] [--root <bone>:<from>:<to>]
+          --mirror-from <attachment> --swap <from>=<to>      (e.g. --swap _l=_r)
+          [--smooth <passes>] [--smooth-amount 0.5]          (alone: smooth existing weights)`;
 
 type Args = { _: string[]; flags: Record<string, string[]> };
 
@@ -196,6 +204,54 @@ async function main(): Promise<Record<string, unknown>> {
       setMix(p, need('from'), need('to'), d === 'none' ? null : Number(d));
       writeProject(out, p);
       return { outputs: [out], mixes: p.mixes ?? [] };
+    }
+    case 'mesh': {
+      const out = need('out');
+      const g = /^(\d+)x(\d+)$/.exec(need('grid')) ?? usage('--grid must be <cols>x<rows>, e.g. 2x28.');
+      const mesh = gridMesh(p, need('att'), Number(g[1]), Number(g[2]));
+      writeProject(out, p);
+      return { outputs: [out], attachment: flag('att'), mesh };
+    }
+    case 'weights': {
+      const out = need('out');
+      const picked = ['auto', 'along', 'mirror-from'].filter((k) => flag(k) !== undefined);
+      if (picked.length > 1) usage('Use one of --auto, --along or --mirror-from.');
+      const triple = (k: string, n: number): string[] => {
+        const v = need(k).split(':');
+        if (v.length !== n) usage(`--${k} expects ${n} colon-separated fields (got “${flag(k)}”).`);
+        return v;
+      };
+      const number = (k: string, v: string): number => {
+        const x = Number(v);
+        if (!Number.isFinite(x)) usage(`--${k}: “${v}” is not a number.`);
+        return x;
+      };
+      let req: WeightRequest = { kind: 'none' };
+      if (flag('auto') !== undefined) req = { kind: 'auto', bones: need('auto').split(',').filter(Boolean), maxInfluences: num('max-influences') };
+      else if (flag('mirror-from') !== undefined) {
+        const sw = need('swap').split('=');
+        if (sw.length !== 2 || !sw[0]) usage('--swap expects <from>=<to>, e.g. _l=_r.');
+        req = { kind: 'mirror', from: need('mirror-from'), swap: [sw[0], sw[1]] };
+      } else if (flag('along') !== undefined) {
+        const chain = need('along').split(',');
+        if (chain.length !== 2) usage('--along expects <upper>,<lower>.');
+        const band = need('band').split('/');
+        if (band.length !== 2) usage('--band expects <inner>/<outer>, e.g. 36/50.');
+        const side = num('side') ?? 1;
+        if (side !== 1 && side !== -1) usage('--side must be 1 or -1.');
+        const e = flag('end') !== undefined ? triple('end', 4) : null;
+        const r = flag('root') !== undefined ? triple('root', 3) : null;
+        req = {
+          kind: 'limb', upper: chain[0], lower: chain[1], helper: flag('helper'),
+          band: { inner: number('band', band[0]), outer: number('band', band[1]), side: side as 1 | -1 },
+          ...(e ? { end: { bone: e[0], at: number('end', e[1]), band: number('end', e[2]), max: number('end', e[3]) } } : {}),
+          ...(r ? { root: { bone: r[0], from: number('root', r[1]), to: number('root', r[2]) } } : {}),
+        };
+      } else if (flag('smooth') === undefined) usage('weights: give --auto, --along, --mirror-from or --smooth.');
+      const passes = num('smooth');
+      const res = setWeights(p, need('att'), req, passes !== undefined ? { passes, amount: num('smooth-amount') } : undefined);
+      writeProject(out, p);
+      return { outputs: [out], attachment: flag('att'), mode: req.kind, ...(passes !== undefined ? { smoothed: passes } : {}), ...res };
     }
     default:
       return usage(`Unknown command “${cmd}”.`);

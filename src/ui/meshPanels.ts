@@ -5,12 +5,17 @@ import { findKeyIndex, snapToFrame } from '../model/animation.ts';
 import { laneKeys, slotLane } from '../model/keys.ts';
 import { autoWeights, deformAt, keyDeform, meshSummary, moveMeshPoint, normalizeWeights, paintVertex, setMesh } from '../model/meshOps.ts';
 import type { PaintMode } from '../model/meshOps.ts';
+import { limbWeights, mirrorWeights, smoothWeights, suffixBoneMap } from '../model/limbWeights.ts';
 import { isAncestorOrSelf } from '../model/skeleton.ts';
 import type { Attachment } from '../model/types.ts';
 import type { App } from './app.ts';
 import { h, numberField } from './dom.ts';
 
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
+
+/** Limb-weight form state per attachment (survives re-renders of the inspector). */
+type LimbForm = { upper: string; lower: string; helper: string; inner: number; outer: number; side: 1 | -1; mirrorFrom: string; swapFrom: string; swapTo: string };
+const limbForms = new Map<string, LimbForm>();
 
 function labeledSelect(testId: string, label: string, options: { value: string; label: string }[], value: string, onChange: (v: string) => void): HTMLElement {
   const el = h('select', { 'data-testid': testId, 'aria-label': label }, ...options.map((o) => h('option', { value: o.value }, o.label)));
@@ -69,6 +74,7 @@ export function meshSection(app: App, a: Attachment): HTMLElement[] {
         h('button', { class: 'mini', 'data-testid': 'weights-rigid', disabled: !mesh.weights, title: 'Remove weights: the mesh follows its attachment’s bone rigidly', onclick: () => setMeshAtt('Make mesh rigid', (x) => void delete x.mesh!.weights) }, 'Make rigid'),
       ),
     );
+    out.push(...limbSection(app, a, setMeshAtt));
     if (ed.meshTool === 'weights') {
       const b = ed.brush;
       const opts = p.bones.map((x) => ({ value: x.id, label: x.name }));
@@ -151,4 +157,75 @@ export function meshSection(app: App, a: Attachment): HTMLElement[] {
     );
   out.push(h('p', { class: 'hint' }, 'Deform offsets are in image pixels, keyed for the whole mesh at once, and interpolate between keys.'));
   return out;
+}
+
+/**
+ * Limb weights (R1): one continuous limb image bends as a round tube. Upper → lower over a
+ * band around the joint (tight inside the bend, wide outside), an optional helper bone
+ * takes the joint line; plus smoothing and copying from the mirrored limb.
+ */
+function limbSection(app: App, a: Attachment, setMeshAtt: (label: string, fn: (x: Attachment) => void) => void): HTMLElement[] {
+  const { ed } = app;
+  const p = ed.project;
+  const mesh = a.mesh!;
+  const upper0 = a.boneId ?? p.bones[0]?.id ?? '';
+  const f = limbForms.get(a.id) ?? {
+    upper: upper0, lower: p.bones.find((b) => b.parentId === upper0)?.id ?? upper0, helper: '',
+    inner: 20, outer: 40, side: 1, mirrorFrom: '', swapFrom: '_l', swapTo: '_r',
+  };
+  limbForms.set(a.id, f);
+  const bones = p.bones.map((b) => ({ value: b.id, label: b.name }));
+  const mirrors = p.attachments.filter((x) => x.id !== a.id && x.mesh?.weights && x.mesh.points.length === mesh.points.length);
+  const ok = !!f.upper && !!f.lower && f.upper !== f.lower;
+  const run = (label: string, fn: (x: Attachment) => void) => {
+    try {
+      setMeshAtt(label, fn);
+    } catch (e) {
+      app.error('Weights not changed', [(e as Error).message]);
+    }
+  };
+  return [
+    h('div', { class: 'group-label' }, 'Limb weights'),
+    h('div', { class: 'row2' },
+      labeledSelect('lw-upper', 'Upper bone', bones, f.upper, (v) => ((f.upper = v), ed.emit('view'))),
+      labeledSelect('lw-lower', 'Lower bone', bones, f.lower, (v) => ((f.lower = v), ed.emit('view'))),
+    ),
+    h('div', { class: 'row2' },
+      labeledSelect('lw-helper', 'Joint helper', [{ value: '', label: '— none' }, ...bones], f.helper, (v) => ((f.helper = v), ed.emit('view'))),
+      labeledSelect('lw-side', 'Bends toward', [{ value: '1', label: 'bone +y' }, { value: '-1', label: 'bone −y' }], String(f.side), (v) => ((f.side = v === '-1' ? -1 : 1), ed.emit('view'))),
+    ),
+    h('div', { class: 'row2' },
+      numberField({ label: 'Inside band (px)', value: f.inner, min: 1, max: 1000, testId: 'lw-inner', onCommit: (v) => ((f.inner = Math.max(1, v)), ed.emit('view')) }),
+      numberField({ label: 'Outside band (px)', value: f.outer, min: 1, max: 1000, testId: 'lw-outer', onCommit: (v) => ((f.outer = Math.max(1, v)), ed.emit('view')) }),
+    ),
+    h('div', { class: 'row2' },
+      h('button', {
+        class: 'mini', 'data-testid': 'weights-limb', disabled: !ok,
+        title: 'Weight the mesh as one bending limb: upper → lower across the joint band, the helper on the joint line',
+        onclick: () => run('Limb weights', (x) => void (x.mesh!.weights = limbWeights(ed.project, x, { upper: f.upper, lower: f.lower, ...(f.helper ? { helper: f.helper } : {}), band: { inner: f.inner, outer: f.outer, side: f.side } }))),
+      }, 'Apply limb weights'),
+      h('button', {
+        class: 'mini', 'data-testid': 'weights-smooth', disabled: !mesh.weights,
+        title: 'One smoothing pass: each vertex moves halfway toward its neighbours’ weights',
+        onclick: () => run('Smooth weights', (x) => void (x.mesh!.weights = smoothWeights(x, 1))),
+      }, 'Smooth weights'),
+    ),
+    h('div', { class: 'row2' },
+      labeledSelect('wm-source', 'Mirror from', [{ value: '', label: mirrors.length ? '—' : '(no matching mesh)' }, ...mirrors.map((x) => ({ value: x.id, label: x.name }))], f.mirrorFrom, (v) => ((f.mirrorFrom = v), ed.emit('view'))),
+      h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Swap names'),
+        (() => {
+          const el = h('input', { 'data-testid': 'wm-swap', 'aria-label': 'Swap bone-name part, e.g. _l=_r', value: `${f.swapFrom}=${f.swapTo}` }) as HTMLInputElement;
+          el.addEventListener('change', () => {
+            const [from, to] = el.value.split('=');
+            if (from && to !== undefined) ((f.swapFrom = from), (f.swapTo = to));
+          });
+          return el;
+        })()),
+    ),
+    h('button', {
+      class: 'mini', 'data-testid': 'weights-mirror', disabled: !f.mirrorFrom,
+      title: 'Copy the other limb’s weights vertex for vertex, renaming its bones (e.g. _l → _r)',
+      onclick: () => run('Mirror weights', (x) => void (x.mesh!.weights = mirrorWeights(ed.project.attachments.find((y) => y.id === f.mirrorFrom)!, x, suffixBoneMap(ed.project, f.swapFrom, f.swapTo)))),
+    }, 'Mirror weights'),
+  ];
 }

@@ -251,6 +251,55 @@ describe('vertex editing and weights (Setup)', () => {
     await page.keyboard.press('Escape');
     assert.equal((await state()).meshTool, 'off', 'Esc leaves the mesh tool');
   });
+
+  it('Limb weights form: banded upper → lower hand-over in one undo step; Smooth; Mirror needs a matching mesh', async () => {
+    const p = await project();
+    const lowerId = byName(p.bones, 'lower').id, upperId = byName(p.bones, 'upper').id;
+    await page.getByTestId('lw-upper').selectOption({ label: 'upper' });
+    await page.getByTestId('lw-lower').selectOption({ label: 'lower' });
+    await page.getByTestId('lw-helper').selectOption('');
+    await page.getByTestId('lw-side').selectOption('1');
+    await setField('lw-inner', 6);
+    await setField('lw-outer', 30);
+    assert.equal(await page.getByTestId('weights-mirror').isDisabled(), true, 'no other weighted mesh to mirror from');
+    assert.deepEqual(await page.getByTestId('wm-source').locator('option').allInnerTexts(), ['(no matching mesh)']);
+    await page.getByTestId('wm-source').selectOption('');
+    await setField('wm-swap', '_a=_b');
+    assert.equal(await page.getByTestId('wm-swap').inputValue(), '_a=_b');
+    const undo0 = (await state()).undo;
+    await page.getByTestId('weights-limb').click();
+    assert.equal((await state()).undo, undo0 + 1, 'one undo step');
+    let w = (await band()).mesh.weights;
+    const pts: number[] = (await band()).mesh.points;
+    assert.ok(sums1(w));
+    const lowerW = (i: number) => w[i].find((x: any) => x.bone === lowerId)?.w ?? 0;
+    assert.equal(w[0][0].bone, upperId, 'left end follows the upper bone');
+    assert.equal(lowerW(0), 0);
+    // First grid column past the joint, inside (+y, bottom edge) vs outside (top edge): the tight inside band is more decided.
+    const at = (x: number, y: number) => pts.findIndex((_, k) => k % 2 === 0 && Math.abs(pts[k] - x) < 1e-9 && Math.abs(pts[k + 1] - y) < 1e-9) / 2;
+    const xs = [...new Set(pts.filter((_, k) => k % 2 === 0))].sort((a, b) => a - b);
+    const ys = pts.filter((_, k) => k % 2 === 1);
+    const past = xs.find((x) => x > ART_W / 2)!;
+    const top = at(past, Math.min(...ys)), bottom = at(past, Math.max(...ys));
+    assert.ok(top >= 0 && bottom >= 0, `edge vertices at x=${past}`);
+    assert.ok(lowerW(bottom) > lowerW(top), `inside ${lowerW(bottom)} > outside ${lowerW(top)}`);
+    report.push(`limb weights: column x=${past} lower share inside ${lowerW(bottom).toFixed(3)} / outside ${lowerW(top).toFixed(3)}`);
+    await page.getByTestId('lw-side').selectOption('-1');
+    await page.getByTestId('weights-limb').click();
+    w = (await band()).mesh.weights;
+    assert.ok(lowerW(top) > lowerW(bottom), 'side −1 tightens the top edge instead');
+    const before = w.map((l: any[]) => l.map((x) => x.w));
+    await page.getByTestId('weights-smooth').click();
+    w = (await band()).mesh.weights;
+    assert.ok(sums1(w));
+    assert.notDeepEqual(w.map((l: any[]) => l.map((x) => x.w)), before, 'smoothing changed the weights');
+    await page.keyboard.press('Control+z');
+    assert.deepEqual((await band()).mesh.weights.map((l: any[]) => l.map((x: any) => x.w)), before, 'undo restores the limb weights');
+    await page.getByTestId('lw-lower').selectOption({ label: 'upper' });
+    assert.equal(await page.getByTestId('weights-limb').isDisabled(), true, 'upper = lower disables Apply');
+    await page.getByTestId('lw-lower').selectOption({ label: 'lower' });
+    await page.getByTestId('weights-auto').click(); // later tests expect auto weights
+  });
 });
 
 describe('bending, deform keys and output', () => {
