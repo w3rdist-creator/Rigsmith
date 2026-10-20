@@ -16,6 +16,7 @@ import { angleOf, round } from './math.ts';
 import { hasInheritFlags, topoOrder } from './skeleton.ts';
 import type { Curve, Interp, Key, PathNode, Project } from './types.ts';
 import { flatEvents } from './events.ts';
+import { bakeSprings } from './rigOps.ts';
 
 export const RUNTIME_FORMAT_ID = 'rigsmith.runtime';
 export const RUNTIME_FORMAT_VERSION = 3;
@@ -115,7 +116,10 @@ export function runtimeProblems(project: Project): string[] {
   return out;
 }
 
-export function exportRuntime(project: Project): RuntimeExport {
+export function exportRuntime(source: Project): RuntimeExport {
+  // Springs are simulated in the editor only: players get them as baked rotate keys.
+  const project = source.springs?.length ? structuredClone(source) : source;
+  if (project !== source) bakeSprings(project);
   const ordered = topoOrder(project.bones);
   const nameOf = new Map(project.bones.map((b) => [b.id, b.name]));
   const imageOf = new Map(project.images.map((im) => [im.id, im]));

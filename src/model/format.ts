@@ -1,4 +1,5 @@
 import { colorValueProblem, formatColor, isColor, isWhite, parseColor, setupColor } from './color.ts';
+import { springProblems } from './springs.ts';
 import { findCycles, hasInheritFlags, isAncestorOrSelf } from './skeleton.ts';
 import type {
   Affine,
@@ -31,6 +32,7 @@ import type {
   TransformConstraint,
   VertexWeights,
   EventKey,
+  SpringConstraint,
 } from './types.ts';
 import { BLEND_MODES, CHANNEL_ARITY, CHANNELS, EVENT_NAME, FORMAT_ID, FORMAT_VERSION, FRAME_MAX_SIDE, INTERPS, SEQUENCE_MAX_REPEAT } from './types.ts';
 
@@ -74,6 +76,7 @@ export function v3Features(p: Project): string[] {
   const f = new Set<string>();
   if (p.bones.some(hasInheritFlags)) f.add('bone inherit flags');
   if (p.transformConstraints?.length) f.add('transform constraints');
+  if (p.springs?.length) f.add('springs');
   for (const a of p.attachments) {
     if (a.blend && a.blend !== 'normal') f.add('blend modes');
     if (a.color && !isWhite(setupColor(a))) f.add('tint colours');
@@ -173,6 +176,8 @@ export function toFileObject(project: Project): Project {
   if (pcs) out.pathConstraints = pcs;
   const tcs = nonEmpty(project.transformConstraints);
   if (tcs) out.transformConstraints = tcs.map(writeTransform);
+  const springs = nonEmpty(project.springs);
+  if (springs) out.springs = springs.map((s) => ({ id: s.id, name: s.name, bones: s.bones.slice(), stiffness: s.stiffness, damping: s.damping, gain: s.gain, max: s.max, blend: s.blend, mix: s.mix }));
   const skins = nonEmpty(project.skins);
   if (skins) out.skins = skins;
   const mixes = nonEmpty(project.mixes);
@@ -335,7 +340,7 @@ function sortedTimes(c: Checker, list: { time: number }[], where: string): void 
 }
 
 /** Every top-level field this version reads and writes. */
-const TOP_LEVEL_KEYS: readonly string[] = ['format', 'version', 'name', 'bones', 'images', 'attachments', 'animations', 'ik', 'paths', 'pathConstraints', 'transformConstraints', 'skins', 'mixes', 'sequences', 'frame'];
+const TOP_LEVEL_KEYS: readonly string[] = ['format', 'version', 'name', 'bones', 'images', 'attachments', 'animations', 'ik', 'paths', 'pathConstraints', 'transformConstraints', 'springs', 'skins', 'mixes', 'sequences', 'frame'];
 
 export function validateProject(raw: unknown): ParseResult {
   const c = new Checker();
@@ -613,6 +618,27 @@ export function validateProject(raw: unknown): ParseResult {
     transformConstraints.push(out);
   });
 
+  const springs: SpringConstraint[] = [];
+  const springRaw = c.optArr(raw, 'springs', 'project');
+  if (springRaw) v3only('springs', 'project');
+  const sprung = new Set<string>();
+  springRaw?.forEach((sr, i) => {
+    const w = `springs[${i}]`;
+    if (!isObj(sr)) return c.fail(`${w} must be an object`);
+    const id = c.str(sr, 'id', w);
+    if (constraintIds.has(id) || springs.some((s) => s.id === id)) c.fail(`${w}.id "${id}" is duplicated`);
+    const bones = c.arr(sr, 'bones', w).filter((b): b is string => typeof b === 'string');
+    if (!bones.length) c.fail(`${w}.bones must list at least one bone`);
+    for (const b of bones) {
+      if (!boneIds.has(b)) c.fail(`${w} references missing bone "${b}"`);
+      if (sprung.has(b)) c.fail(`${w}: bone "${b}" is already in a spring`);
+      sprung.add(b);
+    }
+    const s: SpringConstraint = { id, name: c.str(sr, 'name', w), bones, stiffness: c.num(sr, 'stiffness', w), damping: c.num(sr, 'damping', w), gain: c.num(sr, 'gain', w), max: c.num(sr, 'max', w), blend: c.num(sr, 'blend', w), mix: c.num(sr, 'mix', w, 1) };
+    for (const e of springProblems(s)) c.fail(`${w}: ${e}`);
+    springs.push(s);
+  });
+
   // Animations
   const animations: Animation[] = [];
   const animIds = new Set<string>();
@@ -881,6 +907,7 @@ export function validateProject(raw: unknown): ParseResult {
   if (pathsRaw) project.paths = paths;
   if (pcRaw) project.pathConstraints = pathConstraints;
   if (tcRaw) project.transformConstraints = transformConstraints;
+  if (springRaw) project.springs = springs;
   if (skinsRaw) project.skins = skins;
   if (mixRaw) project.mixes = mixes;
   if (seqRaw) project.sequences = sequences;

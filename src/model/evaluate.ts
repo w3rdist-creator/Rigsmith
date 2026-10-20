@@ -3,6 +3,8 @@
 //   local pose (keys + curves) → constraints (IK, paths) → world matrices →
 //   per-attachment draw state (visibility, opacity, tint, image, skin, draw order) →
 //   mesh vertices (deform keys + skinning).
+import { applySprings, setSpringEvaluator, springOffsets } from './springs.ts';
+import type { SpringOffsets } from './springs.ts';
 import { TIME_EPSILON, samplePose, sampleKeys } from './animation.ts';
 import type { Mat, Vec } from './math.ts';
 import { apply } from './math.ts';
@@ -18,6 +20,8 @@ export interface EvalOptions {
   skinId?: string | null;
   /** Evaluate IK/path constraints (default true). */
   constraints?: boolean;
+  /** Internal (springs.ts): use these spring offsets instead of the full simulation. */
+  springOffsets?: SpringOffsets;
   /** Use this local pose instead of sampling `anim` (animation mixing). */
   pose?: Map<string, LocalPose>;
 }
@@ -68,6 +72,8 @@ export function drawOrderAt(project: Project, anim: Animation | null, t: number)
 
 export function evaluate(project: Project, anim: Animation | null, time: number, opts: EvalOptions = {}): Frame {
   const pose = opts.pose ? new Map(opts.pose) : samplePose(project.bones, anim, time);
+  // Springs (v3) add their simulated lag to the keyed rotations, before the constraints.
+  if (!opts.pose && anim && project.springs?.length) applySprings(pose, opts.springOffsets ?? springOffsets(project, anim), anim, time);
   if (opts.constraints !== false) applyConstraints(project, pose, anim, time);
   const world = computeWorld(project.bones, pose);
   const skin = opts.skinId ? project.skins?.find((s) => s.id === opts.skinId) : undefined;
@@ -135,3 +141,5 @@ export function frameBounds(frame: Frame, b: Bounds | null = null): Bounds | nul
   }
   return out;
 }
+
+setSpringEvaluator((p, a, t, partial) => evaluate(p, a, t, { springOffsets: partial }));

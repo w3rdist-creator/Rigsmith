@@ -306,6 +306,34 @@ export interface TransformConstraint {
 }
 
 /**
+ * v3: a spring (follow-through) on a chain of bones: each bone lags behind its keyed world
+ * angle and is kicked by its base's acceleration, like a damped rotational spring (hat,
+ * ears, tail, coat tails). Deterministic per clip: the whole clip is simulated from its
+ * own motion (loops twice, the seam blended over `blend` frames) and the result is an
+ * offset added to the bone's keyed rotation. The runtime export bakes it into keys.
+ */
+export interface SpringConstraint {
+  id: string;
+  name: string;
+  /** Bones in chain order (each is simulated after, and sees, the ones before it). */
+  bones: string[];
+  /** Pull toward the keyed angle per frame (0 < k ≤ 1). */
+  stiffness: number;
+  /** Fraction of angular velocity lost per frame (0..1). */
+  damping: number;
+  /** How strongly the base's sideways acceleration kicks the bone (0 = none). */
+  gain: number;
+  /** Largest lag from the keyed angle, degrees. */
+  max: number;
+  /** Loops: frames before the end eased into frame 0's offset (seamless). */
+  blend: number;
+  /** 0 = keyed pose only, 1 = full spring. */
+  mix: number;
+}
+
+export const SPRING_DEFAULTS = { stiffness: 0.08, damping: 0.18, gain: 1, max: 35, blend: 12, mix: 1 };
+
+/**
  * v2: an attachment set. While the skin is active, an entry replaces the image an
  * attachment shows: without `from` it replaces the attachment's setup image (wherever
  * that image is shown, including via image keys); with `from` it replaces that keyed
@@ -364,6 +392,8 @@ export interface Project {
   pathConstraints?: PathConstraint[];
   /** v3 */
   transformConstraints?: TransformConstraint[];
+  /** v3 */
+  springs?: SpringConstraint[];
   skins?: Skin[];
   mixes?: MixRule[];
   /** v2: saved clip sequences. */

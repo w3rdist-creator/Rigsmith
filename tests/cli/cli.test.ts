@@ -242,6 +242,28 @@ describe('clip specs (R6)', () => {
     assert.match(miss.json.errors[0], /No animation named “nope” to add keys to/);
     assert.equal(cli('draw-order', RIG, '--anim', 'wave', '--at', '1', '--out', path.join(OUT, 'k2.rig.json')).code, 2);
   });
+
+  it('spring adds a follow-through chain (R8); bake-springs turns it into keys; bad input exits 1 / 2 and writes nothing', () => {
+    const out = path.join(OUT, 's.rig.json');
+    const r = cli('spring', RIG, '--bones', 'm1', '--follow', '--stiffness', '0.1', '--gain', '1.4', '--max', '40', '--out', out);
+    assert.equal(r.code, 0, JSON.stringify(r.json));
+    assert.deepEqual(r.json.spring, { name: 'm1-spring', bones: ['m1', 'm2'], stiffness: 0.1, damping: 0.18, gain: 1.4, max: 40, blend: 12, mix: 1 });
+    const p = parseProject(readFileSync(out, 'utf8'));
+    assert.ok(p.ok && p.project.version === 3 && p.project.springs?.length === 1);
+    const lot = cli('lottie', out, '--anim', 'wave', '--out', path.join(OUT, 's.lottie.json'));
+    assert.match(lot.json.errors.join('\n'), /Bake springs first/);
+    const baked = path.join(OUT, 's-baked.rig.json');
+    const b = cli('bake-springs', out, '--out', baked);
+    assert.deepEqual([b.code, b.json.springs, b.json.bones, b.json.animations], [0, 1, 4, 2]);
+    const q = parseProject(readFileSync(baked, 'utf8'));
+    assert.ok(q.ok && !q.project.springs && q.project.animations[0].tracks.m2.rotate.length === 31);
+    const bad = path.join(OUT, 's-bad.rig.json');
+    assert.equal(cli('spring', out, '--bones', 'm2', '--out', bad).code, 1, 'already in a spring');
+    assert.equal(cli('spring', RIG, '--bones', 'm1', '--damping', '3', '--out', bad).code, 1);
+    assert.equal(cli('spring', RIG, '--bones', 'm1,m2', '--follow', '--out', bad).code, 2);
+    assert.equal(cli('bake-springs', RIG, '--out', bad).code, 1, 'nothing to bake');
+    assert.ok(!existsSync(bad));
+  });
 });
 
 describe('rendering (headless Chrome for Testing via render.html)', () => {

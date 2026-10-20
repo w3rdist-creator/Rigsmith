@@ -110,6 +110,7 @@ files that declare version 1 but contain v2 fields, and versions newer than 2.
 |---|---|
 | `Key.interp: "bezier"` + `Key.curve: [x1,y1,x2,y2]` | cubic easing of the segment leaving the key; x in [0,1], y unbounded (overshoot/anticipation); `curve` only on bezier keys |
 | v3: `Key.interpY` (+ `Key.curveY` when bezier) | translate keys only: the y component's own easing (x keeps `interp`/`curve`); editor: Curve ▸ Separate Y and the axis menu; Lottie refuses it |
+| v3: `Project.springs: SpringConstraint[]` | follow-through on bone chains (`bones` in chain order, `stiffness`, `damping`, `gain`, `max`, `blend`, `mix`); a bone is in one spring at most; editor: bone ▸ + Spring (chain), spring inspector (parameters, + Next bone / − Last bone, Bake all springs), tree row 〰; runtime: baked into rotate keys |
 | v3: `Animation.events: {name: [{time, payload?}]}` | timeline events (named cues for the game); one timeline lane per name (`e:<name>`), so copy/paste/nudge/delete work as on other lanes; editor: timeline name field + ◆ Event, selected-event name/payload fields; runtime: flat `events` list |
 | `Attachment.hidden` | hidden in the setup pose (visibility keys can show it) |
 | `Animation.slots[attId].visible / opacity / image` | slot keys: visibility `[0|1]` (stepped), opacity `[0..1]` (interpolated), image swaps `{time, imageId}` (stepped) |
@@ -134,7 +135,7 @@ key outside the list above (`TOP_LEVEL_KEYS` in `format.ts`); unknown keys insid
 are still dropped without a warning.
 
 Evaluation order (`src/model/evaluate.ts`, shared by the viewport, onion skin, sequence
-export and runtime export): sample local pose → IK constraints (array order) → path
+export and runtime export): sample local pose → spring offsets (v3) → IK constraints (array order) → path
 constraints (array order) → transform constraints (array order, v3) → world matrices → per-attachment state (visibility, opacity,
 tint, image, skin, draw order) → mesh vertices.
 
@@ -184,6 +185,23 @@ tint, image, skin, draw order) → mesh vertices.
   setup pose (rotation: the offset absorbs the current bend; aim: holds the current
   angle). Files and runtime exports use version 3 only when a rig has transform
   constraints or angle keys, so every other rig stays readable by v2 consumers.
+- **Springs** (v3, `SpringConstraint`, `src/model/springs.ts`): follow-through for soft
+  parts (hat, ears, tail, coat tails). Each bone of the chain, in order, is simulated over
+  the whole clip from the clip's own evaluated motion (seeing the chain bones before it
+  already sprung): a damped rotational spring on its world angle, `vel += stiffness ·
+  (keyed − φ) − damping · vel − kick`, where the kick is the base's sideways acceleration
+  (px/frame²) over max(20, length), scaled by `gain`; the lag is clamped to `max` degrees.
+  Loops run twice (so frame 0 starts settled) and the last `blend` frames ease into frame
+  0's offset, so the seam is continuous. The per-frame offsets (× `mix`) are added to the
+  bone's keyed local rotation before IK, linear between frames. This is the showcase rigs'
+  `springBake()` moved into the model: on Mapo the two agree to 1e-11° on all 8 clips
+  (`scripts/roadmap/r8-springs-mapo.ts`). Results are cached per animation and
+  re-simulated when anything they depend on changes (bones, constraints, springs, the
+  clip's keys) — about 0.5 s per 8 s clip on Mapo, and the cache check costs about
+  0.6 ms per evaluate. Mixing adds each clip's offsets to its rotation. The runtime export
+  bakes springs into keys (players need no simulation); Lottie refuses them until
+  **Bake all springs** (`bakeSprings`), which writes the same motion as one linear rotate
+  key per frame and removes the springs.
 - **Blend, tint and vertex alpha** (v3, `Attachment.blend`, `Attachment.color`, slot
   `color` keys, `Mesh.alphas`): `blend` is `normal` (absent), `additive`, `screen` or
   `multiply` and maps to the canvas operations `source-over`, `lighter`, `screen` and

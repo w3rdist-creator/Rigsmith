@@ -205,7 +205,7 @@ export class Editor {
     const p = this.project;
     if (this.selection?.kind === 'bone' && !p.bones.some((b) => b.id === this.selection!.id)) this.selection = null;
     if (this.selection?.kind === 'attachment' && !p.attachments.some((a) => a.id === this.selection!.id)) this.selection = null;
-    if (this.selection?.kind === 'constraint' && ![...(p.ik ?? []), ...(p.pathConstraints ?? []), ...(p.transformConstraints ?? [])].some((c) => c.id === this.selection!.id)) this.selection = null;
+    if (this.selection?.kind === 'constraint' && ![...(p.ik ?? []), ...(p.pathConstraints ?? []), ...(p.transformConstraints ?? []), ...(p.springs ?? [])].some((c) => c.id === this.selection!.id)) this.selection = null;
     if (this.selection?.kind === 'path' && !p.paths?.some((x) => x.id === this.selection!.id)) this.selection = null;
     const path = this.selection?.kind === 'path' ? p.paths?.find((x) => x.id === this.selection!.id) : undefined;
     if (path && this.pathNode >= path.nodes.length) this.pathNode = path.nodes.length - 1;

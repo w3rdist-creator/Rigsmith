@@ -25,7 +25,8 @@ import { autoWeights, bindMesh, gridPoints, meshSummary, setMesh, triangulate } 
 import { evaluate } from '../../src/model/evaluate.ts';
 import { computeWorld } from '../../src/model/skeleton.ts';
 import { setMixRule } from '../../src/model/mix.ts';
-import { addAimConstraint, addIk, addRotationConstraint, constraintNames } from '../../src/model/rigOps.ts';
+import { addAimConstraint, addIk, addRotationConstraint, addSpring, bakeSprings, constraintNames } from '../../src/model/rigOps.ts';
+import type { SpringConstraint } from '../../src/model/types.ts';
 import { dataUrlBytes, decodePngExact, encodePngExact } from '../../src/model/png.ts';
 import { addSkin, setSkinEntry } from '../../src/model/skinOps.ts';
 import type { BoneInherit, ClipSequence, ImageAsset, Project } from '../../src/model/types.ts';
@@ -307,6 +308,32 @@ export function addIkNamed(p: Project, boneName: string, opts: { oneBone?: boole
   if (!ik) fail(opts.oneBone ? `Cannot add IK at ${boneName}.` : `Cannot add 2-bone IK ending at ${boneName}: it needs a parent and must inherit its parent's full transform.`);
   const nameOf = (b: string) => p.bones.find((x) => x.id === b)!.name;
   return { name: ik.name, bones: ik.bones.map(nameOf), target: nameOf(ik.target), bendPositive: ik.bendPositive };
+}
+
+export type SpringParams = Partial<Pick<SpringConstraint, 'stiffness' | 'damping' | 'gain' | 'max' | 'blend' | 'mix'>>;
+
+/**
+ * Adds a spring on a bone chain (names in chain order; one name follows single children
+ * down). Returns the spring with bone names.
+ */
+export function addSpringNamed(p: Project, boneNames: string[], params: SpringParams, opts: { name?: string; follow?: boolean } = {}): Omit<SpringConstraint, 'id'> {
+  const ids = boneNames.map((n) => boneNamed(p, n));
+  let id = `spring_${safeName(boneNames[0])}`;
+  for (let n = 2; [...(p.springs ?? []), ...(p.ik ?? []), ...(p.pathConstraints ?? []), ...(p.transformConstraints ?? [])].some((k) => k.id === id); n++) id = `spring_${safeName(boneNames[0])}_${n}`;
+  if (opts.name !== undefined && constraintNames(p).includes(opts.name)) fail(`A constraint is already named “${opts.name}”.`);
+  const s = addSpring(p, id, ids, params, opts.follow ?? false);
+  if ('error' in s) fail(s.error);
+  if (opts.name !== undefined) s.name = opts.name;
+  const nameOf = (b: string) => p.bones.find((x) => x.id === b)!.name;
+  const { id: _id, ...rest } = s;
+  return { ...rest, bones: s.bones.map(nameOf) };
+}
+
+/** Bakes every spring into rotate keys (see bakeSprings) and removes them. */
+export function bakeSpringsCmd(p: Project): { springs: number; bones: number; animations: number } {
+  const springs = p.springs?.length ?? 0;
+  if (!springs) fail('The project has no springs to bake.');
+  return { springs, ...bakeSprings(p) };
 }
 
 /**

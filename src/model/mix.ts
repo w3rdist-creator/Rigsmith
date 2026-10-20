@@ -21,6 +21,7 @@
 // A channel keyed by the incoming animation but not by the outgoing one blends from
 // whatever the outgoing pose shows for it (the setup value if nothing before keyed it),
 // under either policy.
+import { offsetAt, springOffsets } from './springs.ts';
 import { playbackTime, sampleKeys } from './animation.ts';
 import type { Rgba } from './color.ts';
 import { clamp01, setupColor } from './color.ts';
@@ -132,6 +133,7 @@ export function mixPose(project: Project, plan: MixPlan, T: number): Map<string,
     const w = entryWeight(e, i, T);
     if (w <= 0) return;
     const t = entryTime(anim, e, T);
+    const springs = project.springs?.length ? springOffsets(project, anim) : null;
     for (const b of project.bones) {
       const tr = anim.tracks[b.id];
       const cur = pose.get(b.id)!;
@@ -145,7 +147,10 @@ export function mixPose(project: Project, plan: MixPlan, T: number): Map<string,
         cur.x = lerp(cur.x, tv[0]);
         cur.y = lerp(cur.y, tv[1]);
       }
-      const rv = val('rotate', [s.rotation]);
+      let rv = val('rotate', [s.rotation]);
+      // Springs ride on the clip's rotation (a spring bone counts as keyed).
+      const so = springs?.get(b.id);
+      if (so) rv = [(rv ?? [s.rotation])[0] + offsetAt(so, anim, t)];
       if (rv) cur.rotation = w >= 1 ? rv[0] : cur.rotation + w * shortest(cur.rotation, rv[0]);
       const sv = val('scale', [s.scaleX, s.scaleY]);
       if (sv) {

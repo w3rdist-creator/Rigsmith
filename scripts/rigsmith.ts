@@ -15,7 +15,7 @@ import type { ClipMode, ClipSpec } from '../src/model/clipSpec.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
 import type { TransformRequest, VertexAlphaRequest, WeightRequest } from './lib/rigsmith-api.ts';
-import { ApiError, EXIT, addImage, addIkNamed, addTransform, setBind, setInherit, setTint, setVertexAlpha, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
+import { ApiError, EXIT, addImage, addIkNamed, addSpringNamed, bakeSpringsCmd, addTransform, setBind, setInherit, setTint, setVertexAlpha, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
 
 const USAGE = `rigsmith <command> [options]
   validate <project.rig.json>
@@ -58,6 +58,9 @@ const USAGE = `rigsmith <command> [options]
           --clear
   bind <project> --att <attachment> [--anim <name> --at <seconds> | --clear] --out <project>
           (bind a weighted mesh at the setup pose, or at an animation frame's pose; --clear: bind at setup)
+  spring <project> --bones <bone[,bone…]> [--follow] [--stiffness 0.08] [--damping 0.18] [--gain 1] [--max 35] [--blend 12] [--mix 1] [--name <n>] --out <project>
+          (follow-through on a chain; one bone with --follow takes its single-child descendants too)
+  bake-springs <project> --out <project>   (springs → per-frame rotate keys; needed for Lottie)
   ik <project> --bone <bone> [--one-bone] [--bend positive|negative] --out <project>
           (2-bone IK ending at <bone>, target at its tip; the bend side follows the setup elbow unless given)
   clip export <project> --anim <name> --out <clip.yaml|clip.json>
@@ -456,6 +459,26 @@ async function main(): Promise<Record<string, unknown>> {
       const res = addIkNamed(p, need('bone'), { oneBone: flag('one-bone') !== undefined, bend: bend as 'positive' | 'negative' | undefined });
       writeProject(out, p);
       return { outputs: [out], ik: res };
+    }
+    case 'spring': {
+      const out = need('out');
+      const params: Record<string, number> = {};
+      for (const k of ['stiffness', 'damping', 'gain', 'max', 'blend', 'mix']) {
+        const v = num(k);
+        if (v !== undefined) params[k] = v;
+      }
+      const bones = need('bones').split(',').map((s) => s.trim()).filter(Boolean);
+      if (!bones.length) usage('--bones expects bone names, comma-separated.');
+      if (flag('follow') !== undefined && bones.length !== 1) usage('--follow takes one bone.');
+      const spring = addSpringNamed(p, bones, params, { name: flag('name'), follow: flag('follow') !== undefined });
+      writeProject(out, p);
+      return { outputs: [out], spring };
+    }
+    case 'bake-springs': {
+      const out = need('out');
+      const res = bakeSpringsCmd(p);
+      writeProject(out, p);
+      return { outputs: [out], ...res };
     }
     case 'key':
     case 'event':

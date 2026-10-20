@@ -77,6 +77,10 @@ Baked data lets a consumer play without an interpolator: `frames` samples at `i 
 (`frames = duration·fps` for loops, which omit the repeat of frame 0; `+1` for one-shots).
 Bakes ignore skins and mixes (evaluate from keys for those).
 
+Springs (the editor's follow-through, v3) are never written to a runtime file: the export
+bakes them into each spring bone's rotate keys (one linear key per frame), so players need
+no simulation and `baked` includes them.
+
 **Version 3** is version 2 plus `transformConstraints`, `angle` constraint keys, bone
 `inherit` flags, attachment `blend` and `color`, slot `color` keys, mesh `alphas`, mesh `bind`, translate keys' `interpY`/`curveY` and animation `events`
 (rules: `docs/architecture.md` → Transform constraints, Inherit flags, Blend, tint and

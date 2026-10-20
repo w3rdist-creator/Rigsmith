@@ -11,6 +11,8 @@ import {
   addPathConstraint,
   addPathNode,
   addRotationConstraint,
+  addSpring,
+  bakeSprings,
   deleteConstraint,
   deletePath,
   keyConstraint,
@@ -21,7 +23,8 @@ import {
   slotValues,
   validIkTargets,
 } from '../model/rigOps.ts';
-import type { Animation, Attachment, Bone, IkConstraint, PathConstraint, Project, TransformConstraint } from '../model/types.ts';
+import type { Animation, Attachment, Bone, IkConstraint, PathConstraint, Project, SpringConstraint, TransformConstraint } from '../model/types.ts';
+import { springProblems } from '../model/springs.ts';
 import { newId } from '../model/types.ts';
 import { setBoneInherit } from '../model/skeleton.ts';
 import type { App } from './app.ts';
@@ -145,6 +148,7 @@ export function boneRigSection(app: App, b: Bone): HTMLElement[] {
     ...(p.ik ?? []).filter((k) => k.bones.includes(b.id) || k.target === b.id).map((k) => ({ id: k.id, name: k.name, role: k.target === b.id ? 'IK target' : 'IK chain' })),
     ...(p.pathConstraints ?? []).filter((k) => k.bones.includes(b.id)).map((k) => ({ id: k.id, name: k.name, role: 'on path' })),
     ...(p.transformConstraints ?? []).filter((k) => k.bone === b.id || k.source === b.id || k.relativeTo === b.id).map((k) => ({ id: k.id, name: k.name, role: k.bone === b.id ? (k.kind === 'aim' ? 'aim' : 'copies rotation') : 'drives' })),
+    ...(p.springs ?? []).filter((k) => k.bones.includes(b.id)).map((k) => ({ id: k.id, name: k.name, role: 'spring' })),
   ];
   for (const c of involved) out.push(h('button', { class: 'linklike', 'data-testid': `goto-constraint-${c.name}`, onclick: () => ed.select({ kind: 'constraint', id: c.id }) }, `${c.role}: ${c.name}`));
   const parent = p.bones.find((x) => x.id === b.parentId);
@@ -180,6 +184,17 @@ export function boneRigSection(app: App, b: Bone): HTMLElement[] {
       h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Bend of'), srcSel),
       h('button', { class: 'mini', 'data-testid': 'tc-add-rotation', disabled: !others.length, title: 'Rotate this bone by a fraction of the chosen bone’s bend (e.g. a joint helper at half the elbow angle)', onclick: () => addTc('rotation') }, '+ Rotation'),
     ),
+    h('button', { class: 'mini', 'data-testid': 'spring-add', disabled: (p.springs ?? []).some((k) => k.bones.includes(b.id)), title: 'Follow-through: this bone and its single-child descendants lag and settle behind the motion (hats, ears, tails)', onclick: () => {
+      const id = newId('spring');
+      let err = '';
+      ed.mutate('Add spring', (q) => {
+        const r = addSpring(q, id, [b.id], {}, true);
+        if ('error' in r) err = r.error;
+      });
+      if (err) return app.status(err);
+      ed.select({ kind: 'constraint', id });
+      app.status('Spring added: the chain now lags behind the motion of every clip. Tune it in the inspector.');
+    } }, '+ Spring (chain)'),
     h('button', { class: 'mini', 'data-testid': 'tc-add-aim', title: 'Hold this bone at its current screen angle (e.g. a prop that stays level while the hand moves)', onclick: () => addTc('aim') }, '+ Aim (hold angle)'),
   );
   if (ed.mode === 'setup') {
@@ -216,6 +231,8 @@ export function renderConstraintInspector(app: App, root: HTMLElement, id: strin
   const ik = p.ik?.find((k) => k.id === id);
   const pc = p.pathConstraints?.find((k) => k.id === id);
   const tc = p.transformConstraints?.find((k) => k.id === id);
+  const sp = p.springs?.find((k) => k.id === id);
+  if (sp) return renderSpringInspector(app, root, sp);
   if (!ik && !pc && !tc) return;
   const anim = ed.mode === 'animate' ? ed.anim() : null;
   const t = anim ? snapToFrame(ed.time, anim.fps) : 0;
@@ -296,6 +313,49 @@ export function renderConstraintInspector(app: App, root: HTMLElement, id: strin
   );
 }
 
+function renderSpringInspector(app: App, root: HTMLElement, sp: SpringConstraint): void {
+  const { ed } = app;
+  const p = ed.project;
+  const name = (bid: string) => p.bones.find((b) => b.id === bid)?.name ?? '?';
+  const setS = (label: string, fn: (s: SpringConstraint) => void) =>
+    app.guard(() => ed.mutate(label, (q) => {
+      const s = q.springs!.find((k) => k.id === sp.id)!;
+      const copy = { ...s, bones: s.bones.slice() };
+      fn(copy);
+      const bad = springProblems(copy);
+      if (bad.length) throw new Error(bad.join('; '));
+      fn(s);
+    }));
+  const param = (key: 'stiffness' | 'damping' | 'gain' | 'max' | 'blend' | 'mix', label: string, opts: { min: number; max: number; step: number }) =>
+    numberField({ label, value: sp[key], ...opts, testId: `spring-${key}`, onCommit: (v) => setS(`Spring ${key}`, (s) => void (s[key] = key === 'blend' ? Math.round(v) : v)) });
+  const last = sp.bones[sp.bones.length - 1];
+  const kids = p.bones.filter((b) => b.parentId === last);
+  const taken = new Set((p.springs ?? []).flatMap((k) => k.bones));
+  const next = kids.length === 1 && !taken.has(kids[0].id) ? kids[0] : null;
+  append(root,
+    h('div', { class: 'kind-badge' }, 'Spring · simulated per clip'),
+    textField('Name', sp.name, 'constraint-name', (v) => setS('Rename constraint', (s) => void (s.name = v))),
+    h('p', { class: 'dim', 'data-testid': 'spring-chain' }, `Chain: ${sp.bones.map(name).join(' → ')}`),
+    h('div', { class: 'row2' },
+      h('button', { class: 'mini', 'data-testid': 'spring-extend', disabled: !next, title: next ? `Add ${next.name} to the chain` : 'The last bone has no single free child', onclick: () => setS('Extend spring', (s) => void s.bones.push(next!.id)) }, '+ Next bone'),
+      h('button', { class: 'mini', 'data-testid': 'spring-shorten', disabled: sp.bones.length < 2, onclick: () => setS('Shorten spring', (s) => void s.bones.pop()) }, '− Last bone'),
+    ),
+    h('div', { class: 'row2' }, param('stiffness', 'Stiffness', { min: 0.01, max: 1, step: 0.01 }), param('damping', 'Damping', { min: 0, max: 1, step: 0.01 })),
+    h('div', { class: 'row2' }, param('gain', 'Kick (gain)', { min: 0, max: 10, step: 0.05 }), param('max', 'Max lag (°)', { min: 1, max: 180, step: 1 })),
+    h('div', { class: 'row2' }, param('blend', 'Loop blend (frames)', { min: 0, max: 120, step: 1 }), param('mix', 'Mix', { min: 0, max: 1, step: 0.05 })),
+    h('p', { class: 'hint' }, 'Each bone lags behind its keyed angle and is kicked by its base’s acceleration, then settles (stiffness pulls back, damping calms it). Loops simulate twice and blend the seam. Added on top of the keys, before IK. Runtime exports carry it as baked keys; Lottie needs Bake first.'),
+    h('div', { class: 'row2' },
+      h('button', { class: 'mini', 'data-testid': 'spring-bake', title: 'Write every spring into the animations as per-frame rotate keys and remove the springs (undo restores them)', onclick: () => {
+        let res = { bones: 0, animations: 0 };
+        ed.mutate('Bake springs', (q) => void (res = bakeSprings(q)));
+        ed.select(null);
+        app.status(`Baked springs: ${res.bones} bone track(s) across ${res.animations} animation(s). The motion is now ordinary keys.`);
+      } }, 'Bake all springs'),
+      h('button', { class: 'mini danger', 'data-testid': 'constraint-delete', onclick: () => deleteC(app, sp.id) }, 'Delete constraint'),
+    ),
+  );
+}
+
 function deleteC(app: App, id: string): void {
   app.ed.mutate('Delete constraint', (q) => deleteConstraint(q, id));
   app.ed.select(null);
@@ -372,6 +432,7 @@ export function renderConstraintList(app: App, root: HTMLElement): void {
     ...(p.paths ?? []).map((x) => row('path', x.id, x.name, '∿', `tree-path-${x.name}`)),
     ...(p.pathConstraints ?? []).map((k) => row('constraint', k.id, k.name, '⇢', `tree-constraint-${k.name}`)),
     ...(p.transformConstraints ?? []).map((k) => row('constraint', k.id, k.name, k.kind === 'aim' ? '➚' : '↻', `tree-constraint-${k.name}`)),
+    ...(p.springs ?? []).map((k) => row('constraint', k.id, k.name, '〰', `tree-constraint-${k.name}`)),
   ];
   root.append(
     h('div', { class: 'panel-head' },

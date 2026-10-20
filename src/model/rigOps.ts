@@ -9,7 +9,9 @@ import type { Mat, Vec } from './math.ts';
 import { apply, applyLinear, identity, invert, multiply, fromTRS } from './math.ts';
 import { drawOrderAt, steppedAt } from './evaluate.ts';
 import { attachmentWorld, boneLocalFromWorld, computeWorld, hasInheritFlags, isAncestorOrSelf, localFromWorld, parentLinear } from './skeleton.ts';
-import type { Animation, Attachment, Bone, ImageAsset, IkConstraint, PathConstraint, PathShape, Project, TransformConstraint } from './types.ts';
+import type { Animation, Attachment, Bone, ImageAsset, IkConstraint, PathConstraint, PathShape, Project, SpringConstraint, TransformConstraint } from './types.ts';
+import { SPRING_DEFAULTS, emptyTrack } from './types.ts';
+import { springOffsets, springProblems } from './springs.ts';
 import { makeBone, uniqueName } from './ops.ts';
 
 // ---- Slot keys ------------------------------------------------------------------------
@@ -140,7 +142,7 @@ function bendOf(project: Project, chain: string[]): boolean {
 }
 
 export function constraintNames(p: Project): string[] {
-  return [...(p.ik ?? []), ...(p.pathConstraints ?? []), ...(p.transformConstraints ?? [])].map((k) => k.name);
+  return [...(p.ik ?? []), ...(p.pathConstraints ?? []), ...(p.transformConstraints ?? []), ...(p.springs ?? [])].map((k) => k.name);
 }
 
 /** Bones that may serve as the target of `ik` (not in or under its chain). */
@@ -152,7 +154,56 @@ export function deleteConstraint(project: Project, id: string): void {
   if (project.ik) project.ik = project.ik.filter((k) => k.id !== id);
   if (project.pathConstraints) project.pathConstraints = project.pathConstraints.filter((k) => k.id !== id);
   if (project.transformConstraints) project.transformConstraints = project.transformConstraints.filter((k) => k.id !== id);
+  if (project.springs) project.springs = project.springs.filter((k) => k.id !== id);
   for (const an of project.animations) if (an.constraints) delete an.constraints[id];
+}
+
+// ---- Springs -------------------------------------------------------------------------
+
+/**
+ * Adds a spring on `boneIds` (chain order). With one bone and `followChain`, the chain
+ * continues down single children (tail1 → tail2 → …). Bones already in a spring are refused.
+ */
+export function addSpring(project: Project, id: string, boneIds: string[], params: Partial<Omit<SpringConstraint, 'id' | 'name' | 'bones'>> = {}, followChain = false): SpringConstraint | { error: string } {
+  const chain = boneIds.slice();
+  if (followChain && chain.length === 1) {
+    for (;;) {
+      const kids = project.bones.filter((b) => b.parentId === chain[chain.length - 1]);
+      if (kids.length !== 1) break;
+      chain.push(kids[0].id);
+    }
+  }
+  const taken = new Set((project.springs ?? []).flatMap((s) => s.bones));
+  const bad = chain.find((b) => !project.bones.some((x) => x.id === b) || taken.has(b));
+  if (!chain.length || bad) return { error: bad ? `${project.bones.find((x) => x.id === bad)?.name ?? bad} is missing or already in a spring.` : 'Choose at least one bone.' };
+  const first = project.bones.find((b) => b.id === chain[0])!;
+  const s: SpringConstraint = { id, name: uniqueName(constraintNames(project), `${first.name}-spring`), bones: chain, ...SPRING_DEFAULTS, ...params };
+  const problems = springProblems(s);
+  if (problems.length) return { error: problems.join('; ') };
+  (project.springs ??= []).push(s);
+  return s;
+}
+
+/**
+ * Writes every spring into the animations as rotate keys (one linear key per frame:
+ * keyed rotation + offset) and removes the springs — for Lottie, or for hand edits.
+ */
+export function bakeSprings(project: Project): { bones: number; animations: number } {
+  if (!project.springs?.length) return { bones: 0, animations: 0 };
+  const per = project.animations.map((a) => [a, springOffsets(project, a)] as const);
+  let bones = 0;
+  for (const [a, offs] of per) {
+    for (const [id, off] of offs) {
+      const bone = project.bones.find((b) => b.id === id)!;
+      const tr = (a.tracks[id] ??= emptyTrack());
+      const keyed = (f: number) => sampleKeys(tr.rotate, f / a.fps, [bone.rotation])[0];
+      const vals = off.map((o, f) => keyed(f) + o);
+      tr.rotate = vals.map((v, f) => ({ time: f / a.fps, value: [v], interp: 'linear' }));
+      bones++;
+    }
+  }
+  delete project.springs;
+  return { bones, animations: per.length };
 }
 
 // ---- Transform constraints -------------------------------------------------------------

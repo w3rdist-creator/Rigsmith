@@ -42,6 +42,11 @@ export function repairReferences(p: Project): string[] {
     for (const tc of p.transformConstraints) if (tc.kind === 'aim' && tc.relativeTo && (!boneIds.has(tc.relativeTo) || tc.relativeTo === tc.bone)) tc.relativeTo = null;
     if (p.transformConstraints.length !== before) notes.push(`${before - p.transformConstraints.length} transform constraint(s) removed (their bones were deleted).`);
   }
+  if (p.springs) {
+    const before = p.springs.length;
+    p.springs = p.springs.map((s) => ({ ...s, bones: s.bones.filter((b) => boneIds.has(b)) })).filter((s) => s.bones.length);
+    if (p.springs.length !== before) notes.push(`${before - p.springs.length} spring(s) removed (their bones were deleted).`);
+  }
   // Mesh weights: influences of missing bones are dropped and the rest renormalized; a
   // vertex left without influences goes to the attachment's bone (or, with no bone, the
   // mesh becomes rigid).
