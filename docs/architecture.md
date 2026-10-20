@@ -206,6 +206,12 @@ tint, image, skin, draw order) → mesh vertices.
   bakes springs into keys (players need no simulation); Lottie refuses them until
   **Bake all springs** (`bakeSprings`), which writes the same motion as one linear rotate
   key per frame and removes the springs.
+- **Bake constraints** (R14, `bakeConstraints`; Constraints ▸ Bake, `rigsmith
+  bake-constraints`): springs are baked first; then every animation is evaluated at each
+  whole frame and each bone driven by an IK, path or transform constraint gets one linear
+  translate, rotate and scale key per frame holding its solved local pose; the constraints
+  and their keys are removed. Exact at whole frames (Lottie's grid); between frames the
+  motion is linear. The setup pose is not baked. Meshes, masks and emitters have no bake.
 - **Blend, tint and vertex alpha** (v3, `Attachment.blend`, `Attachment.color`, slot
   `color` keys, `Mesh.alphas`): `blend` is `normal` (absent), `additive`, `screen` or
   `multiply` and maps to the canvas operations `source-over`, `lighter`, `screen` and

@@ -7,9 +7,9 @@ import { localRotationFor } from './constraints.ts';
 import { angleOf } from './math.ts';
 import type { Mat, Vec } from './math.ts';
 import { apply, applyLinear, identity, invert, multiply, fromTRS } from './math.ts';
-import { drawOrderAt, steppedAt } from './evaluate.ts';
+import { drawOrderAt, evaluate, steppedAt } from './evaluate.ts';
 import { attachmentWorld, boneLocalFromWorld, computeWorld, hasInheritFlags, isAncestorOrSelf, localFromWorld, parentLinear } from './skeleton.ts';
-import type { Animation, Attachment, Bone, ImageAsset, IkConstraint, PathConstraint, PathShape, Project, SpringConstraint, TransformConstraint } from './types.ts';
+import type { Animation, Attachment, Bone, ImageAsset, IkConstraint, LocalPose, PathConstraint, PathShape, Project, SpringConstraint, TransformConstraint } from './types.ts';
 import { EMITTER_MAX_RATE, SPRING_DEFAULTS, emptyTrack } from './types.ts';
 import { springOffsets, springProblems } from './springs.ts';
 import { makeBone, uniqueName } from './ops.ts';
@@ -205,6 +205,41 @@ export function bakeSprings(project: Project): { bones: number; animations: numb
   }
   delete project.springs;
   return { bones, animations: per.length };
+}
+
+/**
+ * Writes what the IK, path and transform constraints do into every animation — one
+ * linear translate, rotate and scale key per frame on each constrained bone, the solved
+ * local pose — then removes the constraints and their keys (springs are baked first). The
+ * motion is unchanged at whole frames; the setup pose stays unsolved. For Lottie, or for
+ * hand edits of a solved clip.
+ */
+export function bakeConstraints(project: Project): { constraints: number; bones: number; animations: number; springs: number } {
+  const cons = [...(project.ik ?? []), ...(project.pathConstraints ?? []), ...(project.transformConstraints ?? [])];
+  const ids = new Set<string>([...(project.ik ?? []).flatMap((k) => k.bones), ...(project.pathConstraints ?? []).flatMap((k) => k.bones), ...(project.transformConstraints ?? []).map((k) => k.bone)]);
+  const springs = project.springs?.length ? bakeSprings(project).bones : 0;
+  if (!cons.length) return { constraints: 0, bones: 0, animations: 0, springs };
+  const solved = project.animations.map((a) => {
+    const n = Math.round(a.duration * a.fps);
+    const frames: Map<string, LocalPose>[] = [];
+    for (let f = 0; f <= n; f++) frames.push(evaluate(project, a, Math.min(a.duration, f / a.fps)).pose);
+    return frames;
+  });
+  project.animations.forEach((a, i) => {
+    for (const id of ids) {
+      const keys = solved[i].map((pose, f) => ({ t: f / a.fps, p: pose.get(id)! }));
+      a.tracks[id] = {
+        translate: keys.map(({ t, p }) => ({ time: t, value: [p.x, p.y], interp: 'linear' as const })),
+        rotate: keys.map(({ t, p }) => ({ time: t, value: [p.rotation], interp: 'linear' as const })),
+        scale: keys.map(({ t, p }) => ({ time: t, value: [p.scaleX, p.scaleY], interp: 'linear' as const })),
+      };
+    }
+    delete a.constraints;
+  });
+  delete project.ik;
+  delete project.pathConstraints;
+  delete project.transformConstraints;
+  return { constraints: cons.length, bones: ids.size, animations: project.animations.length, springs };
 }
 
 // ---- Transform constraints -------------------------------------------------------------

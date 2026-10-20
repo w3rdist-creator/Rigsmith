@@ -25,7 +25,7 @@ import { autoWeights, bindMesh, gridPoints, meshSummary, setMesh, triangulate } 
 import { evaluate } from '../../src/model/evaluate.ts';
 import { computeWorld } from '../../src/model/skeleton.ts';
 import { setMixRule } from '../../src/model/mix.ts';
-import { addAimConstraint, addIk, addRotationConstraint, addSpring, bakeSprings, constraintNames } from '../../src/model/rigOps.ts';
+import { addAimConstraint, addIk, addRotationConstraint, addSpring, bakeConstraints, bakeSprings, constraintNames } from '../../src/model/rigOps.ts';
 import type { Emitter, SpringConstraint } from '../../src/model/types.ts';
 import { emitterProblems } from '../../src/model/emitters.ts';
 import { setClip } from '../../src/model/masks.ts';
@@ -359,6 +359,12 @@ export function setMask(p: Project, attName: string, maskName: string | null): {
   const bad = setClip(p.attachments, att.id, mask?.id ?? null);
   if (bad.length) fail(`Cannot clip “${attName}”: ${bad.join('; ')}.`);
   return { clip: mask?.name ?? null };
+}
+
+/** Bakes IK, path and transform constraints (and springs) into per-frame keys (see bakeConstraints). */
+export function bakeConstraintsCmd(p: Project): { constraints: number; bones: number; animations: number; springs: number } {
+  if (!(p.ik?.length || p.pathConstraints?.length || p.transformConstraints?.length || p.springs?.length)) fail('The project has no constraints or springs to bake.');
+  return bakeConstraints(p);
 }
 
 /** Bakes every spring into rotate keys (see bakeSprings) and removes them. */

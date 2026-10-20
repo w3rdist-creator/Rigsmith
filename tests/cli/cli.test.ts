@@ -302,6 +302,17 @@ describe('clip specs (R6)', () => {
     const c = cli('mask', out, '--att', 'bead2', '--clear', '--out', path.join(OUT, 'm2.rig.json'));
     assert.deepEqual([c.code, c.json.clip], [0, null]);
   });
+
+  it('bake-constraints (R14) writes IK and path constraints into keys and removes them; nothing to bake exits 1', () => {
+    const out = path.join(OUT, 'b.rig.json');
+    const r = cli('bake-constraints', RIG, '--out', out);
+    assert.equal(r.code, 0, JSON.stringify(r.json));
+    assert.ok(r.json.constraints >= 2 && r.json.bones >= 3 && r.json.animations === 2);
+    const p = parseProject(readFileSync(out, 'utf8'));
+    assert.ok(p.ok && !p.project.ik && !p.project.pathConstraints);
+    assert.equal(cli('bake-constraints', out, '--out', path.join(OUT, 'b2.rig.json')).code, 1);
+    assert.ok(!existsSync(path.join(OUT, 'b2.rig.json')));
+  });
 });
 
 describe('rendering (headless Chrome for Testing via render.html)', () => {

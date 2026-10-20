@@ -15,7 +15,7 @@ import type { ClipMode, ClipSpec } from '../src/model/clipSpec.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
 import type { TransformRequest, VertexAlphaRequest, WeightRequest } from './lib/rigsmith-api.ts';
-import { ApiError, EXIT, addImage, addIkNamed, addSpringNamed, bakeSpringsCmd, setEmitter, setMask, addTransform, setBind, setInherit, setTint, setVertexAlpha, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
+import { ApiError, EXIT, addImage, addIkNamed, addSpringNamed, bakeSpringsCmd, bakeConstraintsCmd, setEmitter, setMask, addTransform, setBind, setInherit, setTint, setVertexAlpha, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
 
 const USAGE = `rigsmith <command> [options]
   validate <project.rig.json>
@@ -65,6 +65,7 @@ const USAGE = `rigsmith <command> [options]
   mask <project> --att <attachment> (--to <mask attachment> | --clear) --out <project>
           (clipping mask: the attachment shows only inside the mask's shape, e.g. pupils in an eye)
   bake-springs <project> --out <project>   (springs → per-frame rotate keys; needed for Lottie)
+  bake-constraints <project> --out <project>   (IK, path and transform constraints + springs → per-frame keys; needed for Lottie)
   ik <project> --bone <bone> [--one-bone] [--bend positive|negative] --out <project>
           (2-bone IK ending at <bone>, target at its tip; the bend side follows the setup elbow unless given)
   clip export <project> --anim <name> --out <clip.yaml|clip.json>
@@ -493,6 +494,12 @@ async function main(): Promise<Record<string, unknown>> {
       const res = setMask(p, need('att'), flag('clear') !== undefined ? null : need('to'));
       writeProject(out, p);
       return { outputs: [out], attachment: flag('att'), ...res };
+    }
+    case 'bake-constraints': {
+      const out = need('out');
+      const res = bakeConstraintsCmd(p);
+      writeProject(out, p);
+      return { outputs: [out], ...res };
     }
     case 'bake-springs': {
       const out = need('out');

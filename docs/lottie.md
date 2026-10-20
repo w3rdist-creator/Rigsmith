@@ -19,7 +19,7 @@ Nothing is approximated. The code is in `src/model/lottie.ts`.
 | Attachment opacity + opacity keys | `o` (×100) | exported |
 | Visibility keys, image-swap keys, skins | one image layer per run of frames with the same image and visibility, switched by `ip`/`op`. Exact at whole frames; a key between frames takes effect at the next frame, as in the PNG sequence (shown as a note) | exported |
 | Draw order (static) | layers are written front to back | exported |
-| IK constraints, path constraints, constraint keys | none in Lottie | **refused** |
+| IK constraints, path constraints, constraint keys | none in Lottie | **refused** — bake them first (Constraints ▸ Bake, `rigsmith bake-constraints`) |
 | Clipping masks (v3) | this exporter writes no track mattes | **refused** |
 | FX sockets / emitters (v3) | Lottie has no particles | **refused** |
 | Springs (v3) | simulated by Rigsmith | **refused** — bake them first (spring inspector ▸ Bake all springs, or `rigsmith bake-springs`) |
@@ -29,7 +29,7 @@ Nothing is approximated. The code is in `src/model/lottie.ts`.
 
 The composition size, frame rate, frame count and origin are the same as the editor's PNG
 sequence at scale 1, padding 4 (`meta.origin` records the origin). A rig that uses a
-refused feature can still be exported after baking that feature into bone keys by hand.
+refused feature can still be exported after baking: **Constraints ▸ Bake** / `rigsmith bake-constraints` writes IK, path and transform constraints (and springs) into one key per frame (exact at whole frames). Meshes, masks, emitters and draw-order keys have no bake: Lottie image layers cannot deform or clip.
 
 ## How fidelity is verified, and the limits
 

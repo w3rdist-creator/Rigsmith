@@ -2,6 +2,7 @@
 // the Lottie IK wording and the constraint-mix blend that
 // the LP-001 option relies on during sequence transitions) — model level.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { defaultMapping, drivenByConstraints, importAnimations, reportSummary } from '../../src/model/animImport.ts';
 import { scheduleSequence } from '../../src/model/clipSequence.ts';
@@ -235,11 +236,12 @@ describe('paste retarget is reported', () => {
 });
 
 describe('RV-008 (carried): the Lottie IK refusal names no command that does not exist', () => {
-  it('says there is no bake command and what to do instead', () => {
+  it('names the bake that exists (R14: Constraints ▸ Bake, rigsmith bake-constraints)', () => {
     const p = target();
     const d = lottieDiagnostics(p, { id: 'x', name: 'x', duration: 1, fps: 30, loop: false, tracks: {} }).find((x) => x.feature === 'IK constraint')!;
-    assert.match(d.message, /no command that bakes IK into keys/);
-    assert.ok(!/bake it into keys first/.test(d.message));
+    assert.match(d.message, /Bake constraints first \(Constraints ▸ Bake, or rigsmith bake-constraints\)/);
+    assert.match(readFileSync(new URL('../../scripts/rigsmith.ts', import.meta.url).pathname, 'utf8'), /case 'bake-constraints'/);
+    assert.match(readFileSync(new URL('../../src/ui/rigPanels.ts', import.meta.url).pathname, 'utf8'), /'data-testid': 'bake-constraints'/);
   });
 });
 

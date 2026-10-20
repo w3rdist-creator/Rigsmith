@@ -12,6 +12,7 @@ import {
   addPathNode,
   addRotationConstraint,
   addSpring,
+  bakeConstraints,
   bakeSprings,
   deleteConstraint,
   deletePath,
@@ -490,6 +491,12 @@ export function renderConstraintList(app: App, root: HTMLElement): void {
         ed.mutate('Add path', (q) => void addPath(q, id, ed.selectedBoneId(), c));
         ed.select({ kind: 'path', id });
       } }, '+ Path'),
+      h('button', { class: 'mini', 'data-testid': 'bake-constraints', disabled: !(p.ik?.length || p.pathConstraints?.length || p.transformConstraints?.length || p.springs?.length), title: 'Write what IK, path and transform constraints (and springs) do into every animation as per-frame keys, then remove them — for Lottie export or hand edits (undo restores them)', onclick: () => {
+        let r = { constraints: 0, bones: 0, animations: 0, springs: 0 };
+        ed.mutate('Bake constraints', (q) => void (r = bakeConstraints(q)));
+        ed.select(null);
+        app.status(`Baked ${r.constraints} constraint(s)${r.springs ? ` and springs on ${r.springs} bone track(s)` : ''}: ${r.bones} bone(s) now carry one key per frame in ${r.animations} animation(s). The motion is unchanged at whole frames.`);
+      } }, 'Bake'),
     ),
     items.length ? h('div', { class: 'tree', 'data-testid': 'constraint-list' }, ...items) : h('p', { class: 'empty' }, 'No constraints or paths. Select a bone and use “+ 2-bone IK”, “+ Rotation” or “+ Aim” in the inspector, or add a path.'),
   );
