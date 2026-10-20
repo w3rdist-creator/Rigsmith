@@ -52,7 +52,8 @@ joint folds toward: bone +y for `--side 1`, −y for `--side -1`). A `--helper` 
 twin mesh's weights vertex for vertex (same grid), renaming bones containing the
 `--swap` text. `--smooth N` runs N Laplacian passes over the triangle graph (each moves a
 vertex `--smooth-amount`, default 0.5, toward its neighbours' average; at most 4
-influences kept). The editor has the same controls under Mesh ▸ Limb weights.
+influences kept). The editor has the same controls under Mesh ▸ Limb weights (Tip follows /
+Top stays on for `--end` / `--root`; each Smooth click is one pass at 0.5).
 
 ## How rendering works
 

@@ -295,6 +295,26 @@ describe('vertex editing and weights (Setup)', () => {
     assert.notDeepEqual(w.map((l: any[]) => l.map((x) => x.w)), before, 'smoothing changed the weights');
     await page.keyboard.press('Control+z');
     assert.deepEqual((await band()).mesh.weights.map((l: any[]) => l.map((x: any) => x.w)), before, 'undo restores the limb weights');
+    // Tip and top blends (axis s = image x − width/2 + 60, the attachment's offset on upper).
+    const sOf = (x: number) => x - ART_W / 2 + 60;
+    const sMax = sOf(Math.max(...xs)), sMin = sOf(Math.min(...xs));
+    await page.getByTestId('lw-end-bone').selectOption({ label: 'upper' });
+    await setField('lw-end-at', sMax - 6);
+    await setField('lw-end-band', 5);
+    await setField('lw-end-max', 0.6);
+    await page.getByTestId('lw-root-bone').selectOption({ label: 'lower' });
+    await setField('lw-root-from', sMin + 1);
+    await setField('lw-root-to', sMin + 2);
+    await page.getByTestId('weights-limb').click();
+    w = (await band()).mesh.weights;
+    assert.ok(sums1(w));
+    const upperW = (i: number) => w[i].find((x: any) => x.bone === upperId)?.w ?? 0;
+    for (let i = 0; i < pts.length / 2; i++) {
+      if (pts[2 * i] === Math.max(...xs)) assert.ok(Math.abs(upperW(i) - 0.6) < 1e-9, `tip vertex ${i} gives the tip bone its max share (${upperW(i)})`);
+      if (pts[2 * i] === Math.min(...xs)) assert.equal(lowerW(i), 1, `top vertex ${i} stays on the top bone`);
+    }
+    await page.getByTestId('lw-end-bone').selectOption('');
+    await page.getByTestId('lw-root-bone').selectOption('');
     await page.getByTestId('lw-lower').selectOption({ label: 'upper' });
     assert.equal(await page.getByTestId('weights-limb').isDisabled(), true, 'upper = lower disables Apply');
     await page.getByTestId('lw-lower').selectOption({ label: 'lower' });

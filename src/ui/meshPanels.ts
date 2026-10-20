@@ -14,7 +14,11 @@ import { h, numberField } from './dom.ts';
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
 
 /** Limb-weight form state per attachment (survives re-renders of the inspector). */
-type LimbForm = { upper: string; lower: string; helper: string; inner: number; outer: number; side: 1 | -1; mirrorFrom: string; swapFrom: string; swapTo: string };
+type LimbForm = {
+  upper: string; lower: string; helper: string; inner: number; outer: number; side: 1 | -1;
+  endBone: string; endAt: number; endBand: number; endMax: number; rootBone: string; rootFrom: number; rootTo: number;
+  mirrorFrom: string; swapFrom: string; swapTo: string;
+};
 const limbForms = new Map<string, LimbForm>();
 
 function labeledSelect(testId: string, label: string, options: { value: string; label: string }[], value: string, onChange: (v: string) => void): HTMLElement {
@@ -171,7 +175,9 @@ function limbSection(app: App, a: Attachment, setMeshAtt: (label: string, fn: (x
   const upper0 = a.boneId ?? p.bones[0]?.id ?? '';
   const f = limbForms.get(a.id) ?? {
     upper: upper0, lower: p.bones.find((b) => b.parentId === upper0)?.id ?? upper0, helper: '',
-    inner: 20, outer: 40, side: 1, mirrorFrom: '', swapFrom: '_l', swapTo: '_r',
+    inner: 20, outer: 40, side: 1,
+    endBone: '', endAt: p.images.find((i) => i.id === a.imageId)?.width ?? 100, endBand: 10, endMax: 0.5, rootBone: '', rootFrom: 0, rootTo: 20,
+    mirrorFrom: '', swapFrom: '_l', swapTo: '_r',
   };
   limbForms.set(a.id, f);
   const bones = p.bones.map((b) => ({ value: b.id, label: b.name }));
@@ -199,10 +205,29 @@ function limbSection(app: App, a: Attachment, setMeshAtt: (label: string, fn: (x
       numberField({ label: 'Outside band (px)', value: f.outer, min: 1, max: 1000, testId: 'lw-outer', onCommit: (v) => ((f.outer = Math.max(1, v)), ed.emit('view')) }),
     ),
     h('div', { class: 'row2' },
+      labeledSelect('lw-end-bone', 'Tip follows', [{ value: '', label: '— none' }, ...bones], f.endBone, (v) => ((f.endBone = v), ed.emit('view'))),
+      numberField({ label: 'Tip share (max)', value: f.endMax, min: 0, max: 1, step: 0.05, testId: 'lw-end-max', onCommit: (v) => ((f.endMax = Math.min(1, Math.max(0, v))), ed.emit('view')) }),
+    ),
+    ...(f.endBone ? [h('div', { class: 'row2' },
+      numberField({ label: 'Tip at (px along)', value: f.endAt, min: -10000, max: 10000, testId: 'lw-end-at', onCommit: (v) => ((f.endAt = v), ed.emit('view')) }),
+      numberField({ label: 'Tip band (px)', value: f.endBand, min: 1, max: 1000, testId: 'lw-end-band', onCommit: (v) => ((f.endBand = Math.max(1, v)), ed.emit('view')) }),
+    )] : []),
+    h('div', { class: 'row2' },
+      labeledSelect('lw-root-bone', 'Top stays on', [{ value: '', label: '— none' }, ...bones], f.rootBone, (v) => ((f.rootBone = v), ed.emit('view'))),
+    ),
+    ...(f.rootBone ? [h('div', { class: 'row2' },
+      numberField({ label: 'Top full until (px)', value: f.rootFrom, min: -10000, max: 10000, testId: 'lw-root-from', onCommit: (v) => ((f.rootFrom = v), ed.emit('view')) }),
+      numberField({ label: 'Top released at (px)', value: f.rootTo, min: -10000, max: 10000, testId: 'lw-root-to', onCommit: (v) => ((f.rootTo = v), ed.emit('view')) }),
+    )] : []),
+    h('div', { class: 'row2' },
       h('button', {
         class: 'mini', 'data-testid': 'weights-limb', disabled: !ok,
         title: 'Weight the mesh as one bending limb: upper → lower across the joint band, the helper on the joint line',
-        onclick: () => run('Limb weights', (x) => void (x.mesh!.weights = limbWeights(ed.project, x, { upper: f.upper, lower: f.lower, ...(f.helper ? { helper: f.helper } : {}), band: { inner: f.inner, outer: f.outer, side: f.side } }))),
+        onclick: () => run('Limb weights', (x) => void (x.mesh!.weights = limbWeights(ed.project, x, {
+          upper: f.upper, lower: f.lower, ...(f.helper ? { helper: f.helper } : {}), band: { inner: f.inner, outer: f.outer, side: f.side },
+          ...(f.endBone ? { end: { bone: f.endBone, at: f.endAt, band: f.endBand, max: f.endMax } } : {}),
+          ...(f.rootBone ? { root: { bone: f.rootBone, from: f.rootFrom, to: f.rootTo } } : {}),
+        }))),
       }, 'Apply limb weights'),
       h('button', {
         class: 'mini', 'data-testid': 'weights-smooth', disabled: !mesh.weights,
