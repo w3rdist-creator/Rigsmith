@@ -4,9 +4,9 @@
 import { frameCount, keysBeyondEnd, snapToFrame } from '../model/animation.ts';
 import { describePortable } from '../model/clipboard.ts';
 import type { KeyRef } from '../model/keys.ts';
-import { DRAW_LANE, boneLane, constraintLane, laneKeys, refsInRange, sameRef, shiftKeys, slotLane } from '../model/keys.ts';
+import { DRAW_LANE, boneLane, constraintLane, eventLane, laneKeys, parseLane, refsInRange, sameRef, shiftKeys, slotLane } from '../model/keys.ts';
 import { topoOrder } from '../model/skeleton.ts';
-import type { Animation, Interp, Key } from '../model/types.ts';
+import type { Animation, EventKey, Interp, Key } from '../model/types.ts';
 import { CHANNELS, INTERPS } from '../model/types.ts';
 import type { App } from './app.ts';
 import { CurveEditor } from './curveEditor.ts';
@@ -108,6 +108,7 @@ export class Timeline {
         if (ct?.[ch]?.length || c.id === selC) rows.push({ lane: constraintLane(c.id, ch), owner: c.name, ch, selected: c.id === selC, onLabel: () => ed.select({ kind: 'constraint', id: c.id }) });
     }
     if (anim.drawOrder?.length) rows.push({ lane: DRAW_LANE, owner: 'draw order', ch: 'order', selected: false });
+    for (const name of Object.keys(anim.events ?? {}).sort()) if (anim.events![name].length) rows.push({ lane: eventLane(name), owner: 'event', ch: name, selected: false });
     return rows;
   }
 
@@ -164,6 +165,21 @@ export class Timeline {
     if (curveCapable) interpSel.value = (selKey as Key).interp;
     interpSel.addEventListener('change', () => app.setInterpForSelection(interpSel.value as Interp));
     const nSel = ed.keySels.length;
+    // Events: a name field + "◆ Event" keys it at the playhead; a selected event key can be renamed / given a payload.
+    const evName = h('input', { type: 'text', 'data-testid': 'event-name', placeholder: 'event name', 'aria-label': 'Event name', size: 12, maxlength: 64 });
+    const addEvent = () => app.addEventAtPlayhead(evName.value);
+    evName.addEventListener('keydown', (e) => e.key === 'Enter' && addEvent());
+    const selInfo = ed.keySel ? parseLane(ed.keySel.lane) : null;
+    const selEvent = selInfo?.kind === 'event' ? (selKey as EventKey | undefined) : undefined;
+    const eventEdit = selEvent && selInfo?.kind === 'event'
+      ? (() => {
+          const nameIn = h('input', { type: 'text', 'data-testid': 'event-key-name', value: selInfo.name, 'aria-label': 'Selected event name', size: 12, maxlength: 64 });
+          nameIn.addEventListener('change', () => app.updateSelectedEvent({ name: nameIn.value }));
+          const payIn = h('input', { type: 'text', 'data-testid': 'event-key-payload', value: selEvent.payload === undefined ? '' : String(selEvent.payload), placeholder: 'payload', 'aria-label': 'Selected event payload', size: 10, maxlength: 256 });
+          payIn.addEventListener('change', () => app.updateSelectedEvent({ payload: payIn.value }));
+          return h('span', { class: 'inline', title: 'Selected event: rename it or set its payload (a number or text)' }, 'Event', nameIn, payIn);
+        })()
+      : null;
 
     const beyond = keysBeyondEnd(anim);
     append(
@@ -188,6 +204,10 @@ export class Timeline {
       h('button', { class: 'mini', 'data-testid': 'nudge-right', disabled: !nSel, title: 'Nudge selected keys one frame later (])', 'aria-label': 'Nudge keys right', onclick: () => app.nudgeKeys(1) }, '1f▸'),
       h('button', { class: 'mini', 'data-testid': 'copy-keys', disabled: !nSel, title: 'Copy selected keys (Ctrl/⌘+C)', onclick: () => app.copySelectedKeys() }, 'Copy'),
       h('button', { class: 'mini', 'data-testid': 'paste-keys', disabled: !ed.clipboard, title: ed.clipboard ? `Paste ${describePortable(ed.clipboard)} at the playhead (Ctrl/⌘+V); onto the selected bone if the keys came from one other bone` : 'Paste keys at the playhead (Ctrl/⌘+V)', 'data-clip': ed.clipboard ? String(ed.clipboard.items.length) : '0', onclick: () => app.pasteKeysAtPlayhead() }, 'Paste'),
+      h('span', { class: 'sep' }),
+      evName,
+      h('button', { class: 'mini', 'data-testid': 'add-event', title: 'Add the named event at the playhead (a cue for the game: sound, flash, burst)', onclick: addEvent }, '◆ Event'),
+      eventEdit,
       h('span', { class: 'sep' }),
       h('button', { class: 'mini', 'data-testid': 'anim-export-spec', title: 'Download this animation as a clip spec (YAML, names instead of ids)', onclick: () => app.exportClipSpec() }, 'Export spec'),
       h('button', { class: 'mini', 'data-testid': 'anim-apply-spec', title: 'Apply a clip spec (.yaml / .json): creates the animation, or rebuilds the one with the same name', onclick: () => app.clipSpecInput.click() }, 'Apply spec…'),
@@ -316,11 +336,11 @@ export class Timeline {
         const isSel = ed.isKeySelected(ref);
         const isPrimary = !!ed.keySel && sameRef(ed.keySel, ref);
         const frame = Math.round(k.time * anim.fps);
-        const value = 'value' in k ? (k as Key).value.map((v) => fmt(v)).join(', ') : 'imageId' in k ? String((k as { imageId: string }).imageId) : 'order';
+        const value = 'value' in k ? (k as Key).value.map((v) => fmt(v)).join(', ') : 'imageId' in k ? String((k as { imageId: string }).imageId) : r.owner === 'event' ? ((k as EventKey).payload !== undefined ? `payload ${(k as EventKey).payload}` : 'event') : 'order';
         const interp = 'interp' in k ? ` (${(k as Key).interp})` : '';
         lane.append(
           h('button', {
-            class: `key ch-${r.ch}${isSel ? ' selected' : ''}${isPrimary ? ' primary' : ''}${Math.abs(k.time - t) < 1e-6 ? ' current' : ''}${k.time > anim.duration + 1e-6 ? ' beyond' : ''}`,
+            class: `key ${r.owner === 'event' ? 'ch-event' : `ch-${r.ch}`}${isSel ? ' selected' : ''}${isPrimary ? ' primary' : ''}${Math.abs(k.time - t) < 1e-6 ? ' current' : ''}${k.time > anim.duration + 1e-6 ? ' beyond' : ''}`,
             style: `left:${Math.min(100, (k.time / anim.duration) * 100)}%`,
             title: `${r.owner} ${r.ch} @ frame ${frame}: ${value}${interp}`,
             'aria-label': `${r.owner} ${r.ch} key at frame ${frame}`,

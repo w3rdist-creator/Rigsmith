@@ -49,6 +49,7 @@ read-only test probe.
 | `deform-key <project> --anim A --att S --at T (--rest \| --offsets f.json) [--ease e] --out p2` | no | one mesh deform key (`--offsets`: a JSON list, 2 per vertex) |
 | `draw-order <project> --anim A --at T (--order a,b,… \| --move S (--to front\|back \| --above X \| --below X)) --out p2` | no | one draw-order key; `--move` starts from the order in effect before T |
 | `constraint-key <project> --anim A --constraint C --channel mix\|position\|angle --at T --value v [--ease e] --out p2` | no | one constraint key (position: path constraints; angle: transform constraints) |
+| `event <project> --anim A --at T --name n [--payload text\|number] --out p2` | no | one timeline event (v3): a named cue the game acts on; a plain number payload is stored as a number |
 
 Authoring commands validate the result with the editor's reader before writing and
 never modify their input file unless `--out` names it.
@@ -107,7 +108,9 @@ drawOrder:
   - {at: 12, order: [body, arm_l, head, spark]}   # or a full back→front list
 constraints:
   arm_ik: {mix: [[0, 1], [10, 0]]}      # mix; position (path); angle (transform)
-events: []              # reserved for timeline events; must be empty for now
+events:                 # timeline events: [at, name, payload?] (runtime: animations[].events)
+  - [6, arm_flash]
+  - [12, sfx, win_small]
 ```
 
 - **Times:** a number is a frame (time = frame / fps); `"0.25s"` is seconds. `clip

@@ -1,10 +1,10 @@
 // Application wiring: actions shared by the toolbar, panels, timeline and shortcuts.
 import { Editor } from '../editor/store.ts';
 import type { Tool } from '../editor/store.ts';
-import { findKeyIndex, keysBeyondEnd, removeKey, setInterp, setInterpY, snapToFrame } from '../model/animation.ts';
+import { findKeyIndex, insertSorted, keysBeyondEnd, removeKey, setInterp, setInterpY, snapToFrame } from '../model/animation.ts';
 import { CURVE_PRESETS } from '../model/curve.ts';
 import type { KeyRef } from '../model/keys.ts';
-import { allLanes, boneLane, closeLoopSeam, copyKeys, deleteKeys, findKey, laneKeys, parseLane, pasteKeys, sameRef, shiftKeys } from '../model/keys.ts';
+import { allLanes, boneLane, closeLoopSeam, copyKeys, deleteKeys, eventLane, findKey, laneKeys, parseLane, pasteKeys, sameRef, shiftKeys } from '../model/keys.ts';
 import { drivenByConstraints } from '../model/animImport.ts';
 import { parsePortable, resolvePortable, toPortable } from '../model/clipboard.ts';
 import { buildDemoProject } from '../model/demo.ts';
@@ -13,8 +13,8 @@ import { parseProject, serializeProject } from '../model/format.ts';
 import { apply, invert } from '../model/math.ts';
 import { keyChannels, makeBone, uniqueName } from '../model/ops.ts';
 import { CycleError, attachmentWorld, boneTip, deleteBone, reparentBone } from '../model/skeleton.ts';
-import type { Animation, Channel, Curve, Key, Project } from '../model/types.ts';
-import { CHANNELS, emptyProject, emptyTrack, newId } from '../model/types.ts';
+import type { Animation, Channel, Curve, EventKey, Key, Project } from '../model/types.ts';
+import { CHANNELS, EVENT_NAME, emptyProject, emptyTrack, newId } from '../model/types.ts';
 import { frameBounds } from '../model/evaluate.ts';
 import { drawFrame, exportContext } from '../render/draw.ts';
 import type { Autosave } from './autosave.ts';
@@ -565,6 +565,49 @@ export class App {
     return anim && this.ed.keySel ? findKey(anim, this.ed.keySel) : undefined;
   }
 
+  /** Adds (or replaces) event `name` at the playhead's frame and selects it. */
+  addEventAtPlayhead(name: string, payload?: string): void {
+    const anim = this.ed.anim();
+    const n = name.trim();
+    if (!anim) return;
+    if (!EVENT_NAME.test(n)) return this.status('Event names are 1–64 letters, digits and _ . : - (e.g. prop_flash, sfx:win).');
+    const time = snapToFrame(this.ed.time, anim.fps);
+    const value = parsePayload(payload);
+    this.mutateAnim(`Add event ${n}`, (a) => {
+      const keys = laneKeys(a, eventLane(n), true) as EventKey[];
+      const i = findKeyIndex(keys, time);
+      const key: EventKey = { time, ...(value !== undefined ? { payload: value } : {}) };
+      if (i >= 0) keys[i] = key;
+      else insertSorted(keys, key);
+    });
+    this.ed.selectKey({ lane: eventLane(n), time });
+    this.status(`Event “${n}” at frame ${Math.round(time * anim.fps)}.`);
+  }
+
+  /** Renames (moves to another event lane) and/or sets the payload of the selected event key. */
+  updateSelectedEvent(change: { name?: string; payload?: string }): void {
+    const anim = this.ed.anim();
+    const ref = this.ed.keySel;
+    const info = ref && parseLane(ref.lane);
+    if (!anim || !ref || info?.kind !== 'event') return;
+    const name = change.name?.trim() ?? info.name;
+    if (!EVENT_NAME.test(name)) return this.status('Event names are 1–64 letters, digits and _ . : - (e.g. prop_flash, sfx:win).');
+    const old = findKey(anim, ref) as EventKey | undefined;
+    if (!old) return;
+    const payload = change.payload !== undefined ? parsePayload(change.payload) : old.payload;
+    this.mutateAnim(name !== info.name ? `Rename event ${info.name} → ${name}` : `Event ${name} payload`, (a) => {
+      const from = laneKeys(a, ref.lane) as EventKey[];
+      from.splice(findKeyIndex(from, ref.time), 1);
+      if (!from.length) delete a.events![info.name];
+      const to = laneKeys(a, eventLane(name), true) as EventKey[];
+      const i = findKeyIndex(to, ref.time);
+      const key: EventKey = { time: old.time, ...(payload !== undefined ? { payload } : {}) };
+      if (i >= 0) to[i] = key;
+      else insertSorted(to, key);
+    });
+    this.ed.selectKey({ lane: eventLane(name), time: ref.time });
+  }
+
   private mutateAnim(label: string, fn: (a: Animation) => void): void {
     const id = this.ed.animId;
     if (!id) return;
@@ -928,6 +971,14 @@ export class App {
   snapshot(): Project {
     return JSON.parse(serializeProject(this.ed.project)) as Project;
   }
+}
+
+/** An event payload typed in a field: blank → none, a plain number → number, else the text. */
+export function parsePayload(text: string | undefined): string | number | undefined {
+  if (text === undefined) return undefined;
+  const t = text.trim();
+  if (!t) return undefined;
+  return /^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$/.test(t) ? Number(t) : t.slice(0, 256);
 }
 
 export function download(blob: Blob, filename: string): void {

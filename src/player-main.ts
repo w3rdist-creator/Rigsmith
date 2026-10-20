@@ -1,6 +1,8 @@
 // player.html: load a runtime JSON + atlas (JSON + page PNGs) or loose images, pick an
 // animation / skin / optional transition, scrub or play. Read-only probe for tests:
 // window.__rigsmithPlayer.
+import { eventsBetween } from './model/events.ts';
+import type { FiredEvent } from './model/events.ts';
 import type { AtlasMeta } from './model/atlas.ts';
 import type { RuntimeExport } from './model/exportRuntime.ts';
 import { exportContext, renderSequenceFrame } from './render/sequence.ts';
@@ -32,6 +34,9 @@ const slider = h('input', { type: 'range', min: 0, max: 0, step: 1, value: 0, 'd
 const label = h('span', { class: 'dim', 'data-testid': 'player-frame-label' });
 const playBtn = h('button', { class: 'mini', 'data-testid': 'player-play' }, 'Play');
 const canvas = h('canvas', { class: 'player-canvas', 'data-testid': 'player-canvas' });
+// Timeline events fired during playback (newest last), as a game would receive them.
+const eventLog = h('ol', { class: 'dim', 'data-testid': 'player-events', 'aria-label': 'Fired events' });
+let fired: (FiredEvent & { frame: number })[] = [];
 
 root.append(
   h('h1', {}, 'Rigsmith runtime player'),
@@ -47,7 +52,16 @@ root.append(
   ),
   h('div', { class: 'export-actions' }, playBtn, slider, label),
   h('div', { class: 'mix-stage' }, canvas),
+  h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Events fired while playing'), eventLog),
 );
+
+function fire(events: FiredEvent[], frame: number): void {
+  for (const e of events) {
+    fired.push({ ...e, frame });
+    eventLog.append(h('li', {}, `f${frame} ${e.name}${e.payload !== undefined ? ` (${e.payload})` : ''}`));
+  }
+  while (eventLog.childElementCount > 20) eventLog.firstElementChild!.remove();
+}
 
 function showErrors(list: string[]): void {
   errors.replaceChildren(...list.map((e) => h('li', {}, e)));
@@ -127,6 +141,8 @@ fileIn.addEventListener('change', async () => {
 
 function prepare(): void {
   if (!player) return;
+  fired = [];
+  eventLog.replaceChildren();
   // A running loop holds the old clip's frames and timing: stop it, and restart on the new
   // clip once it is prepared (showcase 1 R1: switching clips mid-play froze the player).
   const wasPlaying = !!raf;
@@ -202,18 +218,25 @@ function play(): void {
   const fps = s.anim.fps;
   const t0 = performance.now() - s.plan.times[index] * 1000;
   const loop = s.anim.loop;
+  // Events fire as playback passes them (prev < time ≤ now; from 0 a time-0 event fires).
+  let lastT = index === 0 ? -1 : s.plan.times[index];
+  const advance = (f: number) => {
+    const t = s.plan.times[f];
+    if (f !== index || lastT < 0) fire(eventsBetween(s.anim, lastT, t), s.plan.frames[f]);
+    lastT = t;
+    index = f;
+    show();
+  };
   const tick = (now: number) => {
     let f = Math.floor(((now - t0) / 1000) * fps);
     if (f >= s.frames.length) {
       if (!loop) {
-        index = s.frames.length - 1;
-        show();
+        advance(s.frames.length - 1);
         return stop();
       }
       f %= s.frames.length;
     }
-    index = f;
-    show();
+    advance(f);
     raf = requestAnimationFrame(tick);
   };
   raf = requestAnimationFrame(tick);
@@ -222,6 +245,8 @@ function play(): void {
 Object.defineProperty(window, '__rigsmithPlayer', {
   value: Object.freeze({
     state: () => ({ loaded: !!player, ...state, index, frames: setup?.frames.length ?? 0, playing: !!raf }),
+    /** Events fired since the clip was prepared: {time, name, payload?, frame}. */
+    events: () => fired.map((e) => ({ ...e })),
     /** Evaluated bone world matrices and mesh vertices of the shown frame. */
     frame: () => {
       if (!player || !setup) return null;

@@ -68,6 +68,7 @@ const USAGE = `rigsmith <command> [options]
   deform-key <project> --anim <name> --att <attachment> --at <frame|Ns> (--rest | --offsets <file.json>) [--ease <name>] --out <project>
   draw-order <project> --anim <name> --at <frame|Ns> (--order a,b,… | --move <att> (--to front|back | --above <att> | --below <att>)) --out <project>
   constraint-key <project> --anim <name> --constraint <name> --channel mix|position|angle --at <frame|Ns> --value <v> [--ease <name>] --out <project>
+  event <project> --anim <name> --at <frame|Ns> --name <event> [--payload <text|number>] --out <project>
   (times: a number is a frame, "0.25s" is seconds; specs: docs/cli.md → Clip specs)`;
 
 type Args = { _: string[]; flags: Record<string, string[]> };
@@ -160,6 +161,11 @@ function singleKeySpec(cmd: string): ClipSpec {
   const at = atFlag();
   const ease = flag('ease'), curve = curveFlag('curve');
   const easeFields = { ...(ease !== undefined ? { ease } : {}), ...(curve ? { curve } : {}) };
+  if (cmd === 'event') {
+    const payload = flag('payload');
+    const num = payload !== undefined && /^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$/.test(payload) ? Number(payload) : payload;
+    return { name, events: [{ at, name: need('name'), ...(num !== undefined ? { payload: num } : {}) }] };
+  }
   if (cmd === 'deform-key') {
     if ((flag('rest') === undefined) === (flag('offsets') === undefined)) usage('deform-key: give --rest or --offsets <file.json>.');
     const value = flag('rest') !== undefined ? 'rest' : JSON.parse(readFileSync(need('offsets'), 'utf8'));
@@ -452,6 +458,7 @@ async function main(): Promise<Record<string, unknown>> {
       return { outputs: [out], ik: res };
     }
     case 'key':
+    case 'event':
     case 'deform-key':
     case 'draw-order':
     case 'constraint-key': {

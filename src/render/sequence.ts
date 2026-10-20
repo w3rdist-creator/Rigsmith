@@ -10,6 +10,7 @@ import { scheduleSequence } from '../model/clipSequence.ts';
 import type { MixPlan } from '../model/mix.ts';
 import { evaluateMix, planLength } from '../model/mix.ts';
 import { buildZip } from '../model/zip.ts';
+import { flatEvents } from '../model/events.ts';
 import type { ZipEntry } from '../model/zip.ts';
 import type { Animation, ClipSequence, Project, ProjectFrame } from '../model/types.ts';
 import type { ImageLookup } from './draw.ts';
@@ -119,6 +120,8 @@ export interface SequenceMeta {
   /** Saved clip sequences only: each step's frame range in this export. */
   sequence?: { steps: { animation: string; repeat: number; startFrame: number; frames: number; framesPerPlay: number; mix: number }[] };
   frames: { index: number; frame: number; time: number; file: string }[];
+  /** Timeline events in the exported range: `frame` = round(time · fps), `index` = that frame's position here. */
+  events?: { time: number; frame: number; index: number; name: string; payload?: string | number }[];
 }
 
 export function sequenceFileName(setup: SequenceSetup, i: number): string {
@@ -151,7 +154,18 @@ export function sequenceMeta(project: Project, setup: SequenceSetup, req: Sequen
       : `one-shot: frame ${setup.plan.lastFrame} (= duration) is the final pose and may be exported`,
     ...(setup.schedule ? { sequence: { steps: setup.schedule.map((st) => ({ animation: st.name, repeat: st.repeat, startFrame: st.startFrame, frames: st.frames, framesPerPlay: st.framesPerPlay, mix: st.mix })) } } : {}),
     frames: setup.plan.frames.map((f, i) => ({ index: i, frame: f, time: setup.plan.times[i], file: sequenceFileName(setup, i) })),
+    ...sequenceEvents(setup, req.fps),
   };
+}
+
+function sequenceEvents(setup: SequenceSetup, fps: number): { events?: SequenceMeta['events'] } {
+  const out: NonNullable<SequenceMeta['events']> = [];
+  for (const e of flatEvents(setup.anim)) {
+    const frame = Math.round(e.time * fps);
+    const index = setup.plan.frames.indexOf(frame);
+    if (index >= 0) out.push({ ...e, frame, index });
+  }
+  return out.length ? { events: out } : {};
 }
 
 export class Cancelled extends Error {

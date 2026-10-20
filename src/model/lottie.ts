@@ -16,6 +16,7 @@
 // parented to their bone with p = attachment offset and a = image centre. Lottie draws
 // layer 0 on top, so layers are written front to back. Position is split (p.s = true)
 // so x and y ease independently exactly like Rigsmith's per-component interpolation.
+import { flatEvents } from './events.ts';
 import { isWhite, setupColor } from './color.ts';
 import { lastExportFrame } from './sequence.ts';
 import { frameWarnings, requestGeometry } from './sequence.ts';
@@ -53,6 +54,7 @@ export function lottieDiagnostics(project: Project, anim: Animation): LottieDiag
   for (const [id, st] of Object.entries(anim.slots ?? {})) if (st.deform?.length) err('deform keys', project.attachments.find((a) => a.id === id)?.name ?? id, 'Deform keys need meshes. Not exported.');
   if (anim.constraints && Object.keys(anim.constraints).length) err('constraint keys', anim.name, 'Constraint keys have no Lottie equivalent.');
   for (const im of project.images) if (im.mime !== 'image/png') err('image format', im.name, `${im.name} is ${im.mime}; only PNG assets are embedded.`);
+  if (Object.values(anim.events ?? {}).some((ks) => ks.length)) out.push({ level: 'note', feature: 'timeline events', item: anim.name, message: 'Timeline events are written as Lottie markers (cm = name, or name|payload) at their frame.' });
   const discrete = Object.values(anim.slots ?? {}).some((s) => s.visible?.length || s.image?.length);
   if (discrete) out.push({ level: 'note', feature: 'visibility / image keys', item: anim.name, message: 'Exported as separate image layers switched by in/out points: exact at whole frames; a key between frames takes effect at the next frame (as in the PNG sequence).' });
   out.push({ level: 'note', feature: 'validation', item: anim.name, message: 'Fidelity is verified against Rigsmith’s own frames by an in-repo Lottie subset evaluator and by lottie-web 5.13.0 (canvas renderer, Chrome); not tested in lottie-web’s SVG/HTML renderers, After Effects or other players.' });
@@ -160,6 +162,7 @@ export function exportLottie(project: Project, animName: string, skinName: strin
       imageLayers.push({ ...base(`${att.name}:${im.name}`, ks, parent), ty: 2, refId: assets.get(im.id)!.id, ip: run.from, op: run.to });
     }
   }
+  const events = flatEvents(anim);
   // Lottie draws the first layer on top: images front → back, then the (invisible) nulls.
   const lottie = {
     v: '5.7.0',
@@ -173,6 +176,8 @@ export function exportLottie(project: Project, animName: string, skinName: strin
     assets: [...assets.values()],
     layers: [...imageLayers.reverse(), ...nulls],
     meta: { g: 'Rigsmith Lottie subset exporter 1', origin: [geo.originX, geo.originY], loop: anim.loop },
+    // Timeline events as Lottie markers (cm = event name, or name|payload).
+    ...(events.length ? { markers: events.map((e) => ({ tm: e.time * fps, cm: e.payload !== undefined ? `${e.name}|${e.payload}` : e.name, dr: 0 })) } : {}),
   };
   return { ok: true, lottie, diagnostics };
 }

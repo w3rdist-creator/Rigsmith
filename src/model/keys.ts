@@ -29,15 +29,18 @@ export type LaneInfo =
   | { kind: 'bone'; id: string; channel: Channel }
   | { kind: 'slot'; id: string; channel: SlotChannel }
   | { kind: 'constraint'; id: string; channel: ConstraintChannel }
-  | { kind: 'draw' };
+  | { kind: 'draw' }
+  | { kind: 'event'; name: string };
 
 export const boneLane = (boneId: string, ch: Channel) => `b:${boneId}:${ch}`;
 export const slotLane = (attId: string, ch: SlotChannel) => `s:${attId}:${ch}`;
 export const constraintLane = (id: string, ch: ConstraintChannel) => `c:${id}:${ch}`;
 export const DRAW_LANE = 'd';
+export const eventLane = (name: string) => `e:${name}`;
 
 export function parseLane(lane: string): LaneInfo | null {
   if (lane === DRAW_LANE) return { kind: 'draw' };
+  if (lane.startsWith('e:')) return lane.length > 2 ? { kind: 'event', name: lane.slice(2) } : null;
   const m = /^([bsc]):(.+):([a-z]+)$/.exec(lane);
   if (!m) return null;
   const [, k, id, ch] = m;
@@ -54,6 +57,11 @@ export function laneKeys(anim: Animation, lane: string, create = false): TimedKe
   if (info.kind === 'draw') {
     if (!anim.drawOrder && create) anim.drawOrder = [];
     return anim.drawOrder;
+  }
+  if (info.kind === 'event') {
+    if (!anim.events && create) anim.events = {};
+    if (anim.events && !anim.events[info.name] && create) anim.events[info.name] = [];
+    return anim.events?.[info.name];
   }
   if (info.kind === 'bone') {
     let tr: BoneTrack | undefined = anim.tracks[info.id];
@@ -81,6 +89,7 @@ export function allLanes(anim: Animation): string[] {
   for (const [id, tr] of Object.entries(anim.slots ?? {})) for (const ch of SLOT_CHANNELS) if (tr[ch]?.length) out.push(slotLane(id, ch));
   for (const [id, tr] of Object.entries(anim.constraints ?? {})) for (const ch of ['mix', 'position', 'angle'] as const) if (tr[ch]?.length) out.push(constraintLane(id, ch));
   if (anim.drawOrder?.length) out.push(DRAW_LANE);
+  for (const [name, ks] of Object.entries(anim.events ?? {})) if (ks.length) out.push(eventLane(name));
   return out;
 }
 

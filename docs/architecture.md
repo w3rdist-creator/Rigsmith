@@ -110,6 +110,7 @@ files that declare version 1 but contain v2 fields, and versions newer than 2.
 |---|---|
 | `Key.interp: "bezier"` + `Key.curve: [x1,y1,x2,y2]` | cubic easing of the segment leaving the key; x in [0,1], y unbounded (overshoot/anticipation); `curve` only on bezier keys |
 | v3: `Key.interpY` (+ `Key.curveY` when bezier) | translate keys only: the y component's own easing (x keeps `interp`/`curve`); editor: Curve ▸ Separate Y and the axis menu; Lottie refuses it |
+| v3: `Animation.events: {name: [{time, payload?}]}` | timeline events (named cues for the game); one timeline lane per name (`e:<name>`), so copy/paste/nudge/delete work as on other lanes; editor: timeline name field + ◆ Event, selected-event name/payload fields; runtime: flat `events` list |
 | `Attachment.hidden` | hidden in the setup pose (visibility keys can show it) |
 | `Animation.slots[attId].visible / opacity / image` | slot keys: visibility `[0|1]` (stepped), opacity `[0..1]` (interpolated), image swaps `{time, imageId}` (stepped) |
 | `Animation.drawOrder: [{time, order: [attId…]}]` | stepped draw-order keys; each `order` lists every attachment exactly once |

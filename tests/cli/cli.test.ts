@@ -212,7 +212,7 @@ describe('clip specs (R6)', () => {
     assert.match(yaml.json.errors[0], /line 2: .*anchors/);
   });
 
-  it('key / deform-key / draw-order / constraint-key add one key each through the same applier', () => {
+  it('key / deform-key / draw-order / constraint-key / event add one key each through the same applier', () => {
     const out = path.join(OUT, 'k.rig.json');
     const steps: string[][] = [
       ['key', RIG, '--anim', 'wave', '--bone', 'torso', '--channel', 'rotate', '--at', '10', '--value', '-70', '--ease', 'ease-out'],
@@ -222,6 +222,8 @@ describe('clip specs (R6)', () => {
       ['deform-key', out, '--anim', 'wave', '--att', 'band', '--at', '20', '--rest'],
       ['draw-order', out, '--anim', 'wave', '--at', '20', '--move', 'band', '--to', 'front'],
       ['constraint-key', out, '--anim', 'wave', '--constraint', 'lower-ik', '--channel', 'mix', '--at', '25', '--value', '0.2'],
+      ['event', out, '--anim', 'wave', '--at', '6', '--name', 'prop_flash', '--payload', '3'],
+      ['event', out, '--anim', 'wave', '--at', '0.5s', '--name', 'sfx:win', '--payload', 'big'],
     ];
     for (const s of steps) assert.equal(cli(...s, '--out', out).code, 0, s.join(' '));
     const r = parseProject(readFileSync(out, 'utf8'));
@@ -233,6 +235,8 @@ describe('clip specs (R6)', () => {
     assert.deepEqual(w.slots!.a_upper.image!.at(-1), { time: 25 / 30, imageId: 'i_arm' });
     assert.deepEqual(w.drawOrder!.at(-1)!.order.at(-1), 'a_band');
     assert.deepEqual(w.constraints!.ik_arm.mix!.at(-1)!.value, [0.2]);
+    assert.deepEqual(w.events, { prop_flash: [{ time: 0.2, payload: 3 }], 'sfx:win': [{ time: 0.5, payload: 'big' }] });
+    assert.equal(r.project.version, 3);
     const miss = cli('key', RIG, '--anim', 'nope', '--bone', 'torso', '--channel', 'rotate', '--at', '1', '--value', '1', '--out', path.join(OUT, 'k2.rig.json'));
     assert.equal(miss.code, 1);
     assert.match(miss.json.errors[0], /No animation named “nope” to add keys to/);

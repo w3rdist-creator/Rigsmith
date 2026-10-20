@@ -58,6 +58,13 @@ const copy = <T>(v: T): T => (Array.isArray(v) ? (v.slice() as T) : v);
 const keys = (ks: RuntimeKey[] | undefined): Key[] =>
   (ks ?? []).map((k) => ({ time: k.time, value: copy(k.value), interp: k.interp, ...(k.curve ? { curve: copy(k.curve) as Key['curve'] } : {}), ...(k.interpY ? { interpY: k.interpY } : {}), ...(k.curveY ? { curveY: copy(k.curveY) as Key['curve'] } : {}) }));
 
+/** Runtime events (flat, by time) → the editor's per-name lists. */
+function groupEvents(list: { time: number; name: string; payload?: string | number }[]): NonNullable<Animation['events']> {
+  const out: NonNullable<Animation['events']> = {};
+  for (const e of list) (out[e.name] ??= []).push({ time: e.time, ...(e.payload !== undefined ? { payload: e.payload } : {}) });
+  return out;
+}
+
 function convertRuntime(raw: unknown): Project {
   const rt = raw as RuntimeExport;
   if (!rt || typeof rt !== 'object' || rt.format !== RUNTIME_FORMAT_ID) throw new RuntimeError('Not a rigsmith.runtime file.');
@@ -117,6 +124,7 @@ function convertRuntime(raw: unknown): Project {
       ...(Object.keys(slots).length ? { slots } : {}),
       ...(an.drawOrder?.length ? { drawOrder: an.drawOrder.map((k) => ({ time: k.time, order: k.order.map((n) => need(attNames, n, 'attachment')) })) } : {}),
       ...(Object.keys(constraints).length ? { constraints } : {}),
+      ...(an.events?.length ? { events: groupEvents(an.events) } : {}),
     };
   });
   const project: Project = { format: FORMAT_ID, version: rt.version === 3 ? 3 : 2, name: rt.name, bones, images, attachments, animations };

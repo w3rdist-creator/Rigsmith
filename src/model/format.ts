@@ -30,8 +30,9 @@ import type {
   SlotTrack,
   TransformConstraint,
   VertexWeights,
+  EventKey,
 } from './types.ts';
-import { BLEND_MODES, CHANNEL_ARITY, CHANNELS, FORMAT_ID, FORMAT_VERSION, FRAME_MAX_SIDE, INTERPS, SEQUENCE_MAX_REPEAT } from './types.ts';
+import { BLEND_MODES, CHANNEL_ARITY, CHANNELS, EVENT_NAME, FORMAT_ID, FORMAT_VERSION, FRAME_MAX_SIDE, INTERPS, SEQUENCE_MAX_REPEAT } from './types.ts';
 
 export type ParseResult = { ok: true; project: Project; warnings: string[] } | { ok: false; errors: string[] };
 
@@ -83,6 +84,7 @@ export function v3Features(p: Project): string[] {
     if (an.constraints && Object.values(an.constraints).some((c) => c.angle?.length)) f.add('constraint angle keys');
     if (an.slots && Object.values(an.slots).some((s) => s.color?.length)) f.add('colour keys');
     if (Object.values(an.tracks).some((tr) => tr.translate.some((k) => k.interpY))) f.add('per-axis translate easing');
+    if (Object.values(an.events ?? {}).some((ks) => ks.length)) f.add('timeline events');
   }
   return [...f];
 }
@@ -128,6 +130,12 @@ function writeAnimation(an: Animation): Animation {
     if (Object.keys(t).length) cons[id] = t;
   }
   if (Object.keys(cons).length) out.constraints = cons;
+  const events: Record<string, EventKey[]> = {};
+  for (const name of Object.keys(an.events ?? {}).sort()) {
+    const ks = an.events![name];
+    if (ks.length) events[name] = ks.map((k) => (k.payload !== undefined ? { time: k.time, payload: k.payload } : { time: k.time }));
+  }
+  if (Object.keys(events).length) out.events = events;
   return out;
 }
 
@@ -731,6 +739,41 @@ export function validateProject(raw: unknown): ParseResult {
           cons[cid] = ct;
         }
         anim.constraints = cons;
+      }
+    }
+    if (an.events !== undefined) {
+      v3only('timeline events', w);
+      if (!isObj(an.events)) c.fail(`${w}.events must be an object of event name → keys`);
+      else {
+        const events: Record<string, EventKey[]> = {};
+        for (const [name, list] of Object.entries(an.events)) {
+          const ew = `${w}.events["${name}"]`;
+          if (!EVENT_NAME.test(name)) c.fail(`${ew}: event names are 1–64 letters, digits and _ . : -`);
+          if (!Array.isArray(list)) {
+            c.fail(`${ew} must be an array`);
+            continue;
+          }
+          const keys: EventKey[] = [];
+          list.forEach((k, ki) => {
+            const kw = `${ew}[${ki}]`;
+            if (!isObj(k)) return c.fail(`${kw} must be an object`);
+            const time = c.num(k, 'time', kw);
+            if (time < 0) c.fail(`${kw}.time must not be negative`);
+            const key: EventKey = { time };
+            if (k.payload !== undefined) {
+              if (typeof k.payload === 'string' ? k.payload.length > 256 : !isFiniteNum(k.payload)) c.fail(`${kw}.payload must be a string (at most 256 characters) or a finite number`);
+              else key.payload = k.payload as string | number;
+            }
+            keys.push(key);
+          });
+          let prev = -Infinity;
+          for (const k of keys) {
+            if (k.time <= prev) c.fail(`${ew} keys must be sorted by strictly increasing time`);
+            prev = k.time;
+          }
+          events[name] = keys;
+        }
+        anim.events = events;
       }
     }
     animations.push(anim);

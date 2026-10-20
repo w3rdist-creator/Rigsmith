@@ -99,6 +99,9 @@ export function resolvePortable(project: Project, pc: PortableClipboard): Resolv
     } else if (info?.kind === 'constraint') {
       const id = con(info.id);
       lane = id && constraintLane(id, info.channel);
+    } else if (info?.kind === 'event') {
+      // Events are named, not id'd: the lane carries over as is.
+      lane = it.lane;
     } else if (info?.kind === 'draw') {
       lane = DRAW_LANE;
       const order = (key as DrawOrderKey).order.flatMap((id) => {

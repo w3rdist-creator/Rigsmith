@@ -15,6 +15,7 @@ import { v3Features } from './format.ts';
 import { angleOf, round } from './math.ts';
 import { hasInheritFlags, topoOrder } from './skeleton.ts';
 import type { Curve, Interp, Key, PathNode, Project } from './types.ts';
+import { flatEvents } from './events.ts';
 
 export const RUNTIME_FORMAT_ID = 'rigsmith.runtime';
 export const RUNTIME_FORMAT_VERSION = 3;
@@ -72,6 +73,8 @@ export interface RuntimeExport {
     slots: Record<string, { visible?: RuntimeKey[]; opacity?: RuntimeKey[]; image?: { time: number; image: string }[]; deform?: RuntimeKey[]; color?: RuntimeKey[] }>;
     /** v2: attachment names back→front. */
     drawOrder: { time: number; order: string[] }[];
+    /** v3: timeline events sorted by time, then name (absent when the clip has none). */
+    events?: { time: number; name: string; payload?: string | number }[];
     /** v2: by constraint name. */
     constraints: Record<string, { mix?: RuntimeKey[]; position?: RuntimeKey[]; angle?: RuntimeKey[] }>;
     /** baked[boneName][frame] = [worldX, worldY, worldRotationDeg, worldScaleX, worldScaleY] (after IK/path/transform constraints) */
@@ -216,7 +219,8 @@ export function exportRuntime(project: Project): RuntimeExport {
         constraints[n] = { ...(ct.mix?.length ? { mix: conv(ct.mix) } : {}), ...(ct.position?.length ? { position: conv(ct.position) } : {}), ...(ct.angle?.length ? { angle: conv(ct.angle) } : {}) };
       }
       const drawOrder = (anim.drawOrder ?? []).map((k) => ({ time: k.time, order: k.order.map((id) => attName.get(id) ?? id) }));
-      return { name: anim.name, duration: anim.duration, fps: anim.fps, loop: anim.loop, frames, keys, slots, drawOrder, constraints, baked, ...(slotted ? { bakedSlots } : {}), ...(meshed.length ? { bakedMeshes } : {}) };
+      const events = flatEvents(anim);
+      return { name: anim.name, duration: anim.duration, fps: anim.fps, loop: anim.loop, frames, keys, slots, drawOrder, constraints, ...(events.length ? { events } : {}), baked, ...(slotted ? { bakedSlots } : {}), ...(meshed.length ? { bakedMeshes } : {}) };
     }),
   };
 }

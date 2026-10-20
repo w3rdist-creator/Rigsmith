@@ -242,7 +242,7 @@ export class Editor {
     // Keep selected keys that belong to the newly selected item; drop the rest.
     const owner = (r: KeyRef) => {
       const info = parseLane(r.lane);
-      if (!info || info.kind === 'draw') return null;
+      if (!info || info.kind === 'draw' || info.kind === 'event') return null;
       return { kind: info.kind === 'bone' ? 'bone' : info.kind === 'slot' ? 'attachment' : 'constraint', id: info.id };
     };
     if (sel?.kind === 'path' && (this.selection?.kind !== 'path' || this.selection.id !== sel.id)) this.pathNode = 0;

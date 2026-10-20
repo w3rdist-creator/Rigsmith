@@ -202,7 +202,7 @@ describe('authoring', () => {
     assert.deepEqual(a.constraints!.ik_arm.mix!.map((k) => k.value[0]), [1, 0]);
   });
 
-  it('merge adds keys to an existing animation; create refuses an existing name; events are reserved', () => {
+  it('merge adds keys to an existing animation; create refuses an existing name; events are keyed', () => {
     const p = richProject();
     const m = applyClip(p, { name: 'wave', bones: { f1: { rotate: [[5, 10]] } } }, 'merge');
     assert.ok(m.ok);
@@ -214,7 +214,7 @@ describe('authoring', () => {
     const c = applyClip(p, { name: 'wave', length: 30, bones: {} });
     assert.ok(!c.ok && /exists; apply with replace/.test(c.errors[0]));
     const e = applyClip(p, author({ events: [{ at: 1, name: 'x' }] }));
-    assert.ok(!e.ok && /reserved/.test(e.errors[0]));
+    assert.ok(e.ok && e.project.animations.find((a) => a.id === e.animId)!.events!.x[0].time === 1 / 30, 'events (R7)');
   });
 });
 

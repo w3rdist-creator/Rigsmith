@@ -49,6 +49,7 @@ rounded.
     "slots": { "<attachment>": { "visible": [Key], "opacity": [Key], "image": [{ "time", "image" }], "deform": [Key],
                                 "color": [Key] } },                       // v2; color v3, value [r, g, b, a] 0..1
     "drawOrder": [{ "time", "order": ["<attachment>", …] }],                                          // v2
+    "events"?: [{ "time", "name", "payload"?: "<text>" | <number> }],                                // v3: by time, then name
     "constraints": { "<constraint>": { "mix": [Key], "position": [Key], "angle": [Key] } },           // v2; angle v3
     "baked": { "<bone>": [[worldX, worldY, worldRotationDeg, worldScaleX, worldScaleY], …] },
     "bakedSlots": [[{ "attachment", "visible", "opacity", "image", "color"? }, …], …],   // only with slot / draw-order keys; color only when not white
@@ -77,7 +78,7 @@ Baked data lets a consumer play without an interpolator: `frames` samples at `i 
 Bakes ignore skins and mixes (evaluate from keys for those).
 
 **Version 3** is version 2 plus `transformConstraints`, `angle` constraint keys, bone
-`inherit` flags, attachment `blend` and `color`, slot `color` keys, mesh `alphas`, mesh `bind` and translate keys' `interpY`/`curveY`
+`inherit` flags, attachment `blend` and `color`, slot `color` keys, mesh `alphas`, mesh `bind`, translate keys' `interpY`/`curveY` and animation `events`
 (rules: `docs/architecture.md` → Transform constraints, Inherit flags, Blend, tint and
 vertex alpha). It is written only when the rig uses them; a v2-only consumer can still
 play a v3 file's `baked` data, which already includes the constraints (but must draw the
@@ -255,3 +256,15 @@ Limits: Canvas2D only (no WebGL path); verified in headless Chrome for Testing o
 skin at a time (no skin composition); transitions in the player are a single A → B
 crossfade (the editor's preview also does interruptions); the player has no event,
 audio or physics support (the editor has none either).
+
+## Timeline events (v3)
+
+`animations[].events` lists named cues — a sound, a flash, a particle burst — at times in
+the clip, sorted by time then name, each with an optional `payload` (text, or a number).
+A player fires an event when playback passes its time: the events with
+`previous < time ≤ now`, starting from −1 so time-0 events fire. When a looping clip wraps,
+it fires the rest of the old pass, then the new pass from 0. An event at exactly the
+duration fires once, at the wrap. `src/model/events.ts` (`eventsBetween`) implements this,
+and the reference player (`player.html`) lists what it fires. Events do not change any
+pose, so `baked` data is unaffected. Sequence exports list the events in their range in
+`sequence.json` (`frame` = round(time · fps)); Lottie exports write them as markers.

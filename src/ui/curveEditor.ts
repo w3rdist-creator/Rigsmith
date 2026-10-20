@@ -41,7 +41,7 @@ export class CurveEditor {
     if (!keys || i < 0 || !('interp' in keys[i])) return null;
     const info = parseLane(ref.lane);
     const owner = info && info.kind === 'bone' ? ed.project.bones.find((b) => b.id === info.id)?.name : info && info.kind === 'slot' ? ed.project.attachments.find((a) => a.id === info.id)?.name : info && info.kind === 'constraint' ? info.id : 'key';
-    const ch = info && info.kind !== 'draw' ? info.channel : '';
+    const ch = info && info.kind !== 'draw' && info.kind !== 'event' ? info.channel : '';
     return { key: keys[i] as Key, next: keys[i + 1], label: `${owner ?? ''} ${ch}`, translate: info?.kind === 'bone' && info.channel === 'translate' };
   }
 

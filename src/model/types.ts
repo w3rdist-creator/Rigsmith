@@ -175,6 +175,19 @@ export interface DrawOrderKey {
   order: string[];
 }
 
+/**
+ * v3: a timeline event — a named cue (sound, flash, particle burst) at a moment of the
+ * clip, for the game to act on. Stored per name (Animation.events), so each name is a lane.
+ */
+export interface EventKey {
+  time: number;
+  /** Optional data for the handler (e.g. an SFX id or a strength). */
+  payload?: string | number;
+}
+
+/** Event names: letters, digits and _ . : - (e.g. prop_flash, sfx:win_small). */
+export const EVENT_NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
+
 /** v2: animated attachment ("slot") properties. */
 export interface SlotTrack {
   /** value [1] shown / [0] hidden; always stepped. */
@@ -213,6 +226,8 @@ export interface Animation {
   drawOrder?: DrawOrderKey[];
   /** v2: keyed by IK or path constraint id. */
   constraints?: Record<string, ConstraintTrack>;
+  /** v3: timeline events by event name, each list sorted by time. */
+  events?: Record<string, EventKey[]>;
 }
 
 /** v2: one- or two-bone IK. bones = [bone] or [parent, child]; target is any other bone. */

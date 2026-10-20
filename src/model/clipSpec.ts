@@ -23,7 +23,7 @@
 //            color: [[0, "#ffffffff"]], deform: [{at: 0, value: rest}]}
 //   drawOrder: [{at: 10, move: glow, to: front}, {at: 20, move: glow, below: body}, {at: 25, order: [a, b, c]}]
 //   constraints: {arm_ik: {mix: [[0, 1], [10, 0]]}}
-//   events: []                   # reserved for R7 (timeline events); must be empty for now
+//   events: [[6, prop_flash], [12, sfx, win_small], {at: "0.9s", name: burst, payload: 3}]
 //
 // Times (`at`, `length`): a number is a frame (time = frame / fps); "0.125s" is seconds.
 // Eases: linear, step, smooth, a curve preset name (ease-in, ease-out, ease-in-out,
@@ -39,7 +39,8 @@ import { formatColor, parseColor } from './color.ts';
 import { insertSorted, findKeyIndex } from './animation.ts';
 import { parseProject, serializeProject } from './format.ts';
 import type { Animation, Bone, Channel, ConstraintTrack, Curve, DrawOrderKey, ImageKey, Interp, Key, Project, SlotTrack } from './types.ts';
-import { cloneProject, emptyTrack } from './types.ts';
+import { EVENT_NAME, cloneProject, emptyTrack } from './types.ts';
+import { flatEvents } from './events.ts';
 import { parseYaml, stringifyYaml } from './yamlLite.ts';
 import type { YamlValue } from './yamlLite.ts';
 
@@ -424,7 +425,6 @@ export function applyClip(project: Project, spec: ClipSpec, mode: ClipMode = 'cr
   for (const k of Object.keys(spec)) if (!TOP_KEYS.has(k)) errors.push(`unknown top-level field “${k}”`);
   if (spec.format !== undefined && spec.format !== CLIP_FORMAT) errors.push(`format must be ${CLIP_FORMAT}`);
   if (spec.version !== undefined && spec.version !== 1) errors.push('version must be 1');
-  if (spec.events !== undefined && !(Array.isArray(spec.events) && spec.events.length === 0)) errors.push('events: reserved for timeline events (R7); leave it empty');
   if (typeof spec.name !== 'string' || !spec.name.trim()) errors.push('name: the animation name is required');
   if (errors.length) return { ok: false, errors };
   const name = spec.name as string;
@@ -511,6 +511,7 @@ export function applyClip(project: Project, spec: ClipSpec, mode: ClipMode = 'cr
       }
   }
   applyDrawOrder(spec, anim, ctx);
+  applyEvents(spec, anim, ctx);
   // Constraints.
   if (spec.constraints !== undefined) {
     if (!isObj(spec.constraints)) errors.push('constraints: must be a map of constraint names');
@@ -546,6 +547,27 @@ export function applyClip(project: Project, spec: ClipSpec, mode: ClipMode = 'cr
   return { ok: true, project: p, animId: anim.id, keys: countKeys(anim), created: !existing };
 }
 
+/** events: [at, name, payload?] or {at, name, payload?}; a name + time pair is one key. */
+function applyEvents(spec: ClipSpec, anim: Animation, ctx: Ctx): void {
+  if (spec.events === undefined) return;
+  if (!Array.isArray(spec.events)) return void ctx.errors.push('events: must be a list of [at, name, payload?]');
+  spec.events.forEach((raw, i) => {
+    const w = `events[${i}]`;
+    let at: YamlValue | undefined, name: YamlValue | undefined, payload: YamlValue | undefined;
+    if (Array.isArray(raw) && (raw.length === 2 || raw.length === 3)) [at, name, payload] = raw;
+    else if (isObj(raw)) {
+      for (const k of Object.keys(raw)) if (!['at', 'name', 'payload'].includes(k)) ctx.errors.push(`${w}: unknown field “${k}”`);
+      ({ at, name, payload } = raw);
+    } else return void ctx.errors.push(`${w}: an event is [at, name, payload?] or {at, name, payload?}`);
+    const time = readTime(at, `${w}.at`, ctx);
+    if (typeof name !== 'string' || !EVENT_NAME.test(name)) return void ctx.errors.push(`${w}: event names are 1–64 letters, digits and _ . : - (got ${JSON.stringify(name)})`);
+    if (payload !== undefined && !(typeof payload === 'string' ? payload.length <= 256 : isNum(payload))) return void ctx.errors.push(`${w}: payload is a string (at most 256 characters) or a number`);
+    if (time === null) return;
+    anim.events ??= {};
+    put((anim.events[name] ??= []), { time, ...(payload !== undefined ? { payload: payload as string | number } : {}) });
+  });
+}
+
 function readImageKeys(list: YamlValue | undefined, w: string, ctx: Ctx, dest: ImageKey[]): void {
   if (!Array.isArray(list)) return void ctx.errors.push(`${w}: must be a list of [at, image]`);
   list.forEach((raw, i) => {
@@ -564,6 +586,7 @@ function countKeys(a: Animation): number {
   for (const tr of Object.values(a.tracks)) for (const ch of BONE_CHANNELS) n += tr[ch].length;
   for (const st of Object.values(a.slots ?? {})) for (const ch of SLOT_CH) n += st[ch]?.length ?? 0;
   for (const ct of Object.values(a.constraints ?? {})) for (const ch of CON_CH) n += ct[ch]?.length ?? 0;
+  for (const ks of Object.values(a.events ?? {})) n += ks.length;
   return n;
 }
 
@@ -662,6 +685,8 @@ export function exportClip(project: Project, animId: string): ClipSpec {
     if (Object.keys(chs).length) ctOut[c.name] = chs;
   }
   if (Object.keys(ctOut).length) spec.constraints = ctOut;
+  const events = flatEvents(anim);
+  if (events.length) spec.events = events.map((e) => (e.payload !== undefined ? [time(e.time), e.name, e.payload] : [time(e.time), e.name]));
   return spec;
 }
 

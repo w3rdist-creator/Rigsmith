@@ -187,6 +187,7 @@ button.transport.play.on { background: var(--animate); border-color: var(--anima
 .key.ch-translate { background: var(--translate); color: var(--translate); }
 .key.ch-rotate { background: var(--rotate); color: var(--rotate); }
 .key.ch-scale { background: var(--scale); color: var(--scale); }
+.key.ch-event { background: #f72585; color: #f72585; border-radius: 1px; }
 .key.current { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35); }
 .key.selected { border-color: white; box-shadow: 0 0 0 2px var(--accent); z-index: 2; }
 .key.beyond { opacity: 0.35; }
