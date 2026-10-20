@@ -61,7 +61,7 @@ const keys = (ks: RuntimeKey[] | undefined): Key[] =>
 function convertRuntime(raw: unknown): Project {
   const rt = raw as RuntimeExport;
   if (!rt || typeof rt !== 'object' || rt.format !== RUNTIME_FORMAT_ID) throw new RuntimeError('Not a rigsmith.runtime file.');
-  if ((rt.version as number) !== 1 && rt.version !== 2) throw new RuntimeError(`Unsupported runtime version ${rt.version}.`);
+  if ((rt.version as number) !== 1 && rt.version !== 2 && rt.version !== 3) throw new RuntimeError(`Unsupported runtime version ${rt.version}.`);
   if (!Array.isArray(rt.bones) || !Array.isArray(rt.attachments) || !Array.isArray(rt.animations)) throw new RuntimeError('Runtime file is missing bones, attachments or animations.');
   const boneNames = new Set(rt.bones.map((b) => b.name));
   const need = (set: Set<string>, n: string, what: string) => {
@@ -103,7 +103,7 @@ function convertRuntime(raw: unknown): Project {
       };
     }
     const constraints: NonNullable<Animation['constraints']> = {};
-    for (const [n, ct] of Object.entries(an.constraints ?? {})) constraints[n] = { ...(ct.mix ? { mix: keys(ct.mix) } : {}), ...(ct.position ? { position: keys(ct.position) } : {}) };
+    for (const [n, ct] of Object.entries(an.constraints ?? {})) constraints[n] = { ...(ct.mix ? { mix: keys(ct.mix) } : {}), ...(ct.position ? { position: keys(ct.position) } : {}), ...(ct.angle ? { angle: keys(ct.angle) } : {}) };
     return {
       id: an.name,
       name: an.name,
@@ -116,12 +116,19 @@ function convertRuntime(raw: unknown): Project {
       ...(Object.keys(constraints).length ? { constraints } : {}),
     };
   });
-  const project: Project = { format: FORMAT_ID, version: 2, name: rt.name, bones, images, attachments, animations };
+  const project: Project = { format: FORMAT_ID, version: rt.version === 3 ? 3 : 2, name: rt.name, bones, images, attachments, animations };
   if (rt.ik?.length) project.ik = rt.ik.map((k) => ({ id: k.name, name: k.name, bones: k.bones.map((b) => need(boneNames, b, 'IK bone')), target: need(boneNames, k.target, 'IK target'), mix: k.mix, bendPositive: k.bendPositive }));
   if (rt.paths?.length) project.paths = rt.paths.map((p) => ({ id: p.name, name: p.name, boneId: p.bone === null ? null : need(boneNames, p.bone, 'path bone'), closed: p.closed, nodes: p.nodes.map((n) => ({ ...n })) }));
   const pathNames = new Set((project.paths ?? []).map((p) => p.id));
   if (rt.pathConstraints?.length)
     project.pathConstraints = rt.pathConstraints.map((c) => ({ id: c.name, name: c.name, pathId: need(pathNames, c.path, 'path'), bones: c.bones.map((b) => need(boneNames, b, 'path bone')), position: c.position, spacing: c.spacing, mix: c.mix, rotate: c.rotate, rotateOffset: c.rotateOffset }));
+  if (rt.transformConstraints?.length)
+    project.transformConstraints = rt.transformConstraints.map((c) => ({
+      id: c.name, name: c.name, kind: c.kind, bone: need(boneNames, c.bone, 'constrained bone'), factor: c.factor, angle: c.angle, mix: c.mix,
+      ...(c.kind === 'rotation'
+        ? { source: need(boneNames, c.source ?? '', 'source bone'), ...(c.mitre ? { mitre: { ...c.mitre } } : {}) }
+        : { relativeTo: c.relativeTo ? need(boneNames, c.relativeTo, 'aim reference bone') : null }),
+    }));
   if (rt.skins?.length)
     project.skins = rt.skins.map((s) => ({ id: s.name, name: s.name, entries: s.entries.map((e) => ({ attachmentId: need(attNames, e.attachment, 'attachment'), imageId: need(imageNames, e.image, 'image'), ...(e.from ? { from: need(imageNames, e.from, 'image') } : {}) })) }));
   const animNames = new Set(animations.map((a) => a.id));

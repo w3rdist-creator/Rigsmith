@@ -36,6 +36,7 @@ read-only test probe.
 | `set-mix <project> --from A --to B --duration S\|none --out p2` | no | stores or removes a mix rule |
 | `mesh <project> --att A --grid CxR --out p2` | no | replaces A's image with a triangulated C×R grid mesh (rigid until weighted) |
 | `weights <project> --att A --out p2` + one of `--auto b1,b2 [--max-influences N]` · `--along upper,lower --band inner/outer [--side ±1] [--helper bone] [--end bone:at:band:max] [--root bone:from:to]` · `--mirror-from A2 --swap _l=_r`, and/or `[--smooth N] [--smooth-amount a]` | no | sets A's mesh weights (see below) |
+| `constrain <project> --bone B --out p2` + one of `--copy-rotation SRC [--factor 0.5] [--offset 0] [--mitre k:max]` · `--aim deg\|hold [--relative-to bone]`, and `[--name n] [--mix 1]` | no | adds a transform constraint (file becomes v3) |
 
 Authoring commands validate the result with the editor's reader before writing and
 never modify their input file unless `--out` names it.
@@ -86,6 +87,10 @@ then only uses CLI commands: `add-image` ×15, `skin` ×3, `set-mix`, `validate`
 on this Chrome for Testing build (other Chrome builds may encode PNG bytes differently).
 
 ## Verified by
+
+`npm test` (`tests/unit/transform-constraints.test.ts`): `constrain` as a subprocess — a mitred
+half-angle helper and a held aim written as v3 exactly as requested; usage errors exit 2,
+invalid requests exit 1, nothing written on failure.
 
 `npm test` (`tests/unit/limb-weights.test.ts`): `mesh` / `weights` as subprocesses — the
 limb → mirror → smooth chain equals the model functions exactly; usage errors exit 2,

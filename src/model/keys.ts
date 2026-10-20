@@ -3,7 +3,7 @@
 //
 // Lane ids:  b:<boneId>:<translate|rotate|scale>   bone channels
 //            s:<attachmentId>:<visible|opacity|image|deform>   slot (attachment) channels
-//            c:<constraintId>:<mix|position>      constraint channels
+//            c:<constraintId>:<mix|position|angle> constraint channels
 //            d                                    draw order
 //
 // Collision policy (deterministic): when moved or pasted keys land on a frame that
@@ -43,7 +43,7 @@ export function parseLane(lane: string): LaneInfo | null {
   const [, k, id, ch] = m;
   if (k === 'b' && (CHANNELS as readonly string[]).includes(ch)) return { kind: 'bone', id, channel: ch as Channel };
   if (k === 's' && (SLOT_CHANNELS as readonly string[]).includes(ch)) return { kind: 'slot', id, channel: ch as SlotChannel };
-  if (k === 'c' && (ch === 'mix' || ch === 'position')) return { kind: 'constraint', id, channel: ch };
+  if (k === 'c' && (ch === 'mix' || ch === 'position' || ch === 'angle')) return { kind: 'constraint', id, channel: ch };
   return null;
 }
 
@@ -79,7 +79,7 @@ export function allLanes(anim: Animation): string[] {
   const out: string[] = [];
   for (const [id, tr] of Object.entries(anim.tracks)) for (const ch of CHANNELS) if (tr[ch].length) out.push(boneLane(id, ch));
   for (const [id, tr] of Object.entries(anim.slots ?? {})) for (const ch of SLOT_CHANNELS) if (tr[ch]?.length) out.push(slotLane(id, ch));
-  for (const [id, tr] of Object.entries(anim.constraints ?? {})) for (const ch of ['mix', 'position'] as const) if (tr[ch]?.length) out.push(constraintLane(id, ch));
+  for (const [id, tr] of Object.entries(anim.constraints ?? {})) for (const ch of ['mix', 'position', 'angle'] as const) if (tr[ch]?.length) out.push(constraintLane(id, ch));
   if (anim.drawOrder?.length) out.push(DRAW_LANE);
   return out;
 }

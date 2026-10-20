@@ -5,7 +5,7 @@ independent formats; this is not a Spine, Lottie or other third-party runtime.
 
 | File | Produced by | Contents |
 |---|---|---|
-| `<name>.runtime.json` (`rigsmith.runtime`, version 2) | toolbar **Export data** (`export-runtime`), `node scripts/rigsmith.ts runtime` | rig, keys, constraints, meshes, skins, mixes; baked per-frame data |
+| `<name>.runtime.json` (`rigsmith.runtime`, version 2; 3 when the rig has transform constraints) | toolbar **Export data** (`export-runtime`), `node scripts/rigsmith.ts runtime` | rig, keys, constraints, meshes, skins, mixes; baked per-frame data |
 | `<name>-atlas.zip` → `<name>.atlas.json` (`rigsmith.atlas`, version 1) + `<name>-<n>.png` | toolbar **Export atlas…** (`export-atlas`), `node scripts/rigsmith.ts atlas` | packed texture pages and regions |
 | `dist/player.html` | `npm run build` | reference player: loads the two files above (or loose images) |
 
@@ -33,6 +33,9 @@ rounded.
   "ik": [{ "name", "bones": ["upper", "lower"], "target": "bone", "mix", "bendPositive" }],           // v2
   "paths": [{ "name", "bone": null | "name", "closed", "nodes": [{ "x", "y", "inX", "inY", "outX", "outY" }] }], // v2
   "pathConstraints": [{ "name", "path", "bones": [], "position", "spacing", "mix", "rotate", "rotateOffset" }],  // v2
+  "transformConstraints": [{ "name", "kind": "rotation" | "aim", "bone", "factor", "angle", "mix",          // v3 only
+      "source"?: "bone", "mitre"?: { "k", "max" },   // rotation
+      "relativeTo"?: null | "bone" }],                 // aim
   "skins": [{ "name": "alt", "entries": [{ "attachment", "image", "from"?: "keyed image" }] }],      // v2
   "mixes": [{ "from": "wave", "to": "rest", "duration": 0.3 }],                                      // v2
   "animations": [{
@@ -40,7 +43,7 @@ rounded.
     "keys": { "<bone>": { "translate": [Key], "rotate": [Key], "scale": [Key] } },
     "slots": { "<attachment>": { "visible": [Key], "opacity": [Key], "image": [{ "time", "image" }], "deform": [Key] } }, // v2
     "drawOrder": [{ "time", "order": ["<attachment>", …] }],                                          // v2
-    "constraints": { "<constraint>": { "mix": [Key], "position": [Key] } },                           // v2
+    "constraints": { "<constraint>": { "mix": [Key], "position": [Key], "angle": [Key] } },           // v2; angle v3
     "baked": { "<bone>": [[worldX, worldY, worldRotationDeg, worldScaleX, worldScaleY], …] },
     "bakedSlots": [[{ "attachment", "visible", "opacity", "image" }, …], …],   // only with slot / draw-order keys
     "bakedMeshes": { "<attachment>": [[x0, y0, …], …] }                         // only with meshes
@@ -53,7 +56,8 @@ rounded.
 
 Evaluation rules are those of the editor (`docs/architecture.md`): local pose from keys
 (stepped channels show setup before their first key; interpolated channels hold their
-first key) → IK in array order → path constraints in array order → world matrices →
+first key) → IK in array order → path constraints in array order → transform constraints
+in array order (v3) → world matrices →
 slot state, skin, draw order → mesh vertices
 `Σ wᵢ · Wᵢ(now) · Wᵢ(setup)⁻¹ · A(setup) · (p + deform)`. Skins: an entry without `from`
 replaces the attachment's setup image wherever it shows; with `from` it replaces that keyed
@@ -62,6 +66,11 @@ image. Mixes: `docs/architecture.md` → Mixing.
 Baked data lets a consumer play without an interpolator: `frames` samples at `i / fps`
 (`frames = duration·fps` for loops, which omit the repeat of frame 0; `+1` for one-shots).
 Bakes ignore skins and mixes (evaluate from keys for those).
+
+**Version 3** is version 2 plus `transformConstraints` and `angle` constraint keys
+(rules: `docs/architecture.md` → Transform constraints). It is written only when the rig
+uses them; a v2-only consumer can still play a v3 file's `baked` data, which already
+includes the constraints.
 
 ## `rigsmith.atlas` version 1
 

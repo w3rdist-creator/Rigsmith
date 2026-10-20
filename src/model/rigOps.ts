@@ -2,11 +2,12 @@
 // draw-order keys, IK and path constraints, cutout placement and pivot editing.
 import { findKeyIndex, insertSorted, sampleKeys, setKey, snapToFrame } from './animation.ts';
 import { localRotationFor } from './constraints.ts';
+import { angleOf } from './math.ts';
 import type { Mat, Vec } from './math.ts';
 import { apply, applyLinear, identity, invert, multiply, fromTRS } from './math.ts';
 import { drawOrderAt, steppedAt } from './evaluate.ts';
 import { attachmentWorld, computeWorld, isAncestorOrSelf, localFromWorld } from './skeleton.ts';
-import type { Animation, Attachment, Bone, ImageAsset, IkConstraint, PathConstraint, PathShape, Project } from './types.ts';
+import type { Animation, Attachment, Bone, ImageAsset, IkConstraint, PathConstraint, PathShape, Project, TransformConstraint } from './types.ts';
 import { makeBone, uniqueName } from './ops.ts';
 
 // ---- Slot keys ------------------------------------------------------------------------
@@ -64,8 +65,8 @@ export function keyDrawOrder(anim: Animation, time: number, order: string[]): vo
   else insertSorted(keys, { time, order: order.slice() });
 }
 
-/** Keys a constraint's mix or a path constraint's position at time t. */
-export function keyConstraint(anim: Animation, id: string, ch: 'mix' | 'position', time: number, value: number): void {
+/** Keys a constraint's mix, a path constraint's position or a transform constraint's angle at time t. */
+export function keyConstraint(anim: Animation, id: string, ch: 'mix' | 'position' | 'angle', time: number, value: number): void {
   const t = snapToFrame(time, anim.fps);
   anim.constraints ??= {};
   const ct = (anim.constraints[id] ??= {});
@@ -127,7 +128,7 @@ function bendOf(project: Project, chain: string[]): boolean {
 }
 
 export function constraintNames(p: Project): string[] {
-  return [...(p.ik ?? []).map((k) => k.name), ...(p.pathConstraints ?? []).map((k) => k.name)];
+  return [...(p.ik ?? []), ...(p.pathConstraints ?? []), ...(p.transformConstraints ?? [])].map((k) => k.name);
 }
 
 /** Bones that may serve as the target of `ik` (not in or under its chain). */
@@ -138,7 +139,39 @@ export function validIkTargets(project: Project, chain: readonly string[]): Bone
 export function deleteConstraint(project: Project, id: string): void {
   if (project.ik) project.ik = project.ik.filter((k) => k.id !== id);
   if (project.pathConstraints) project.pathConstraints = project.pathConstraints.filter((k) => k.id !== id);
+  if (project.transformConstraints) project.transformConstraints = project.transformConstraints.filter((k) => k.id !== id);
   for (const an of project.animations) if (an.constraints) delete an.constraints[id];
+}
+
+// ---- Transform constraints -------------------------------------------------------------
+
+const wrap180 = (d: number) => ((((d + 180) % 360) + 360) % 360) - 180;
+
+/**
+ * Adds a rotation-fraction constraint: `boneId` takes `factor` of `sourceId`'s bend. The
+ * offset angle is chosen so the setup pose does not move (like adding IK).
+ */
+export function addRotationConstraint(project: Project, id: string, boneId: string, sourceId: string, factor = 0.5): TransformConstraint | null {
+  const bone = project.bones.find((b) => b.id === boneId);
+  const src = project.bones.find((b) => b.id === sourceId);
+  if (!bone || !src || bone.id === src.id) return null;
+  const w = computeWorld(project.bones);
+  const bend = wrap180(angleOf(w.get(src.id)!) - angleOf((src.parentId && w.get(src.parentId)) || identity()));
+  const tc: TransformConstraint = { id, name: uniqueName(constraintNames(project), `${bone.name}-rotation`), kind: 'rotation', bone: bone.id, source: src.id, factor, angle: bone.rotation - factor * bend, mix: 1 };
+  (project.transformConstraints ??= []).push(tc);
+  return tc;
+}
+
+/** Adds an aim constraint holding `boneId` at its current setup world angle (relative to `relativeTo`'s, if given). */
+export function addAimConstraint(project: Project, id: string, boneId: string, relativeTo: string | null = null): TransformConstraint | null {
+  const bone = project.bones.find((b) => b.id === boneId);
+  if (!bone || relativeTo === boneId || (relativeTo && !project.bones.some((b) => b.id === relativeTo))) return null;
+  const w = computeWorld(project.bones);
+  // A negative own scaleX flips the drawn axis; the constraint holds the unflipped one (see localRotationFor).
+  const angle = wrap180(angleOf(w.get(bone.id)!) + (bone.scaleX < 0 ? 180 : 0) - (relativeTo ? angleOf(w.get(relativeTo)!) : 0));
+  const tc: TransformConstraint = { id, name: uniqueName(constraintNames(project), `${bone.name}-aim`), kind: 'aim', bone: bone.id, relativeTo, factor: 1, angle, mix: 1 };
+  (project.transformConstraints ??= []).push(tc);
+  return tc;
 }
 
 // ---- Paths -------------------------------------------------------------------------------

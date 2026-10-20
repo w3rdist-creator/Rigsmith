@@ -3,16 +3,19 @@
 // per-frame baked world transforms so a consumer can play it without an interpolator.
 // Version 2 (see docs/runtime.md) keeps every version-1 field and adds what a player
 // needs to evaluate from keys alone: curves, slot / draw-order / constraint keys, IK and
-// path constraints, mesh weights, skins and mix rules. Images are referenced by name
-// (the atlas region name, or the file name).
+// path constraints, mesh weights, skins and mix rules. Version 3 adds transform
+// constraints and their angle keys; it is written only when the rig uses them, so a
+// version-2 player keeps reading every other rig. Images are referenced by name (the
+// atlas region name, or the file name).
 import { frameCount } from './animation.ts';
 import { evaluate } from './evaluate.ts';
+import { v3Features } from './format.ts';
 import { angleOf, round } from './math.ts';
 import { topoOrder } from './skeleton.ts';
 import type { Curve, Interp, Key, PathNode, Project } from './types.ts';
 
 export const RUNTIME_FORMAT_ID = 'rigsmith.runtime';
-export const RUNTIME_FORMAT_VERSION = 2;
+export const RUNTIME_FORMAT_VERSION = 3;
 
 export interface RuntimeKey {
   time: number;
@@ -24,7 +27,7 @@ export interface RuntimeKey {
 
 export interface RuntimeExport {
   format: typeof RUNTIME_FORMAT_ID;
-  version: typeof RUNTIME_FORMAT_VERSION;
+  version: 2 | typeof RUNTIME_FORMAT_VERSION;
   name: string;
   /** v2: every image an attachment, key or skin can show (name = atlas region name). */
   images: { name: string; width: number; height: number }[];
@@ -42,6 +45,8 @@ export interface RuntimeExport {
   paths: { name: string; bone: string | null; closed: boolean; nodes: PathNode[] }[];
   /** v2 */
   pathConstraints: { name: string; path: string; bones: string[]; position: number; spacing: number; mix: number; rotate: boolean; rotateOffset: number }[];
+  /** v3 (absent in v2 files): see TransformConstraint; bones by name. */
+  transformConstraints?: { name: string; kind: 'rotation' | 'aim'; bone: string; source?: string; factor: number; relativeTo?: string | null; angle: number; mitre?: { k: number; max: number }; mix: number }[];
   /** v2: `from` absent = replaces the attachment's setup image. */
   skins: { name: string; entries: { attachment: string; image: string; from?: string }[] }[];
   /** v2: stored crossfade durations by animation name. */
@@ -58,8 +63,8 @@ export interface RuntimeExport {
     /** v2: attachment names back→front. */
     drawOrder: { time: number; order: string[] }[];
     /** v2: by constraint name. */
-    constraints: Record<string, { mix?: RuntimeKey[]; position?: RuntimeKey[] }>;
-    /** baked[boneName][frame] = [worldX, worldY, worldRotationDeg, worldScaleX, worldScaleY] (after IK/path constraints) */
+    constraints: Record<string, { mix?: RuntimeKey[]; position?: RuntimeKey[]; angle?: RuntimeKey[] }>;
+    /** baked[boneName][frame] = [worldX, worldY, worldRotationDeg, worldScaleX, worldScaleY] (after IK/path/transform constraints) */
     baked: Record<string, number[][]>;
     /** Only when the animation keys slots or draw order: per frame, attachments back→front with their state. */
     bakedSlots?: { attachment: string; visible: boolean; opacity: number; image: string }[][];
@@ -91,7 +96,7 @@ export function runtimeProblems(project: Project): string[] {
   dup('attachments', project.attachments.map((a) => a.name));
   dup('images', project.images.map((i) => i.name));
   dup('animations', project.animations.map((a) => a.name));
-  dup('constraints', [...(project.ik ?? []), ...(project.pathConstraints ?? [])].map((c) => c.name));
+  dup('constraints', [...(project.ik ?? []), ...(project.pathConstraints ?? []), ...(project.transformConstraints ?? [])].map((c) => c.name));
   dup('paths', (project.paths ?? []).map((p) => p.name));
   dup('skins', (project.skins ?? []).map((s) => s.name));
   return out;
@@ -104,17 +109,26 @@ export function exportRuntime(project: Project): RuntimeExport {
   const attName = new Map(project.attachments.map((a) => [a.id, a.name]));
   const animName = new Map(project.animations.map((a) => [a.id, a.name]));
   const pathName = new Map((project.paths ?? []).map((p) => [p.id, p.name]));
-  const conName = new Map([...(project.ik ?? []), ...(project.pathConstraints ?? [])].map((c) => [c.id, c.name]));
+  const conName = new Map([...(project.ik ?? []), ...(project.pathConstraints ?? []), ...(project.transformConstraints ?? [])].map((c) => [c.id, c.name]));
+  const v3 = v3Features(project).length > 0;
   const img = (id: string) => imageOf.get(id)?.name ?? id;
   const bone = (id: string) => nameOf.get(id) ?? id;
   return {
     format: RUNTIME_FORMAT_ID,
-    version: RUNTIME_FORMAT_VERSION,
+    version: v3 ? RUNTIME_FORMAT_VERSION : 2,
     name: project.name,
     images: project.images.map((im) => ({ name: im.name, width: im.width, height: im.height })),
     ik: (project.ik ?? []).map((k) => ({ name: k.name, bones: k.bones.map(bone), target: bone(k.target), mix: k.mix, bendPositive: k.bendPositive })),
     paths: (project.paths ?? []).map((p) => ({ name: p.name, bone: p.boneId ? bone(p.boneId) : null, closed: p.closed, nodes: p.nodes.map((n) => ({ ...n })) })),
     pathConstraints: (project.pathConstraints ?? []).map((c) => ({ name: c.name, path: pathName.get(c.pathId) ?? c.pathId, bones: c.bones.map(bone), position: c.position, spacing: c.spacing, mix: c.mix, rotate: c.rotate, rotateOffset: c.rotateOffset })),
+    ...(v3
+      ? {
+          transformConstraints: (project.transformConstraints ?? []).map((c) => ({
+            name: c.name, kind: c.kind, bone: bone(c.bone), factor: c.factor, angle: c.angle, mix: c.mix,
+            ...(c.kind === 'rotation' ? { source: bone(c.source!), ...(c.mitre ? { mitre: { ...c.mitre } } : {}) } : { relativeTo: c.relativeTo ? bone(c.relativeTo) : null }),
+          })),
+        }
+      : {}),
     skins: (project.skins ?? []).map((s) => ({ name: s.name, entries: s.entries.map((e) => ({ attachment: attName.get(e.attachmentId) ?? e.attachmentId, image: img(e.imageId), ...(e.from ? { from: img(e.from) } : {}) })) })),
     mixes: (project.mixes ?? []).map((m) => ({ from: animName.get(m.from) ?? m.from, to: animName.get(m.to) ?? m.to, duration: m.duration })),
     bones: ordered.map((b) => ({
@@ -185,7 +199,7 @@ export function exportRuntime(project: Project): RuntimeExport {
       for (const [cId, ct] of Object.entries(anim.constraints ?? {})) {
         const n = conName.get(cId);
         if (!n) continue;
-        constraints[n] = { ...(ct.mix?.length ? { mix: conv(ct.mix) } : {}), ...(ct.position?.length ? { position: conv(ct.position) } : {}) };
+        constraints[n] = { ...(ct.mix?.length ? { mix: conv(ct.mix) } : {}), ...(ct.position?.length ? { position: conv(ct.position) } : {}), ...(ct.angle?.length ? { angle: conv(ct.angle) } : {}) };
       }
       const drawOrder = (anim.drawOrder ?? []).map((k) => ({ time: k.time, order: k.order.map((id) => attName.get(id) ?? id) }));
       return { name: anim.name, duration: anim.duration, fps: anim.fps, loop: anim.loop, frames, keys, slots, drawOrder, constraints, baked, ...(slotted ? { bakedSlots } : {}), ...(meshed.length ? { bakedMeshes } : {}) };

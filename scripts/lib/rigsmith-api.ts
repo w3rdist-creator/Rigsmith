@@ -23,6 +23,7 @@ import type { LimbSpec } from '../../src/model/limbWeights.ts';
 import { limbWeights, mirrorWeights, smoothWeights, suffixBoneMap } from '../../src/model/limbWeights.ts';
 import { autoWeights, gridPoints, meshSummary, setMesh, triangulate } from '../../src/model/meshOps.ts';
 import { setMixRule } from '../../src/model/mix.ts';
+import { addAimConstraint, addRotationConstraint, constraintNames } from '../../src/model/rigOps.ts';
 import { dataUrlBytes, decodePngExact, encodePngExact } from '../../src/model/png.ts';
 import { addSkin, setSkinEntry } from '../../src/model/skinOps.ts';
 import type { ClipSequence, ImageAsset, Project } from '../../src/model/types.ts';
@@ -80,7 +81,7 @@ export function summary(p: Project) {
     meshes: p.attachments.filter((a) => a.mesh).length,
     images: p.images.map((i) => `${i.name} ${i.width}×${i.height}`),
     animations: p.animations.map((a) => ({ name: a.name, duration: a.duration, fps: a.fps, loop: a.loop })),
-    constraints: { ik: p.ik?.length ?? 0, path: p.pathConstraints?.length ?? 0 },
+    constraints: { ik: p.ik?.length ?? 0, path: p.pathConstraints?.length ?? 0, transform: p.transformConstraints?.length ?? 0 },
     skins: (p.skins ?? []).map((s) => s.name),
     mixes: (p.mixes ?? []).length,
   };
@@ -165,6 +166,39 @@ export function setSequence(p: Project, name: string, stepList: string, loop: bo
 function attachmentNamed(p: Project, name: string) {
   return p.attachments.find((a) => a.name === name) ?? fail(`No attachment named “${name}”.`);
 }
+export type TransformRequest =
+  | { kind: 'rotation'; bone: string; source: string; factor: number; offset: number; mitre?: { k: number; max: number }; name?: string; mix: number }
+  | { kind: 'aim'; bone: string; angle: number | 'hold'; relativeTo?: string; name?: string; mix: number };
+
+/**
+ * Adds a transform constraint (bone names). Rotation: offset + factor × the source's bend
+ * (offset default 0, like a joint helper). Aim: the held world angle, or 'hold' = the
+ * bone's current setup angle (relative to `relativeTo`'s).
+ */
+export function addTransform(p: Project, req: TransformRequest): { name: string; kind: string; angle: number } {
+  if (!(req.mix >= 0 && req.mix <= 1)) fail('--mix must be between 0 and 1.');
+  if (req.name && constraintNames(p).includes(req.name)) fail(`A constraint named “${req.name}” already exists.`);
+  const bone = boneNamed(p, req.bone);
+  const id = `tc_${p.bones.find((b) => b.id === bone)!.name}_${(p.transformConstraints?.length ?? 0) + 1}`;
+  let tc;
+  if (req.kind === 'rotation') {
+    const src = boneNamed(p, req.source);
+    if (src === bone) fail('A bone cannot copy its own rotation.');
+    if (req.mitre && !(req.mitre.k >= 0 && req.mitre.max >= 1)) fail('--mitre expects <k ≥ 0>:<max ≥ 1>.');
+    tc = addRotationConstraint(p, id, bone, src, req.factor)!;
+    tc.angle = req.offset;
+    if (req.mitre) tc.mitre = { ...req.mitre };
+  } else {
+    const rel = req.relativeTo ? boneNamed(p, req.relativeTo) : null;
+    if (rel === bone) fail('A bone cannot aim relative to itself.');
+    tc = addAimConstraint(p, id, bone, rel)!;
+    if (req.angle !== 'hold') tc.angle = req.angle;
+  }
+  tc.mix = req.mix;
+  if (req.name) tc.name = req.name;
+  return { name: tc.name, kind: tc.kind, angle: tc.angle };
+}
+
 function boneNamed(p: Project, name: string): string {
   return p.bones.find((b) => b.name === name)?.id ?? fail(`No bone named “${name}”.`);
 }

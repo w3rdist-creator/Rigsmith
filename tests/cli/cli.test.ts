@@ -258,7 +258,8 @@ describe('rendering (headless Chrome for Testing via render.html)', () => {
     assert.equal(code, 4);
     assert.match(JSON.parse(stdout).error, /Cancelled/);
     assert.ok(!existsSync(out) && !existsSync(`${out}.partial`), 'nothing written');
-    const ps = spawnSync('pgrep', ['-f', 'browser-profiles/cli([^-]|$)'], { encoding: 'utf8' });
+    // Only this checkout's CLI profile: other Rigsmith checkouts on the machine may be rendering.
+    const ps = spawnSync('pgrep', ['-f', `${ROOT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.hermes/browser-profiles/cli([^-]|$)`], { encoding: 'utf8' });
     assert.equal(ps.stdout.trim(), '', 'the CLI browser is closed');
   });
 

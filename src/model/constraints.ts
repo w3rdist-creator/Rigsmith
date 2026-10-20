@@ -1,5 +1,7 @@
 // Constraints, applied to the sampled local pose before world matrices are final:
-// every IK constraint in array order, then every path constraint in array order.
+// every IK constraint in array order, then every path constraint in array order, then
+// every transform constraint in array order (v3; they read the IK/path-solved pose, so a
+// joint helper follows an IK knee, and a later one can read an earlier one's result).
 // Solvers write local rotation/translation back through the inverse parent matrix, so
 // mirrored parents (negative determinant) and scaled parents give the same local
 // solution as the unscaled rig.
@@ -29,11 +31,18 @@
 // arc length position·L + i·spacing. Open paths clamp to [0, L]; closed paths wrap.
 // With `rotate`, bones turn to the path tangent plus rotateOffset. mix blends local
 // translation/rotation from the keyed values (0) to the constrained values (1).
+//
+// Transform constraint (see TransformConstraint): `rotation` sets the bone's local rotation
+// to angle + factor·bend, bend = wrap(world angle(source) − world angle(source's parent)),
+// and with `mitre` its local scaleY to min(max, 1 + (sec(|bend|/2) − 1)·k); `aim` turns the
+// bone so its world +x axis points at `angle` (+ relativeTo's world angle), through the
+// inverse parent like the solvers above. The solved rotation is taken on the turn nearest
+// the keyed one; mix blends rotation and scaleY from keyed (0) to solved (1).
 import { sampleKeys } from './animation.ts';
 import type { Mat, Vec } from './math.ts';
-import { apply, applyLinear, DEG, determinant, identity, invert } from './math.ts';
+import { angleOf, apply, applyLinear, DEG, determinant, identity, invert } from './math.ts';
 import { computeWorld } from './skeleton.ts';
-import type { Animation, Bone, IkConstraint, LocalPose, PathConstraint, PathShape, Project } from './types.ts';
+import type { Animation, Bone, IkConstraint, LocalPose, PathConstraint, PathShape, Project, TransformConstraint } from './types.ts';
 
 const EPS = 1e-9;
 
@@ -48,14 +57,20 @@ export function pathPosition(anim: Animation | null, pc: PathConstraint, time: n
   return keys?.length ? sampleKeys(keys, time, [pc.position])[0] : pc.position;
 }
 
+export function transformAngle(anim: Animation | null, tc: TransformConstraint, time: number): number {
+  const keys = anim?.constraints?.[tc.id]?.angle;
+  return keys?.length ? sampleKeys(keys, time, [tc.angle])[0] : tc.angle;
+}
+
 /** Constraint values supplied by the caller (a blended mix) instead of one animation's keys. */
 export interface ConstraintValues {
   mix(id: string, base: number): number;
   position(id: string, base: number): number;
+  angle(id: string, base: number): number;
 }
 
 export function applyConstraints(project: Project, pose: Map<string, LocalPose>, anim: Animation | null, time: number, values?: ConstraintValues): void {
-  if (!project.ik?.length && !project.pathConstraints?.length) return;
+  if (!project.ik?.length && !project.pathConstraints?.length && !project.transformConstraints?.length) return;
   const clamp = (v: number) => Math.min(1, Math.max(0, v));
   for (const ik of project.ik ?? []) {
     const mix = values ? clamp(values.mix(ik.id, ik.mix)) : constraintMix(anim, ik.id, time, ik.mix);
@@ -65,6 +80,10 @@ export function applyConstraints(project: Project, pose: Map<string, LocalPose>,
     const path = project.paths?.find((p) => p.id === pc.pathId);
     const mix = values ? clamp(values.mix(pc.id, pc.mix)) : constraintMix(anim, pc.id, time, pc.mix);
     if (path && mix > 0) solvePath(project.bones, pose, path, pc, values ? values.position(pc.id, pc.position) : pathPosition(anim, pc, time), mix);
+  }
+  for (const tc of project.transformConstraints ?? []) {
+    const mix = values ? clamp(values.mix(tc.id, tc.mix)) : constraintMix(anim, tc.id, time, tc.mix);
+    if (mix > 0) solveTransform(project.bones, pose, tc, values ? values.angle(tc.id, tc.angle) : transformAngle(anim, tc, time), mix);
   }
 }
 
@@ -337,4 +356,30 @@ export function solvePath(bones: readonly Bone[], pose: Map<string, LocalPose>, 
     pose.set(id, next);
     world = computeWorld(bones, pose);
   });
+}
+
+/** Rotation-fraction / aim constraint on one bone (see the header). */
+export function solveTransform(bones: readonly Bone[], pose: Map<string, LocalPose>, tc: TransformConstraint, angleDeg: number, mix: number): void {
+  const cur = pose.get(tc.bone);
+  if (!cur) return;
+  const world = computeWorld(bones, pose);
+  let target: number;
+  let scaleY: number | null = null;
+  if (tc.kind === 'rotation') {
+    const src = tc.source ? world.get(tc.source) : undefined;
+    if (!src) return;
+    const bend = wrap(angleOf(src) - angleOf(parentWorldOf(bones, world, tc.source!)));
+    target = angleDeg + tc.factor * bend;
+    if (tc.mitre) scaleY = Math.min(tc.mitre.max, 1 + (1 / Math.cos((Math.abs(bend) / 2) * DEG) - 1) * tc.mitre.k);
+  } else {
+    const rel = tc.relativeTo ? world.get(tc.relativeTo) : undefined;
+    if (tc.relativeTo && !rel) return;
+    const parent = parentWorldOf(bones, world, tc.bone);
+    if (Math.abs(determinant(parent)) < 1e-12) return;
+    target = localRotationFor(parent, rotate({ x: 1, y: 0 }, angleDeg + (rel ? angleOf(rel) : 0)), cur);
+  }
+  const solved = nearTurn(cur.rotation, target);
+  const next: LocalPose = { ...cur, rotation: cur.rotation + mix * (solved - cur.rotation) };
+  if (scaleY !== null) next.scaleY = cur.scaleY + mix * (scaleY - cur.scaleY);
+  pose.set(tc.bone, next);
 }

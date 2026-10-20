@@ -103,13 +103,13 @@ export class ImportAnimDialog {
     const pools: Record<RefKind, { id: string; name: string }[]> = {
       bone: dst.bones,
       attachment: dst.attachments,
-      constraint: [...(dst.ik ?? []), ...(dst.pathConstraints ?? [])],
+      constraint: [...(dst.ik ?? []), ...(dst.pathConstraints ?? []), ...(dst.transformConstraints ?? [])],
       image: dst.images,
     };
     const srcPools: Record<RefKind, { id: string; name: string }[]> = {
       bone: src.bones,
       attachment: src.attachments,
-      constraint: [...(src.ik ?? []), ...(src.pathConstraints ?? [])],
+      constraint: [...(src.ik ?? []), ...(src.pathConstraints ?? []), ...(src.transformConstraints ?? [])],
       image: src.images,
     };
     for (const k of KINDS) {
@@ -149,7 +149,7 @@ export class ImportAnimDialog {
       if (rep.driven.length) {
         const box = h('div', { 'data-testid': 'imp-driven' });
         for (const d of rep.driven) {
-          const kind = d.kind === 'ik' ? 'IK' : 'path';
+          const kind = d.kind === 'ik' ? 'IK' : d.kind === 'path' ? 'path' : 'transform';
           const bones = d.bones.map((b) => `${b.name} (${b.keys})`).join(', ');
           const mute = h('input', { type: 'checkbox', checked: this.mute.has(d.constraintId), 'data-testid': `imp-mute-${safeName(d.constraint)}` });
           mute.addEventListener('change', () => {

@@ -56,7 +56,7 @@ const reject: [string, (o: any) => void, RegExp][] = [
   ['curve x outside [0,1]', (o) => ((o.version = 2), Object.assign(o.animations[0].tracks.b_torso.rotate[0], { interp: 'bezier', curve: [1.5, 0, 0.5, 1] })), /x handles/],
   ['curve on a non-bezier key', (o) => ((o.version = 2), (o.animations[0].tracks.b_torso.rotate[0].curve = [0, 0, 1, 1])), /only allowed on bezier/],
   ['v2 field in a v1 file', (o) => (o.ik = []), /requires project version 2/],
-  ['version 3', (o) => (o.version = 3), /newer than this editor/],
+  ['version 4', (o) => (o.version = 4), /newer than this editor/],
   ['version 0', (o) => (o.version = 0), /Unsupported project version/],
   ['IK chain not parent→child', (o) => ((o.version = 2), (o.ik = [{ id: 'k', name: 'k', bones: ['b_thigh_front', 'b_shin_back'], target: 'b_key', mix: 1, bendPositive: true }])), /child of the first/],
   ['IK target inside its chain', (o) => ((o.version = 2), (o.ik = [{ id: 'k', name: 'k', bones: ['b_thigh_front', 'b_shin_front'], target: 'b_shin_front', mix: 1, bendPositive: true }])), /target must not/],

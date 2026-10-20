@@ -133,7 +133,7 @@ are still dropped without a warning.
 
 Evaluation order (`src/model/evaluate.ts`, shared by the viewport, onion skin, sequence
 export and runtime export): sample local pose → IK constraints (array order) → path
-constraints (array order) → world matrices → per-attachment state (visibility, opacity,
+constraints (array order) → transform constraints (array order, v3) → world matrices → per-attachment state (visibility, opacity,
 image, skin, draw order) → mesh vertices.
 
 - **Stepped slot channels** (visibility, image, draw order) show the setup value before
@@ -157,6 +157,17 @@ image, skin, draw order) → mesh vertices.
 - **Path constraints**: arc-length table (32 samples per cubic segment); bone *i* sits at
   `position·L + i·spacing`; open paths clamp, closed paths wrap; `rotate` aligns the
   bone's +x with the tangent plus `rotateOffset`; `mix` blends translation/rotation.
+- **Transform constraints** (v3, `TransformConstraint`): run after IK and paths, so they
+  read the solved pose (a knee helper follows the IK knee). `rotation`: local rotation =
+  `angle + factor · bend`, bend = the source's world angle minus its parent's (wrapped to
+  ±180°); with `mitre`, local scaleY = `min(max, 1 + (sec(|bend|/2) − 1)·k)`, so a joint
+  helper keeps the limb's width at the bend. `aim`: the bone's +x is turned (through the
+  inverse parent, like IK) to world angle `angle` (+ `relativeTo`'s world angle). `angle`
+  and `mix` are keyable; the solution is kept on the keyed turn and `mix` blends rotation
+  (and the mitre scale) from keyed (0) to solved (1). Adding one in the editor keeps the
+  setup pose (rotation: the offset absorbs the current bend; aim: holds the current
+  angle). Files and runtime exports use version 3 only when a rig has transform
+  constraints or angle keys, so every other rig stays readable by v2 consumers.
 - **Integrity**: every undoable edit runs `repairReferences` (same undo step) so deleting
   bones/attachments/images drops or fixes dependent constraints, slot keys, skin entries
   and draw-order keys, and the project always re-opens.

@@ -380,6 +380,84 @@ describe('path constraint', () => {
   });
 });
 
+describe('transform constraints (rotation fraction, aim)', () => {
+  const ang = (m: M) => (Math.atan2(m[1], m[0]) * 180) / Math.PI;
+  const wrapD = (d: number) => ((((d + 180) % 360) + 360) % 360) - 180;
+  const sy = (m: M) => Math.hypot(m[2], m[3]);
+
+  it('+ Rotation: the key bone takes a fraction of the forearm bend, with a mitre scale; adding does not move it', async () => {
+    await demo();
+    await page.getByTestId('mode-setup').click();
+    await page.getByTestId('tree-bone-windup-key').click();
+    const key = await boneId('windup-key'), torso = await boneId('torso'), fore = await boneId('forearm-front'), arm = await boneId('arm-front');
+    const w0 = await worlds();
+    await page.getByTestId('tc-add-source').selectOption({ label: 'forearm-front' });
+    const u0 = (await state()).undo;
+    await page.getByTestId('tc-add-rotation').click();
+    assert.equal((await state()).undo, u0 + 1, 'one undo step');
+    await page.getByTestId('tree-constraint-windup-key-rotation').waitFor();
+    assert.equal(await page.getByTestId('tc-bone').innerText(), 'Bone: windup-key');
+    const w1 = await worlds();
+    for (let k = 0; k < 6; k++) near(w1[key][k], w0[key][k], 1e-6, 'adding keeps the setup pose');
+    await setField('tc-factor', 1);
+    await page.getByTestId('tc-mitre').check();
+    await setField('tc-mitre-k', 1);
+    await setField('tc-mitre-max', 1.5);
+    const tc = (await project()).transformConstraints[0];
+    assert.deepEqual([tc.kind, tc.source, tc.factor, tc.mitre], ['rotation', fore, 1, { k: 1, max: 1.5 }]);
+    await page.getByTestId('mode-animate').click();
+    for (const f of [6, 18]) {
+      await gotoFrame(f);
+      const w = await worlds();
+      const bend = wrapD(ang(w[fore]) - ang(w[arm]));
+      near(wrapD(ang(w[key]) - ang(w[torso]) - (tc.angle + bend)), 0, 1e-6, `frame ${f}: offset + 1 × bend`);
+      near(sy(w[key]) / sy(w[torso]), Math.min(1.5, 1 / Math.cos((Math.abs(bend) * Math.PI) / 360)), 1e-6, `frame ${f}: mitre scale`);
+    }
+    await page.getByTestId('tc-source').selectOption({ label: 'arm-front' });
+    assert.equal((await project()).transformConstraints[0].source, arm);
+    await page.getByTestId('tc-mitre').uncheck();
+    assert.equal((await project()).transformConstraints[0].mitre, undefined);
+  });
+
+  it('+ Aim: the head holds its screen angle; a keyed angle turns it; mix keys toggle; relative-to and delete', async () => {
+    await page.getByTestId('mode-setup').click();
+    await page.getByTestId('tree-bone-head').click();
+    const head = await boneId('head'), torso = await boneId('torso');
+    const setupAngle = ang((await worlds())[head]);
+    await page.getByTestId('tc-add-aim').click();
+    await page.getByTestId('tree-constraint-head-aim').waitFor();
+    await page.getByTestId('mode-animate').click();
+    for (const f of [4, 13, 22]) {
+      await gotoFrame(f);
+      near(wrapD(ang((await worlds())[head]) - setupAngle), 0, 1e-6, `frame ${f}: head holds its setup screen angle`);
+    }
+    await gotoFrame(10);
+    await setField('tc-angle', -60);
+    await page.getByTestId('key-head-aim-angle-10').waitFor();
+    near(wrapD(ang((await worlds())[head]) - -60), 0, 1e-6, 'keyed angle −60° at frame 10');
+    await page.getByTestId('tc-key-mix').click();
+    await page.getByTestId('key-head-aim-mix-10').waitFor();
+    await page.getByTestId('tc-key-mix').click();
+    await page.getByTestId('key-head-aim-mix-10').waitFor({ state: 'detached' });
+    await page.getByTestId('tc-key-angle').click();
+    await page.getByTestId('key-head-aim-angle-10').waitFor({ state: 'detached' });
+    await page.getByTestId('mode-setup').click();
+    await page.getByTestId('tc-relative').selectOption({ label: 'torso' });
+    await setField('tc-angle', 0);
+    await setField('tc-mix', 1);
+    await page.getByTestId('mode-animate').click();
+    await gotoFrame(7);
+    const w = await worlds();
+    near(wrapD(ang(w[head]) - ang(w[torso])), 0, 1e-6, 'relative to the torso: same angle as the torso');
+    const p = await project();
+    assert.deepEqual(p.transformConstraints.map((c: any) => c.kind), ['rotation', 'aim']);
+    await page.getByTestId('constraint-delete').click();
+    assert.deepEqual((await project()).transformConstraints.map((c: any) => c.kind), ['rotation']);
+    await page.keyboard.press('Control+z');
+    assert.equal((await project()).transformConstraints.length, 2, 'undo restores it');
+  });
+});
+
 describe('cutout tools and pivot mode', () => {
   let limbUrl = '';
   it('cuts a forearm out of one limb image with overlap and a joint bone — non-destructive, pixel-identical in place', async () => {

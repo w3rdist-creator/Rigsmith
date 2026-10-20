@@ -35,6 +35,12 @@ export function repairReferences(p: Project): string[] {
       });
     if (p.pathConstraints.length !== before) notes.push(`${before - p.pathConstraints.length} path constraint(s) removed.`);
   }
+  if (p.transformConstraints) {
+    const before = p.transformConstraints.length;
+    p.transformConstraints = p.transformConstraints.filter((tc) => boneIds.has(tc.bone) && (tc.kind === 'rotation' ? !!tc.source && boneIds.has(tc.source) && tc.source !== tc.bone : true));
+    for (const tc of p.transformConstraints) if (tc.kind === 'aim' && tc.relativeTo && (!boneIds.has(tc.relativeTo) || tc.relativeTo === tc.bone)) tc.relativeTo = null;
+    if (p.transformConstraints.length !== before) notes.push(`${before - p.transformConstraints.length} transform constraint(s) removed (their bones were deleted).`);
+  }
   // Mesh weights: influences of missing bones are dropped and the rest renormalized; a
   // vertex left without influences goes to the attachment's bone (or, with no bone, the
   // mesh becomes rigid).
@@ -59,7 +65,7 @@ export function repairReferences(p: Project): string[] {
     else m.weights = next;
     if (changed) notes.push(`${a.name}: ${changed} vertex weight list(s) repaired.`);
   }
-  const constraintIds = new Set([...(p.ik ?? []).map((k) => k.id), ...(p.pathConstraints ?? []).map((k) => k.id)]);
+  const constraintIds = new Set([...(p.ik ?? []), ...(p.pathConstraints ?? []), ...(p.transformConstraints ?? [])].map((k) => k.id));
   if (p.skins)
     for (const s of p.skins) {
       const seen = new Set<string>();

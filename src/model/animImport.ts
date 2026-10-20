@@ -22,7 +22,7 @@
 //            scale a different set of descendant bones here than in the source.
 // Mix rules between two imported animations are copied too.
 import { uniqueName } from './ops.ts';
-import type { Animation, BoneTrack, Channel, IkConstraint, PathConstraint, Project } from './types.ts';
+import type { Animation, BoneTrack, Channel, IkConstraint, PathConstraint, Project, TransformConstraint } from './types.ts';
 import { newId } from './types.ts';
 
 export type RefKind = 'bone' | 'attachment' | 'constraint' | 'image';
@@ -71,7 +71,7 @@ export interface ImportOptions {
 export interface DrivenReport {
   constraintId: string;
   constraint: string;
-  kind: 'ik' | 'path';
+  kind: 'ik' | 'path' | 'transform';
   /** Setup mix of the constraint. */
   mix: number;
   /** Overridden keys per target bone name (rotate keys for IK; translate, and rotate if the path rotates). */
@@ -81,8 +81,9 @@ export interface DrivenReport {
   muted: boolean;
 }
 
-/** Channels a constraint writes on its bones: IK sets rotation, a path sets position (and rotation). */
-function drivenChannels(c: { kind: 'ik' } | { kind: 'path'; pc: PathConstraint }): Channel[] {
+/** Channels a constraint writes on its bones: IK sets rotation, a path sets position (and rotation), a transform constraint rotation (and scale with a mitre). */
+function drivenChannels(c: { kind: 'ik' } | { kind: 'path'; pc: PathConstraint } | { kind: 'transform'; tc: TransformConstraint }): Channel[] {
+  if (c.kind === 'transform') return c.tc.mitre ? ['rotate', 'scale'] : ['rotate'];
   return c.kind === 'ik' ? ['rotate'] : c.pc.rotate ? ['translate', 'rotate'] : ['translate'];
 }
 
@@ -93,17 +94,18 @@ function drivenChannels(c: { kind: 'ik' } | { kind: 'path'; pc: PathConstraint }
  */
 export function drivenByConstraints(project: Project, anim: Animation): Omit<DrivenReport, 'muted'>[] {
   const out: Omit<DrivenReport, 'muted'>[] = [];
-  const all: ({ kind: 'ik'; c: IkConstraint } | { kind: 'path'; c: PathConstraint })[] = [
-    ...(project.ik ?? []).map((c) => ({ kind: 'ik' as const, c })),
-    ...(project.pathConstraints ?? []).map((c) => ({ kind: 'path' as const, c })),
+  const all: ({ kind: 'ik'; c: IkConstraint; bones: string[] } | { kind: 'path'; c: PathConstraint; bones: string[] } | { kind: 'transform'; c: TransformConstraint; bones: string[] })[] = [
+    ...(project.ik ?? []).map((c) => ({ kind: 'ik' as const, c, bones: c.bones })),
+    ...(project.pathConstraints ?? []).map((c) => ({ kind: 'path' as const, c, bones: c.bones })),
+    ...(project.transformConstraints ?? []).map((c) => ({ kind: 'transform' as const, c, bones: [c.bone] })),
   ];
   for (const it of all) {
     const keyed = anim.constraints?.[it.c.id]?.mix;
     const active = keyed?.length ? keyed.some((k) => k.value[0] > 0) : it.c.mix > 0;
     if (!active) continue;
-    const chans = drivenChannels(it.kind === 'ik' ? { kind: 'ik' } : { kind: 'path', pc: it.c });
+    const chans = drivenChannels(it.kind === 'ik' ? { kind: 'ik' } : it.kind === 'path' ? { kind: 'path', pc: it.c } : { kind: 'transform', tc: it.c });
     const bones: { name: string; keys: number }[] = [];
-    for (const id of it.c.bones) {
+    for (const id of it.bones) {
       const tr: BoneTrack | undefined = anim.tracks[id];
       const n = tr ? chans.reduce((s, ch) => s + tr[ch].length, 0) : 0;
       if (n) bones.push({ name: project.bones.find((b) => b.id === id)?.name ?? id, keys: n });
@@ -138,15 +140,16 @@ export function usedRefs(src: Project, animIds: readonly string[]): UsedRefs {
       for (const k of st.image ?? []) add(u.images, k.imageId, 1);
     }
     for (const k of an.drawOrder ?? []) for (const id of k.order) add(u.attachments, id, 0, true);
-    for (const [id, c] of Object.entries(an.constraints ?? {})) add(u.constraints, id, (c.mix?.length ?? 0) + (c.position?.length ?? 0));
+    for (const [id, c] of Object.entries(an.constraints ?? {})) add(u.constraints, id, (c.mix?.length ?? 0) + (c.position?.length ?? 0) + (c.angle?.length ?? 0));
   }
   return u;
 }
 
 type Named = { id: string; name: string };
-const constraintsOf = (p: Project): (Named & { kind: 'ik' | 'path' })[] => [
+const constraintsOf = (p: Project): (Named & { kind: 'ik' | 'path' | 'transform' })[] => [
   ...(p.ik ?? []).map((k) => ({ id: k.id, name: k.name, kind: 'ik' as const })),
   ...(p.pathConstraints ?? []).map((k) => ({ id: k.id, name: k.name, kind: 'path' as const })),
+  ...(p.transformConstraints ?? []).map((k) => ({ id: k.id, name: k.name, kind: 'transform' as const })),
 ];
 
 /** Name-based default: each used source object maps to the target object with the same name. */
@@ -301,11 +304,15 @@ export function importAnimations(dst: Project, src: Project, animIds: readonly s
       if (!t) continue;
       const kind = constraintsOf(dst).find((x) => x.id === t)!.kind;
       const copy = structuredClone(c);
-      if (kind === 'ik' && copy.position?.length) {
-        report.dropped.push(`“${an.name}”: ${copy.position.length} path-position key(s) (the target is an IK constraint).`);
+      if (kind !== 'path' && copy.position?.length) {
+        report.dropped.push(`“${an.name}”: ${copy.position.length} path-position key(s) (the target is ${kind === 'ik' ? 'an IK' : 'a transform'} constraint).`);
         delete copy.position;
       }
-      const n = (copy.mix?.length ?? 0) + (copy.position?.length ?? 0);
+      if (kind !== 'transform' && copy.angle?.length) {
+        report.dropped.push(`“${an.name}”: ${copy.angle.length} angle key(s) (the target is ${kind === 'ik' ? 'an IK' : 'a path'} constraint).`);
+        delete copy.angle;
+      }
+      const n = (copy.mix?.length ?? 0) + (copy.position?.length ?? 0) + (copy.angle?.length ?? 0);
       if (!n) continue;
       (out.constraints ??= {})[t] = copy;
       report.keys += n;

@@ -1,14 +1,16 @@
-// Phase-2 inspector sections: slot (attachment) keys and draw-order keys, IK and path
-// constraints, path editing, pivot mode, and the constraint list in the left panel.
+// Phase-2 inspector sections: slot (attachment) keys and draw-order keys, IK, path and
+// transform constraints, path editing, pivot mode, and the constraint list in the left panel.
 import { findKeyIndex, snapToFrame } from '../model/animation.ts';
-import { constraintMix, pathPosition } from '../model/constraints.ts';
+import { constraintMix, pathPosition, transformAngle } from '../model/constraints.ts';
 import { drawOrderAt } from '../model/evaluate.ts';
 import { constraintLane, laneKeys, slotLane } from '../model/keys.ts';
 import {
+  addAimConstraint,
   addIk,
   addPath,
   addPathConstraint,
   addPathNode,
+  addRotationConstraint,
   deleteConstraint,
   deletePath,
   keyConstraint,
@@ -18,7 +20,7 @@ import {
   slotValues,
   validIkTargets,
 } from '../model/rigOps.ts';
-import type { Animation, Attachment, Bone, IkConstraint, PathConstraint, Project } from '../model/types.ts';
+import type { Animation, Attachment, Bone, IkConstraint, PathConstraint, Project, TransformConstraint } from '../model/types.ts';
 import { newId } from '../model/types.ts';
 import type { App } from './app.ts';
 import { append, h, numberField } from './dom.ts';
@@ -111,6 +113,7 @@ export function boneRigSection(app: App, b: Bone): HTMLElement[] {
   const involved = [
     ...(p.ik ?? []).filter((k) => k.bones.includes(b.id) || k.target === b.id).map((k) => ({ id: k.id, name: k.name, role: k.target === b.id ? 'IK target' : 'IK chain' })),
     ...(p.pathConstraints ?? []).filter((k) => k.bones.includes(b.id)).map((k) => ({ id: k.id, name: k.name, role: 'on path' })),
+    ...(p.transformConstraints ?? []).filter((k) => k.bone === b.id || k.source === b.id || k.relativeTo === b.id).map((k) => ({ id: k.id, name: k.name, role: k.bone === b.id ? (k.kind === 'aim' ? 'aim' : 'copies rotation') : 'drives' })),
   ];
   for (const c of involved) out.push(h('button', { class: 'linklike', 'data-testid': `goto-constraint-${c.name}`, onclick: () => ed.select({ kind: 'constraint', id: c.id }) }, `${c.role}: ${c.name}`));
   const parent = p.bones.find((x) => x.id === b.parentId);
@@ -128,6 +131,26 @@ export function boneRigSection(app: App, b: Bone): HTMLElement[] {
       h('button', { class: 'mini', 'data-testid': 'ik-add-1', title: 'Aim this bone at a new target', onclick: () => add(false) }, '+ 1-bone IK'),
     ),
   );
+  // Transform constraints: copy a fraction of another bone's bend (joint helpers), or hold a world angle.
+  const others = p.bones.filter((x) => x.id !== b.id);
+  const sibling = others.find((x) => x.parentId === b.parentId && b.parentId) ?? others.find((x) => x.parentId === b.id) ?? others[0];
+  const srcSel = h('select', { 'data-testid': 'tc-add-source', 'aria-label': 'Bend source bone' }, ...others.map((x) => h('option', { value: x.id }, x.name))) as HTMLSelectElement;
+  if (sibling) srcSel.value = sibling.id;
+  const addTc = (kind: 'rotation' | 'aim') => {
+    const id = newId('tc');
+    ed.mutate(kind === 'aim' ? 'Add aim constraint' : 'Add rotation constraint', (q) => void (kind === 'aim' ? addAimConstraint(q, id, b.id) : addRotationConstraint(q, id, b.id, srcSel.value, 0.5)));
+    if (ed.project.transformConstraints?.some((k) => k.id === id)) {
+      ed.select({ kind: 'constraint', id });
+      app.status(kind === 'aim' ? 'Aim added: the bone holds its current screen angle while its parents move.' : 'Rotation constraint added: the bone takes half the source bone’s bend.');
+    }
+  };
+  out.push(
+    h('div', { class: 'row2' },
+      h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Bend of'), srcSel),
+      h('button', { class: 'mini', 'data-testid': 'tc-add-rotation', disabled: !others.length, title: 'Rotate this bone by a fraction of the chosen bone’s bend (e.g. a joint helper at half the elbow angle)', onclick: () => addTc('rotation') }, '+ Rotation'),
+    ),
+    h('button', { class: 'mini', 'data-testid': 'tc-add-aim', title: 'Hold this bone at its current screen angle (e.g. a prop that stays level while the hand moves)', onclick: () => addTc('aim') }, '+ Aim (hold angle)'),
+  );
   if (ed.mode === 'setup')
     out.push(checkbox('Pivot mode (Move tool moves only this origin)', ed.pivotMode, 'pivot-mode', (v) => {
       ed.pivotMode = v;
@@ -144,13 +167,14 @@ export function renderConstraintInspector(app: App, root: HTMLElement, id: strin
   const p = ed.project;
   const ik = p.ik?.find((k) => k.id === id);
   const pc = p.pathConstraints?.find((k) => k.id === id);
-  if (!ik && !pc) return;
+  const tc = p.transformConstraints?.find((k) => k.id === id);
+  if (!ik && !pc && !tc) return;
   const anim = ed.mode === 'animate' ? ed.anim() : null;
   const t = anim ? snapToFrame(ed.time, anim.fps) : 0;
   const name = (bid: string) => p.bones.find((b) => b.id === bid)?.name ?? '?';
-  const setC = <T extends IkConstraint | PathConstraint>(label: string, fn: (c: T) => void) =>
-    ed.mutate(label, (q) => fn(([...(q.ik ?? []), ...(q.pathConstraints ?? [])] as (IkConstraint | PathConstraint)[]).find((c) => c.id === id) as T));
-  const keyable = (ch: 'mix' | 'position', value: number, base: number, testId: string, label: string, opts: { min?: number; max?: number; step?: number }) => {
+  const setC = <T extends IkConstraint | PathConstraint | TransformConstraint>(label: string, fn: (c: T) => void) =>
+    ed.mutate(label, (q) => fn(([...(q.ik ?? []), ...(q.pathConstraints ?? []), ...(q.transformConstraints ?? [])] as (IkConstraint | PathConstraint | TransformConstraint)[]).find((c) => c.id === id) as T));
+  const keyable = (ch: 'mix' | 'position' | 'angle', value: number, base: number, testId: string, label: string, opts: { min?: number; max?: number; step?: number }) => {
     if (!anim) return numberField({ label, value: base, ...opts, testId, onCommit: (v) => setC(`Edit ${ch}`, (c) => void ((c as unknown as Record<string, number>)[ch] = ch === 'mix' ? Math.min(1, Math.max(0, v)) : v)) });
     const keys = laneKeys(anim, constraintLane(id, ch)) ?? [];
     const has = findKeyIndex(keys, t) >= 0;
@@ -176,6 +200,33 @@ export function renderConstraintInspector(app: App, root: HTMLElement, id: strin
       ik.bones.length === 2 ? checkbox('Bend clockwise (elbow side)', ik.bendPositive, 'ik-bend', (v) => setC<IkConstraint>('IK bend direction', (c) => void (c.bendPositive = v))) : null,
       h('button', { class: 'linklike', 'data-testid': 'goto-ik-target', onclick: () => ed.select({ kind: 'bone', id: ik.target }) }, `Select target “${name(ik.target)}”`),
       h('p', { class: 'hint' }, 'Unreachable targets straighten the chain toward them; a target on the chain root leaves the keyed pose. Mirrored parents mirror the bend.'),
+      h('button', { class: 'mini danger', 'data-testid': 'constraint-delete', onclick: () => deleteC(app, id) }, 'Delete constraint'),
+    );
+    return;
+  }
+  if (tc) {
+    const bones = p.bones.filter((b) => b.id !== tc.bone).map((b) => ({ value: b.id, label: b.name }));
+    const rot = tc.kind === 'rotation';
+    append(root,
+      h('div', { class: 'kind-badge' }, `${rot ? 'Rotation' : 'Aim'} constraint${anim ? ` · keying at frame ${Math.round(t * anim.fps)}` : ' · setup'}`),
+      textField('Name', tc.name, 'constraint-name', (v) => setC('Rename constraint', (c) => void (c.name = v))),
+      h('p', { class: 'dim', 'data-testid': 'tc-bone' }, `Bone: ${name(tc.bone)}`),
+      rot
+        ? select('tc-source', 'Bend of', bones, tc.source ?? '', (v) => setC<TransformConstraint>('Constraint source', (c) => void (c.source = v)))
+        : select('tc-relative', 'Angle relative to', [{ value: '', label: '— screen' }, ...bones], tc.relativeTo ?? '', (v) => setC<TransformConstraint>('Aim reference', (c) => void (c.relativeTo = v || null))),
+      rot ? numberField({ label: 'Fraction of the bend', value: tc.factor, step: 0.05, testId: 'tc-factor', onCommit: (v) => setC<TransformConstraint>('Constraint fraction', (c) => void (c.factor = v)) }) : null,
+      keyable('angle', transformAngle(anim, tc, t), tc.angle, 'tc-angle', rot ? 'Offset (°)' : 'Held angle (°)', { step: 1 }),
+      keyable('mix', constraintMix(anim, id, t, tc.mix), tc.mix, 'tc-mix', 'Mix', { min: 0, max: 1, step: 0.05 }),
+      rot ? checkbox('Keep joint volume (mitre scale Y)', !!tc.mitre, 'tc-mitre', (v) => setC<TransformConstraint>('Constraint mitre', (c) => void (v ? (c.mitre = { k: 1, max: 2.2 }) : delete c.mitre))) : null,
+      rot && tc.mitre
+        ? h('div', { class: 'row2' },
+            numberField({ label: 'Mitre amount', value: tc.mitre.k, min: 0, max: 4, step: 0.05, testId: 'tc-mitre-k', onCommit: (v) => setC<TransformConstraint>('Mitre amount', (c) => void (c.mitre!.k = Math.max(0, v))) }),
+            numberField({ label: 'Max scale', value: tc.mitre.max, min: 1, max: 10, step: 0.1, testId: 'tc-mitre-max', onCommit: (v) => setC<TransformConstraint>('Mitre max', (c) => void (c.mitre!.max = Math.max(1, v))) }),
+          )
+        : null,
+      h('p', { class: 'hint' }, rot
+        ? 'Rotation = offset + fraction × the source bone’s bend (its angle to its parent). Mitre scales Y by up to 1/cos(bend/2) so the joint keeps its width. Applied after IK and paths.'
+        : 'Holds the bone’s screen angle (plus the reference bone’s angle) whatever its parents do. Key the angle to turn it. Applied after IK and paths.'),
       h('button', { class: 'mini danger', 'data-testid': 'constraint-delete', onclick: () => deleteC(app, id) }, 'Delete constraint'),
     );
     return;
@@ -272,6 +323,7 @@ export function renderConstraintList(app: App, root: HTMLElement): void {
     ...(p.ik ?? []).map((k) => row('constraint', k.id, k.name, '⤳', `tree-constraint-${k.name}`)),
     ...(p.paths ?? []).map((x) => row('path', x.id, x.name, '∿', `tree-path-${x.name}`)),
     ...(p.pathConstraints ?? []).map((k) => row('constraint', k.id, k.name, '⇢', `tree-constraint-${k.name}`)),
+    ...(p.transformConstraints ?? []).map((k) => row('constraint', k.id, k.name, k.kind === 'aim' ? '➚' : '↻', `tree-constraint-${k.name}`)),
   ];
   root.append(
     h('div', { class: 'panel-head' },
@@ -283,7 +335,7 @@ export function renderConstraintList(app: App, root: HTMLElement): void {
         ed.select({ kind: 'path', id });
       } }, '+ Path'),
     ),
-    items.length ? h('div', { class: 'tree', 'data-testid': 'constraint-list' }, ...items) : h('p', { class: 'empty' }, 'No IK or paths. Select a bone and use “+ 2-bone IK” in the inspector, or add a path.'),
+    items.length ? h('div', { class: 'tree', 'data-testid': 'constraint-list' }, ...items) : h('p', { class: 'empty' }, 'No constraints or paths. Select a bone and use “+ 2-bone IK”, “+ Rotation” or “+ Aim” in the inspector, or add a path.'),
   );
 }
 

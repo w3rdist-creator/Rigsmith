@@ -25,6 +25,7 @@ import type {
   SequenceStep,
   Skin,
   SlotTrack,
+  TransformConstraint,
   VertexWeights,
 } from './types.ts';
 import { CHANNEL_ARITY, CHANNELS, FORMAT_ID, FORMAT_VERSION, FRAME_MAX_SIDE, INTERPS, SEQUENCE_MAX_REPEAT } from './types.ts';
@@ -64,8 +65,16 @@ export function v2Features(p: Project): string[] {
   return [...f];
 }
 
+/** Lists the v3 features a project uses; non-empty ⇒ written as v3, which a v2 reader rejects. */
+export function v3Features(p: Project): string[] {
+  const f = new Set<string>();
+  if (p.transformConstraints?.length) f.add('transform constraints');
+  for (const an of p.animations) if (an.constraints && Object.values(an.constraints).some((c) => c.angle?.length)) f.add('constraint angle keys');
+  return [...f];
+}
+
 export function requiredVersion(p: Project): FormatVersion {
-  return v2Features(p).length ? 2 : 1;
+  return v3Features(p).length ? 3 : v2Features(p).length ? 2 : 1;
 }
 
 const nonEmpty = <T>(xs: T[] | undefined): T[] | undefined => (xs && xs.length ? xs : undefined);
@@ -96,6 +105,7 @@ function writeAnimation(an: Animation): Animation {
     const t: ConstraintTrack = {};
     if (c.mix?.length) t.mix = c.mix.map(writeKey);
     if (c.position?.length) t.position = c.position.map(writeKey);
+    if (c.angle?.length) t.angle = c.angle.map(writeKey);
     if (Object.keys(t).length) cons[id] = t;
   }
   if (Object.keys(cons).length) out.constraints = cons;
@@ -125,6 +135,8 @@ export function toFileObject(project: Project): Project {
   if (paths) out.paths = paths;
   const pcs = nonEmpty(project.pathConstraints);
   if (pcs) out.pathConstraints = pcs;
+  const tcs = nonEmpty(project.transformConstraints);
+  if (tcs) out.transformConstraints = tcs.map(writeTransform);
   const skins = nonEmpty(project.skins);
   if (skins) out.skins = skins;
   const mixes = nonEmpty(project.mixes);
@@ -132,6 +144,15 @@ export function toFileObject(project: Project): Project {
   const seqs = nonEmpty(project.sequences);
   if (seqs) out.sequences = seqs.map((q) => ({ id: q.id, name: q.name, steps: q.steps.map((st) => ({ animId: st.animId, repeat: st.repeat })), loop: q.loop }));
   if (project.frame) out.frame = { x: project.frame.x, y: project.frame.y, width: project.frame.width, height: project.frame.height };
+  return out;
+}
+
+function writeTransform(tc: TransformConstraint): TransformConstraint {
+  const out: TransformConstraint = { id: tc.id, name: tc.name, kind: tc.kind, bone: tc.bone, factor: tc.factor, angle: tc.angle, mix: tc.mix };
+  if (tc.kind === 'rotation') {
+    out.source = tc.source;
+    if (tc.mitre) out.mitre = { k: tc.mitre.k, max: tc.mitre.max };
+  } else out.relativeTo = tc.relativeTo ?? null;
   return out;
 }
 
@@ -262,7 +283,7 @@ function sortedTimes(c: Checker, list: { time: number }[], where: string): void 
 }
 
 /** Every top-level field this version reads and writes. */
-const TOP_LEVEL_KEYS: readonly string[] = ['format', 'version', 'name', 'bones', 'images', 'attachments', 'animations', 'ik', 'paths', 'pathConstraints', 'skins', 'mixes', 'sequences', 'frame'];
+const TOP_LEVEL_KEYS: readonly string[] = ['format', 'version', 'name', 'bones', 'images', 'attachments', 'animations', 'ik', 'paths', 'pathConstraints', 'transformConstraints', 'skins', 'mixes', 'sequences', 'frame'];
 
 export function validateProject(raw: unknown): ParseResult {
   const c = new Checker();
@@ -274,10 +295,13 @@ export function validateProject(raw: unknown): ParseResult {
   if (raw.version > FORMAT_VERSION) {
     return { ok: false, errors: [`Project version ${raw.version} is newer than this editor supports (${FORMAT_VERSION}).`] };
   }
-  if (raw.version !== 1 && raw.version !== 2) return { ok: false, errors: [`Unsupported project version ${raw.version}.`] };
+  if (raw.version !== 1 && raw.version !== 2 && raw.version !== 3) return { ok: false, errors: [`Unsupported project version ${raw.version}.`] };
   const version = raw.version as FormatVersion;
   const v2only = (what: string, where: string) => {
     if (version < 2) c.fail(`${where}: ${what} requires project version 2`);
+  };
+  const v3only = (what: string, where: string) => {
+    if (version < 3) c.fail(`${where}: ${what} requires project version 3`);
   };
 
   const name = typeof raw.name === 'string' ? raw.name : 'Untitled rig';
@@ -476,6 +500,45 @@ export function validateProject(raw: unknown): ParseResult {
     });
   });
 
+  const transformConstraints: TransformConstraint[] = [];
+  const tcRaw = c.optArr(raw, 'transformConstraints', 'project');
+  if (tcRaw) v3only('transformConstraints', 'project');
+  tcRaw?.forEach((tc, i) => {
+    const w = `transformConstraints[${i}]`;
+    if (!isObj(tc)) return c.fail(`${w} must be an object`);
+    const id = c.str(tc, 'id', w);
+    if (constraintIds.has(id)) c.fail(`${w}.id "${id}" is duplicated`);
+    constraintIds.add(id);
+    const kind = tc.kind;
+    if (kind !== 'rotation' && kind !== 'aim') return c.fail(`${w}.kind must be "rotation" or "aim"`);
+    const bone = c.str(tc, 'bone', w);
+    if (!boneIds.has(bone)) c.fail(`${w} references missing bone "${bone}"`);
+    const mix = c.num(tc, 'mix', w, 1);
+    if (mix < 0 || mix > 1) c.fail(`${w}.mix must be between 0 and 1`);
+    const out: TransformConstraint = { id, name: c.str(tc, 'name', w), kind, bone, factor: c.num(tc, 'factor', w, 1), angle: c.num(tc, 'angle', w, 0), mix };
+    if (kind === 'rotation') {
+      const source = c.str(tc, 'source', w);
+      if (!boneIds.has(source)) c.fail(`${w} references missing source bone "${source}"`);
+      else if (source === bone) c.fail(`${w}: a bone cannot copy its own rotation`);
+      out.source = source;
+      if (tc.mitre !== undefined) {
+        if (!isObj(tc.mitre)) c.fail(`${w}.mitre must be an object`);
+        else {
+          const k = c.num(tc.mitre, 'k', `${w}.mitre`), max = c.num(tc.mitre, 'max', `${w}.mitre`);
+          if (k < 0) c.fail(`${w}.mitre.k must not be negative`);
+          if (max < 1) c.fail(`${w}.mitre.max must be at least 1`);
+          out.mitre = { k, max };
+        }
+      }
+    } else {
+      const rel = tc.relativeTo === null || tc.relativeTo === undefined ? null : c.str(tc, 'relativeTo', w);
+      if (rel !== null && !boneIds.has(rel)) c.fail(`${w} references missing bone "${rel}"`);
+      else if (rel === bone) c.fail(`${w}: a bone cannot aim relative to itself`);
+      out.relativeTo = rel;
+    }
+    transformConstraints.push(out);
+  });
+
   // Animations
   const animations: Animation[] = [];
   const animIds = new Set<string>();
@@ -591,6 +654,10 @@ export function validateProject(raw: unknown): ParseResult {
           const ct: ConstraintTrack = {};
           if (cr.mix !== undefined) ct.mix = readKeys(c, cr.mix, `${cw}.mix`, (v) => (v.length === 1 && v[0] >= 0 && v[0] <= 1 ? null : 'must be one number from 0 to 1'), version);
           if (cr.position !== undefined) ct.position = readKeys(c, cr.position, `${cw}.position`, 1, version);
+          if (cr.angle !== undefined) {
+            v3only('constraint angle keys', cw);
+            ct.angle = readKeys(c, cr.angle, `${cw}.angle`, 1, version);
+          }
           cons[cid] = ct;
         }
         anim.constraints = cons;
@@ -700,6 +767,7 @@ export function validateProject(raw: unknown): ParseResult {
   if (ikRaw) project.ik = ik;
   if (pathsRaw) project.paths = paths;
   if (pcRaw) project.pathConstraints = pathConstraints;
+  if (tcRaw) project.transformConstraints = transformConstraints;
   if (skinsRaw) project.skins = skins;
   if (mixRaw) project.mixes = mixes;
   if (seqRaw) project.sequences = sequences;

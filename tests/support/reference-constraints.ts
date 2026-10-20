@@ -15,6 +15,10 @@
 //   segment, with the curve parameter interpolated linearly between table samples;
 //   tangent from the analytic derivative. `exactArcGap` reports how far that table is
 //   from the true arc length (a diagnostic, not part of the rule).
+// - Transform constraints (v3), after paths in array order: the bend is the signed angle
+//   between the source's and its parent's world x axes, from atan2(cross, dot) (src
+//   subtracts wrapped angles); the mitre factor uses sec(θ/2) = √(2 / (1 + cos θ)); aim
+//   reuses the IK aim rule. Solutions are wrapped to the keyed turn and mixed like IK.
 // - Mixing: P_k = P_{k−1} + w_k (v_k − P_{k−1}) per channel, rotation the shortest way,
 //   exact incoming value at w = 1; missing channels per `missing`; constraint mix and
 //   path position blended along the chain the same way (clamped mix per entry); then
@@ -50,7 +54,7 @@ export function keyedLocal(project: any, anim: any | null, t: number): Map<strin
 }
 
 /** Keyed constraint value (mix clamped to 0..1), or the constraint's own value. */
-export function constraintValue(anim: any | null, id: string, channel: 'mix' | 'position', t: number, base: number): number {
+export function constraintValue(anim: any | null, id: string, channel: 'mix' | 'position' | 'angle', t: number, base: number): number {
   const keys = anim?.constraints?.[id]?.[channel];
   const v = keys?.length ? sampleTrack(keys, t, [base])[0] : base;
   return channel === 'mix' ? Math.min(1, Math.max(0, v)) : v;
@@ -204,9 +208,34 @@ export function solvePathRef(project: any, pose: Map<string, Local>, pc: any, po
   });
 }
 
-type ValueOf = (id: string, channel: 'mix' | 'position', base: number) => number;
+type ValueOf = (id: string, channel: 'mix' | 'position' | 'angle', base: number) => number;
 
-/** IK (array order) then paths (array order) on `pose`; constraint values from (anim, t) or `valueOf`. */
+/** Rotation-fraction / aim constraint; mutates `pose`. */
+export function solveTransformRef(project: any, pose: Map<string, Local>, tc: any, angle: number, mix: number): void {
+  const cur = pose.get(tc.bone);
+  if (!cur) return;
+  const worlds = worldsFromLocal(project, pose);
+  let solved: number;
+  let scaleY: number | null = null;
+  if (tc.kind === 'rotation') {
+    const s = worlds.get(tc.source);
+    if (!s) return;
+    const q = parentWorld(project, worlds, tc.source);
+    const cross = q[0] * s[1] - q[1] * s[0], dot = q[0] * s[0] + q[1] * s[1];
+    const bend = Math.atan2(cross, dot) / RAD;
+    solved = angle + tc.factor * bend;
+    if (tc.mitre) scaleY = Math.min(tc.mitre.max, 1 + (Math.sqrt(2 / (1 + Math.cos(bend * RAD))) - 1) * tc.mitre.k);
+  } else {
+    const ref = tc.relativeTo ? worlds.get(tc.relativeTo) : null;
+    const a = (angle + (ref ? deg(ref[0], ref[1]) : 0)) * RAD;
+    solved = aimRotation(parentWorld(project, worlds, tc.bone), Math.cos(a), Math.sin(a), cur);
+  }
+  const next = { ...cur, rotation: cur.rotation + mix * wrap180(solved - cur.rotation) };
+  if (scaleY !== null) next.scaleY = cur.scaleY + mix * (scaleY - cur.scaleY);
+  pose.set(tc.bone, next);
+}
+
+/** IK, then paths, then transform constraints (each in array order) on `pose`; constraint values from (anim, t) or `valueOf`. */
 export function applyConstraintsRef(project: any, pose: Map<string, Local>, anim: any | null, t: number, valueOf?: ValueOf): void {
   const get: ValueOf = valueOf ? (id, ch, base) => (ch === 'mix' ? Math.min(1, Math.max(0, valueOf(id, ch, base))) : valueOf(id, ch, base)) : (id, ch, base) => constraintValue(anim, id, ch, t, base);
   for (const ik of project.ik ?? []) {
@@ -216,6 +245,10 @@ export function applyConstraintsRef(project: any, pose: Map<string, Local>, anim
   for (const pc of project.pathConstraints ?? []) {
     const mix = get(pc.id, 'mix', pc.mix);
     if (mix > 0 && project.paths?.some((p: any) => p.id === pc.pathId)) solvePathRef(project, pose, pc, get(pc.id, 'position', pc.position), mix);
+  }
+  for (const tc of project.transformConstraints ?? []) {
+    const mix = get(tc.id, 'mix', tc.mix);
+    if (mix > 0) solveTransformRef(project, pose, tc, get(tc.id, 'angle', tc.angle), mix);
   }
 }
 

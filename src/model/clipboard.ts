@@ -19,7 +19,7 @@ export interface PortableClipboard {
   names: { bones: Record<string, string>; attachments: Record<string, string>; constraints: Record<string, string>; images: Record<string, string> };
 }
 
-const constraintList = (p: Project) => [...(p.ik ?? []), ...(p.pathConstraints ?? [])];
+const constraintList = (p: Project) => [...(p.ik ?? []), ...(p.pathConstraints ?? []), ...(p.transformConstraints ?? [])];
 
 export function toPortable(project: Project, clip: KeyClipboard, now = new Date()): PortableClipboard {
   const names: PortableClipboard['names'] = { bones: {}, attachments: {}, constraints: {}, images: {} };

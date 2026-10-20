@@ -155,9 +155,9 @@ export function mixPose(project: Project, plan: MixPlan, T: number): Map<string,
   return pose;
 }
 
-/** Constraint mix / path position blended along the plan's chain at global time T. */
+/** Constraint mix / path position / transform angle blended along the plan's chain at global time T. */
 export function mixConstraintValues(project: Project, plan: MixPlan, T: number): ConstraintValues {
-  const blend = (id: string, channel: 'mix' | 'position', base: number) => {
+  const blend = (id: string, channel: 'mix' | 'position' | 'angle', base: number) => {
     let v = base;
     plan.entries.forEach((e, i) => {
       const anim = project.animations.find((a) => a.id === e.animId);
@@ -171,7 +171,7 @@ export function mixConstraintValues(project: Project, plan: MixPlan, T: number):
     });
     return v;
   };
-  return { mix: (id, base) => blend(id, 'mix', base), position: (id, base) => blend(id, 'position', base) };
+  return { mix: (id, base) => blend(id, 'mix', base), position: (id, base) => blend(id, 'position', base), angle: (id, base) => blend(id, 'angle', base) };
 }
 
 /**

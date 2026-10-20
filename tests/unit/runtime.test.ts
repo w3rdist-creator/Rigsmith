@@ -83,7 +83,7 @@ describe('runtime v2', () => {
 
   it('rejects bad files with a reason; v1 runtime files (no v2 sections) still load', () => {
     assert.throws(() => loadRuntime({ format: 'x' }), /Not a rigsmith.runtime/);
-    assert.throws(() => loadRuntime({ ...exportRuntime(p), version: 3 }), /Unsupported runtime version 3/);
+    assert.throws(() => loadRuntime({ ...exportRuntime(p), version: 4 }), /Unsupported runtime version 4/);
     const broken = JSON.parse(JSON.stringify(exportRuntime(p)));
     broken.attachments[0].bone = 'ghost';
     assert.throws(() => loadRuntime(broken), /Unknown bone “ghost”/);

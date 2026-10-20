@@ -6,8 +6,8 @@
 
 export const FORMAT_ID = 'rigsmith.project';
 /** Newest version this editor reads and writes. */
-export const FORMAT_VERSION = 2;
-export type FormatVersion = 1 | 2;
+export const FORMAT_VERSION = 3;
+export type FormatVersion = 1 | 2 | 3;
 
 export interface Bone {
   id: string;
@@ -141,6 +141,8 @@ export interface ConstraintTrack {
   mix?: Key[];
   /** Path constraints: value [position 0..1 along the path]. */
   position?: Key[];
+  /** v3 transform constraints: value [angle, degrees] (see TransformConstraint.angle). */
+  angle?: Key[];
 }
 
 export interface Animation {
@@ -208,6 +210,34 @@ export interface PathConstraint {
 }
 
 /**
+ * v3: sets one bone's rotation from the rig instead of keys (applied after IK and paths).
+ * - `rotation`: local rotation = angle + factor · bend(source), where bend is the source
+ *   bone's world angle minus its parent's (wrapped to ±180°): e.g. a joint helper that takes
+ *   half the elbow's bend. With `mitre`, local scaleY = min(max, 1 + (sec(|bend|/2) − 1)·k),
+ *   so a joint's cross-section keeps its volume.
+ * - `aim`: world angle = angle (+ relativeTo's world angle): a prop held at a fixed screen
+ *   angle while the hand moves.
+ * mix blends rotation (and the mitre scale) from the keyed pose (0) to the constrained one (1).
+ */
+export interface TransformConstraint {
+  id: string;
+  name: string;
+  kind: 'rotation' | 'aim';
+  bone: string;
+  /** rotation: the bone whose bend is copied. */
+  source?: string;
+  /** rotation: fraction of the bend. */
+  factor: number;
+  /** aim: angles are relative to this bone's world angle (null = screen). */
+  relativeTo?: string | null;
+  /** rotation: offset added to the copied bend; aim: the held world angle (degrees). */
+  angle: number;
+  /** rotation: scale the bone's local y toward the mitre length of the bend. */
+  mitre?: { k: number; max: number };
+  mix: number;
+}
+
+/**
  * v2: an attachment set. While the skin is active, an entry replaces the image an
  * attachment shows: without `from` it replaces the attachment's setup image (wherever
  * that image is shown, including via image keys); with `from` it replaces that keyed
@@ -264,6 +294,8 @@ export interface Project {
   ik?: IkConstraint[];
   paths?: PathShape[];
   pathConstraints?: PathConstraint[];
+  /** v3 */
+  transformConstraints?: TransformConstraint[];
   skins?: Skin[];
   mixes?: MixRule[];
   /** v2: saved clip sequences. */

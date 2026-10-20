@@ -10,8 +10,8 @@ import type { Project, ProjectFrame } from '../src/model/types.ts';
 import { safeName } from '../src/render/sequence.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
-import type { WeightRequest } from './lib/rigsmith-api.ts';
-import { ApiError, EXIT, addImage, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
+import type { TransformRequest, WeightRequest } from './lib/rigsmith-api.ts';
+import { ApiError, EXIT, addImage, addTransform, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
 
 const USAGE = `rigsmith <command> [options]
   validate <project.rig.json>
@@ -36,7 +36,10 @@ const USAGE = `rigsmith <command> [options]
           --along <upper,lower> [--helper <bone>] --band <inner>/<outer> [--side 1|-1]
                   [--end <bone>:<at>:<band>:<max>] [--root <bone>:<from>:<to>]
           --mirror-from <attachment> --swap <from>=<to>      (e.g. --swap _l=_r)
-          [--smooth <passes>] [--smooth-amount 0.5]          (alone: smooth existing weights)`;
+          [--smooth <passes>] [--smooth-amount 0.5]          (alone: smooth existing weights)
+  constrain <project> --bone <bone> --out <project> [--name <n>] [--mix 1] (one of:)
+          --copy-rotation <source> [--factor 0.5] [--offset 0] [--mitre <k>:<max>]
+          --aim <degrees|hold> [--relative-to <bone>]`;
 
 type Args = { _: string[]; flags: Record<string, string[]> };
 
@@ -252,6 +255,24 @@ async function main(): Promise<Record<string, unknown>> {
       const res = setWeights(p, need('att'), req, passes !== undefined ? { passes, amount: num('smooth-amount') } : undefined);
       writeProject(out, p);
       return { outputs: [out], attachment: flag('att'), mode: req.kind, ...(passes !== undefined ? { smoothed: passes } : {}), ...res };
+    }
+    case 'constrain': {
+      const out = need('out');
+      const copy = flag('copy-rotation'), aim = flag('aim');
+      if ((copy === undefined) === (aim === undefined)) usage('constrain: give exactly one of --copy-rotation or --aim.');
+      let req: TransformRequest;
+      if (copy !== undefined) {
+        const m = flag('mitre') !== undefined ? need('mitre').split(':').map(Number) : null;
+        if (m && (m.length !== 2 || !m.every(Number.isFinite))) usage('--mitre expects <k>:<max>, e.g. 0.7:1.5.');
+        req = { kind: 'rotation', bone: need('bone'), source: copy, factor: num('factor') ?? 0.5, offset: num('offset') ?? 0, ...(m ? { mitre: { k: m[0], max: m[1] } } : {}), name: flag('name'), mix: num('mix') ?? 1 };
+      } else {
+        const a = aim === 'hold' ? 'hold' : Number(aim);
+        if (a !== 'hold' && !Number.isFinite(a)) usage(`--aim expects degrees or "hold" (got “${aim}”).`);
+        req = { kind: 'aim', bone: need('bone'), angle: a, relativeTo: flag('relative-to'), name: flag('name'), mix: num('mix') ?? 1 };
+      }
+      const res = addTransform(p, req);
+      writeProject(out, p);
+      return { outputs: [out], constraint: res };
     }
     default:
       return usage(`Unknown command “${cmd}”.`);
