@@ -313,6 +313,24 @@ describe('clip specs (R6)', () => {
     assert.equal(cli('bake-constraints', out, '--out', path.join(OUT, 'b2.rig.json')).code, 1);
     assert.ok(!existsSync(path.join(OUT, 'b2.rig.json')));
   });
+
+  it('smear (R13) adds smear images and keys the swaps; slow clips and unknown names exit 1, bad usage 2; nothing written on failure', () => {
+    const out = path.join(OUT, 's.rig.json');
+    const r = cli('smear', RIG, '--anim', 'wave', '--att', 'upper', '--min-px', '2', '--out', out);
+    assert.equal(r.code, 0, JSON.stringify(r.json));
+    const frames: number[] = r.json.frames.upper;
+    assert.ok(frames.length > 0 && r.json.images.length === frames.length);
+    const p = parseProject(readFileSync(out, 'utf8'));
+    assert.ok(p.ok);
+    const keys = p.project.animations.find((a) => a.name === 'wave')!.slots!.a_upper.image!;
+    assert.deepEqual(keys.filter((k) => k.imageId.includes('~smear~')).map((k) => Math.round(k.time * 30)), frames.filter((f) => f < 30), 'one swap per fast frame (a loop’s last frame is frame 0)');
+    const bad = path.join(OUT, 's-bad.rig.json');
+    assert.equal(cli('smear', RIG, '--anim', 'wave', '--att', 'upper', '--out', bad).code, 1, 'nothing moves 40 px a frame');
+    assert.equal(cli('smear', RIG, '--anim', 'wave', '--att', 'nope', '--out', bad).code, 1);
+    assert.equal(cli('smear', RIG, '--anim', 'wave', '--out', bad).code, 2);
+    assert.equal(cli('smear', RIG, '--anim', 'wave', '--att', 'upper', '--min-px', '0', '--out', bad).code, 2);
+    assert.ok(!existsSync(bad));
+  });
 });
 
 describe('rendering (headless Chrome for Testing via render.html)', () => {

@@ -13,6 +13,7 @@ import { resolveLimits } from '../src/model/sequence.ts';
 import { applyClip, exportClip, formatClipSpec, lintClip, parseClipText } from '../src/model/clipSpec.ts';
 import type { ClipMode, ClipSpec } from '../src/model/clipSpec.ts';
 import { exportLottie } from '../src/model/lottie.ts';
+import { smearAnimation } from '../src/model/smear.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
 import type { TransformRequest, VertexAlphaRequest, WeightRequest } from './lib/rigsmith-api.ts';
 import { ApiError, EXIT, addImage, addIkNamed, addSpringNamed, bakeSpringsCmd, bakeConstraintsCmd, setEmitter, setMask, addTransform, setBind, setInherit, setTint, setVertexAlpha, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
@@ -64,6 +65,8 @@ const USAGE = `rigsmith <command> [options]
           (FX socket: the game spawns the particle recipe at the attachment; key the rate with key --channel rate)
   mask <project> --att <attachment> (--to <mask attachment> | --clear) --out <project>
           (clipping mask: the attachment shows only inside the mask's shape, e.g. pupils in an eye)
+  smear <project> --anim <name> --att <a,b> [--min-px 40] [--samples 10] [--strength 0.6] --out <project>
+          (fast frames: add motion-smeared copies of the images and key the swaps)
   bake-springs <project> --out <project>   (springs → per-frame rotate keys; needed for Lottie)
   bake-constraints <project> --out <project>   (IK, path and transform constraints + springs → per-frame keys; needed for Lottie)
   ik <project> --bone <bone> [--one-bone] [--bend positive|negative] --out <project>
@@ -93,6 +96,11 @@ function parseArgs(argv: string[]): Args {
     } else out._.push(a);
   }
   return out;
+}
+
+/** Invalid input (exit 1). */
+function fail1(msg: string): never {
+  throw new ApiError(msg, [msg]);
 }
 
 function usage(msg: string): never {
@@ -494,6 +502,19 @@ async function main(): Promise<Record<string, unknown>> {
       const res = setMask(p, need('att'), flag('clear') !== undefined ? null : need('to'));
       writeProject(out, p);
       return { outputs: [out], attachment: flag('att'), ...res };
+    }
+    case 'smear': {
+      const out = need('out');
+      const anim = p.animations.find((a) => a.name === need('anim')) ?? fail1(`No animation named “${flag('anim')}”.`);
+      const atts = need('att').split(',').map((n) => p.attachments.find((a) => a.name === n.trim())?.id ?? fail1(`No attachment named “${n.trim()}”.`));
+      const strength = num('strength'), samples = num('samples'), minPx = num('min-px');
+      if (strength !== undefined && !(strength > 0 && strength <= 1)) usage('--strength must be more than 0 and at most 1.');
+      if (samples !== undefined && !(Number.isInteger(samples) && samples >= 1 && samples <= 64)) usage('--samples must be a whole number from 1 to 64.');
+      if (minPx !== undefined && !(minPx > 0)) usage('--min-px must be more than 0.');
+      const r = await smearAnimation(p, anim.id, { attachments: atts, ...(strength !== undefined ? { strength } : {}), ...(samples !== undefined ? { samples } : {}), ...(minPx !== undefined ? { minPx } : {}) });
+      if (!r.images.length) fail1(`No fast frames in “${anim.name}” for ${need('att')} (no image corner moves ${minPx ?? 40} px in a frame).`);
+      writeProject(out, p);
+      return { outputs: [out], animation: anim.name, frames: r.frames, images: r.images.map((im) => im.name) };
     }
     case 'bake-constraints': {
       const out = need('out');

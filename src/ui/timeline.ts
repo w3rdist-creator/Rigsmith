@@ -211,6 +211,7 @@ export class Timeline {
       h('span', { class: 'sep' }),
       h('button', { class: 'mini', 'data-testid': 'anim-export-spec', title: 'Download this animation as a clip spec (YAML, names instead of ids)', onclick: () => app.exportClipSpec() }, 'Export spec'),
       h('button', { class: 'mini', 'data-testid': 'anim-apply-spec', title: 'Apply a clip spec (.yaml / .json): creates the animation, or rebuilds the one with the same name', onclick: () => app.clipSpecInput.click() }, 'Apply spec…'),
+      h('button', { class: 'mini', 'data-testid': 'anim-smear', title: 'For the selected attachment (a prop or limb that whips): on fast frames (an image corner moving ≥ 40 px) add a motion-smeared copy of its image and key the swap, so a twirl reads as motion instead of strobing (undo removes them)', onclick: () => void app.smearFastFrames() }, '≋ Smear fast frames'),
       h('button', { class: 'mini', 'data-testid': 'loop-seam', title: 'Close the loop: copy each lane’s first key to the end (selected lanes, or all)', onclick: () => app.closeLoop() }, '⟲ Close loop'),
       beyond ? h('span', { class: 'warn', title: 'Keys after the end are kept but not played.' }, `${beyond} key(s) past end`) : null,
     );

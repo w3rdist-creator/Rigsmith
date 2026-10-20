@@ -212,6 +212,15 @@ tint, image, skin, draw order) → mesh vertices.
   translate, rotate and scale key per frame holding its solved local pose; the constraints
   and their keys are removed. Exact at whole frames (Lottie's grid); between frames the
   motion is linear. The setup pose is not baked. Meshes, masks and emitters have no bake.
+- **Smears** (R13, `src/model/smear.ts`; timeline ≋ Smear fast frames for the selected
+  attachment, `rigsmith smear`): for a fast frame (some image corner moves ≥ 40 px since
+  the previous frame) the rigid motion prev→current is found (a rotation about its fixed
+  point, or a slide) and the image shown is repainted as itself, solid, over ten fading
+  copies along that motion; the canvas is padded symmetrically so the unsmeared pixels keep
+  their place (growth capped at 9× the pixels). Each smear is a new image asset keyed as a
+  stepped slot image swap, with the clip's own image keyed back on the next slow frame, so
+  every exporter and player shows it with no new format feature. Attachments are chosen
+  explicitly: smearing a feature that rides on an unsmeared mesh would tear it apart.
 - **Blend, tint and vertex alpha** (v3, `Attachment.blend`, `Attachment.color`, slot
   `color` keys, `Mesh.alphas`): `blend` is `normal` (absent), `additive`, `screen` or
   `multiply` and maps to the canvas operations `source-over`, `lighter`, `screen` and

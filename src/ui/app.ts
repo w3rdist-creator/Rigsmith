@@ -1,4 +1,5 @@
 // Application wiring: actions shared by the toolbar, panels, timeline and shortcuts.
+import { smearAnimation } from '../model/smear.ts';
 import { Editor } from '../editor/store.ts';
 import type { Tool } from '../editor/store.ts';
 import { findKeyIndex, insertSorted, keysBeyondEnd, removeKey, setInterp, setInterpY, snapToFrame } from '../model/animation.ts';
@@ -14,7 +15,7 @@ import { apply, invert } from '../model/math.ts';
 import { keyChannels, makeBone, uniqueName } from '../model/ops.ts';
 import { CycleError, attachmentWorld, boneTip, deleteBone, reparentBone } from '../model/skeleton.ts';
 import type { Animation, Channel, Curve, EventKey, Key, Project } from '../model/types.ts';
-import { CHANNELS, EVENT_NAME, emptyProject, emptyTrack, newId } from '../model/types.ts';
+import { CHANNELS, EVENT_NAME, cloneProject, emptyProject, emptyTrack, newId } from '../model/types.ts';
 import { frameBounds } from '../model/evaluate.ts';
 import { drawFrame, exportContext } from '../render/draw.ts';
 import type { Autosave } from './autosave.ts';
@@ -459,6 +460,32 @@ export class App {
   }
 
   /** Downloads the current animation as a clip spec (`<name>.clip.yaml`, docs/cli.md → Clip specs). */
+  /** Smears (R13): smear images for this animation's fast frames, keyed as image swaps — one undo step. */
+  async smearFastFrames(): Promise<void> {
+    const anim = this.ed.anim();
+    const sel = this.ed.selection;
+    if (!anim) return;
+    const att = sel?.kind === 'attachment' ? this.ed.project.attachments.find((a) => a.id === sel.id) : undefined;
+    if (!att) return this.status('Select the attachment to smear (a prop or limb that whips, e.g. a whisk), then Smear fast frames.');
+    if (att.mesh || att.emitter) return this.status(`“${att.name}” is a ${att.mesh ? 'mesh' : 'emitter'}; only flat image attachments can be smeared.`);
+    this.status(`Smearing fast frames of “${att.name}” in “${anim.name}”…`);
+    try {
+      const work = cloneProject(this.ed.project);
+      const r = await smearAnimation(work, anim.id, { attachments: [att.id] });
+      const n = Object.values(r.frames).reduce((s, f) => s + f.length, 0);
+      if (!n) return this.status(`No fast frames for “${att.name}” in “${anim.name}” (no image corner moves 40 px in a frame).`);
+      await this.images.decodeAll(r.images);
+      const slots = structuredClone(work.animations.find((a) => a.id === anim.id)!.slots);
+      this.ed.mutate('Smear fast frames', (q) => {
+        for (const im of r.images) if (!q.images.some((x) => x.id === im.id)) q.images.push(im);
+        q.animations.find((a) => a.id === anim.id)!.slots = slots;
+      });
+      this.status(`Smeared ${n} frame(s): ${Object.entries(r.frames).map(([a, f]) => `${a} ${f.join(', ')}`).join('; ')}.`);
+    } catch (e) {
+      this.error('Smear failed', [(e as Error).message]);
+    }
+  }
+
   exportClipSpec(): void {
     const anim = this.ed.anim();
     if (!anim) return;
