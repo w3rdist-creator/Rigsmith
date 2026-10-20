@@ -34,7 +34,8 @@ rounded.
               "bind"?: { "attachment": [a, b, c, d, tx, ty], "bones": { "<bone>": [a, b, c, d, tx, ty] } } }, // v3 bind pose
     "blend"?: "additive" | "screen" | "multiply",                             // v3, absent = normal
     "color"?: "#rrggbbaa",                                                     // v3 tint, absent = white
-    "emitter"?: { "recipe": "<id>", "rate": <per second> }                    // v3 FX socket: not drawn (see FX sockets)
+    "emitter"?: { "recipe": "<id>", "rate": <per second> },                   // v3 FX socket: not drawn (see FX sockets)
+    "clip"?: "<mask attachment>"                                              // v3 clipping mask (see Clipping masks)
   }],
   "ik": [{ "name", "bones": ["upper", "lower"], "target": "bone", "mix", "bendPositive" }],           // v2
   "paths": [{ "name", "bone": null | "name", "closed", "nodes": [{ "x", "y", "inX", "inY", "outX", "outY" }] }], // v2
@@ -77,6 +78,12 @@ image. Mixes: `docs/architecture.md` → Mixing.
 Baked data lets a consumer play without an interpolator: `frames` samples at `i / fps`
 (`frames = duration·fps` for loops, which omit the repeat of frame 0; `+1` for one-shots).
 Bakes ignore skins and mixes (evaluate from keys for those).
+
+Clipping masks (v3): an attachment with `clip: "<mask>"` is drawn only where the mask
+attachment's own drawn shape is — its image alpha at its current transform, image and mesh,
+at full opacity and untinted, whether or not the mask is visible. Draw it into a layer,
+multiply by the mask's shape, then composite with its opacity and blend (Pixi: a sprite
+mask). Masks are one level deep. `baked` data is unaffected.
 
 FX sockets (v3): an attachment with `emitter: {recipe, rate}` is not drawn. A player spawns
 the particle recipe `recipe` (its own particle system, e.g. a factory particle family; the

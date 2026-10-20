@@ -26,6 +26,7 @@ import {
 import type { Animation, Attachment, Bone, IkConstraint, PathConstraint, Project, SpringConstraint, TransformConstraint } from '../model/types.ts';
 import { springProblems } from '../model/springs.ts';
 import { emitterProblems, emitterRate } from '../model/emitters.ts';
+import { setClip } from '../model/masks.ts';
 import { EMITTER_MAX_RATE } from '../model/types.ts';
 import { newId } from '../model/types.ts';
 import { setBoneInherit } from '../model/skeleton.ts';
@@ -91,6 +92,11 @@ export function attachmentSlotSection(app: App, a: Attachment): HTMLElement[] {
         if (v) x.hidden = true;
         else delete x.hidden;
       }), 'Visibility keys can show it during animations.'),
+      select('att-clip', 'Clip to (mask)', [{ value: '', label: '— none' }, ...p.attachments.filter((x) => x.id !== a.id).map((x) => ({ value: x.id, label: x.name }))], a.clip ?? '', (v) => {
+        let bad: string[] = [];
+        ed.mutate(v ? 'Clip attachment' : 'Unclip attachment', (q) => void (bad = setClip(q.attachments, a.id, v || null)));
+        app.status(bad.length ? `Cannot clip: ${bad.join('; ')}.` : v ? `${a.name} now shows only inside ${p.attachments.find((x) => x.id === v)?.name}'s shape (e.g. pupils inside an eye).` : `${a.name} is no longer clipped.`);
+      }),
       ...emitterSetup(app, a),
       h('div', { class: 'group-label' }, 'Cutout'),
       h('button', { class: 'mini', 'data-testid': 'att-cutout', title: 'Cut a piece out of this image (non-destructive), optionally with a new joint bone', onclick: () => app.cutout.open(a.id) }, '✂ Cut out piece…'),

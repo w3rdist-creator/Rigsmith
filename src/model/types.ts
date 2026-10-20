@@ -135,6 +135,12 @@ export interface Attachment {
    * the runtime export names it as a texture hint. Bursts are timeline events (R7).
    */
   emitter?: Emitter;
+  /**
+   * v3 clipping mask: the id of another attachment whose drawn shape (its image's alpha
+   * at its current transform, image and mesh; full opacity, untinted, visible or not)
+   * this attachment is cut to — pupils inside an eye. A mask is not itself clipped.
+   */
+  clip?: string;
 }
 
 export interface Emitter {

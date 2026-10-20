@@ -189,6 +189,24 @@ export function composite(project: any, anim: any | null, t: number, images: Map
     const meta = project.images.find((i: any) => i.id === imageId);
     const img = images.get(imageId)!;
     const base = a.boneId ? worlds.get(a.boneId)! : ([1, 0, 0, 1, 0, 0] as M);
+    if (a.clip) {
+      // Clipping mask (v3, independent restatement): the attachment drawn alone, times the
+      // mask attachment's own image alpha at its transform (full opacity, untinted, shown
+      // or not), then composited with the attachment's blend. Quads only here.
+      const mk = byId.get(a.clip) as any;
+      if (a.mesh || mk.mesh) throw new Error('reference: clipping masks are restated for quads only');
+      const mImageId = stepped(anim?.slots?.[mk.id]?.image, t)?.imageId ?? mk.imageId;
+      const mBase = mk.boneId ? worlds.get(mk.boneId)! : ([1, 0, 0, 1, 0, 0] as M);
+      const own = new Float64Array(w * h * 4), cut = new Float64Array(w * h * 4);
+      quad(own, w, h, mul(view, mul(base, trs(a.x, a.y, a.rotation, a.scaleX, a.scaleY))), meta, img, opacity, { tint, blend: 'normal' });
+      quad(cut, w, h, mul(view, mul(mBase, trs(mk.x, mk.y, mk.rotation, mk.scaleX, mk.scaleY))), project.images.find((i: any) => i.id === mImageId), images.get(mImageId)!, 1);
+      for (let i = 0; i < w * h; i++) {
+        const k = cut[i * 4 + 3];
+        if (own[i * 4 + 3] <= 0 || k <= 0) continue;
+        blendInto(acc, i * 4, [own[i * 4] * k, own[i * 4 + 1] * k, own[i * 4 + 2] * k], own[i * 4 + 3] * k, fx.blend);
+      }
+      continue;
+    }
     if (a.mesh) {
       setup ??= boneWorlds(project, null, 0);
       compositeMesh(acc, w, h, view, a, st, t, project, worlds, setup, meta, img, opacity, slotOverride?.deform.get(a.id), fx);

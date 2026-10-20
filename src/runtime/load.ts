@@ -98,6 +98,7 @@ function convertRuntime(raw: unknown): Project {
     ...(a.blend ? { blend: a.blend } : {}),
     ...(a.color ? { color: a.color } : {}),
     ...(a.emitter ? { emitter: { recipe: a.emitter.recipe, rate: a.emitter.rate } } : {}),
+    ...(a.clip ? { clip: a.clip } : {}),
   }));
   const attNames = new Set(attachments.map((a) => a.id));
   const animations: Animation[] = rt.animations.map((an) => {

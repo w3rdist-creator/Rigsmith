@@ -28,6 +28,7 @@ import { setMixRule } from '../../src/model/mix.ts';
 import { addAimConstraint, addIk, addRotationConstraint, addSpring, bakeSprings, constraintNames } from '../../src/model/rigOps.ts';
 import type { Emitter, SpringConstraint } from '../../src/model/types.ts';
 import { emitterProblems } from '../../src/model/emitters.ts';
+import { setClip } from '../../src/model/masks.ts';
 import { repairReferences } from '../../src/model/integrity.ts';
 import { dataUrlBytes, decodePngExact, encodePngExact } from '../../src/model/png.ts';
 import { addSkin, setSkinEntry } from '../../src/model/skinOps.ts';
@@ -349,6 +350,15 @@ export function setEmitter(p: Project, attName: string, req: { recipe?: string; 
   if (bad.length) fail(bad.join('; '));
   att.emitter = e;
   return { emitter: { ...e } };
+}
+
+/** Clips an attachment to another attachment's shape (clipping mask), or clears it. */
+export function setMask(p: Project, attName: string, maskName: string | null): { clip: string | null } {
+  const att = attachmentNamed(p, attName);
+  const mask = maskName === null ? null : attachmentNamed(p, maskName);
+  const bad = setClip(p.attachments, att.id, mask?.id ?? null);
+  if (bad.length) fail(`Cannot clip “${attName}”: ${bad.join('; ')}.`);
+  return { clip: mask?.name ?? null };
 }
 
 /** Bakes every spring into rotate keys (see bakeSprings) and removes them. */

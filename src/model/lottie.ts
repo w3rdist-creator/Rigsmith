@@ -44,6 +44,7 @@ export function lottieDiagnostics(project: Project, anim: Animation): LottieDiag
   for (const k of project.ik ?? []) err('IK constraint', k.name, `IK “${k.name}” is solved at runtime; Lottie has no IK. Not exported. Rigsmith has no command that bakes IK into keys: to export this rig, delete the IK constraint and key the chain’s rotations by hand.`);
   for (const b of project.bones) if (hasInheritFlags(b)) err('inherit flags', b.name, `Bone “${b.name}” does not inherit its parent's full transform; Lottie parenting always does. Not exported.`);
   for (const k of project.transformConstraints ?? []) err('transform constraint', k.name, `Transform constraint “${k.name}” is solved at runtime; Lottie has no equivalent. Not exported.`);
+  for (const a of project.attachments) if (a.clip) err('clipping mask', a.name, `“${a.name}” is clipped to another attachment; this exporter writes no track mattes. Not exported.`);
   for (const a of project.attachments) if (a.emitter) err('emitter', a.name, `“${a.name}” is an FX socket (particle recipe “${a.emitter.recipe}”); Lottie has no particles. Not exported.`);
   for (const k of project.springs ?? []) err('spring', k.name, `Spring “${k.name}” is simulated by Rigsmith; Lottie has no equivalent. Bake springs first (Bake springs, or rigsmith bake-springs).`);
   for (const k of project.pathConstraints ?? []) err('path constraint', k.name, `Path constraint “${k.name}” has no Lottie equivalent. Not exported.`);

@@ -15,7 +15,7 @@ import type { ClipMode, ClipSpec } from '../src/model/clipSpec.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
 import type { TransformRequest, VertexAlphaRequest, WeightRequest } from './lib/rigsmith-api.ts';
-import { ApiError, EXIT, addImage, addIkNamed, addSpringNamed, bakeSpringsCmd, setEmitter, addTransform, setBind, setInherit, setTint, setVertexAlpha, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
+import { ApiError, EXIT, addImage, addIkNamed, addSpringNamed, bakeSpringsCmd, setEmitter, setMask, addTransform, setBind, setInherit, setTint, setVertexAlpha, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
 
 const USAGE = `rigsmith <command> [options]
   validate <project.rig.json>
@@ -62,6 +62,8 @@ const USAGE = `rigsmith <command> [options]
           (follow-through on a chain; one bone with --follow takes its single-child descendants too)
   emitter <project> --att <attachment> (--recipe <id> [--rate 20] | --rate N | --clear) --out <project>
           (FX socket: the game spawns the particle recipe at the attachment; key the rate with key --channel rate)
+  mask <project> --att <attachment> (--to <mask attachment> | --clear) --out <project>
+          (clipping mask: the attachment shows only inside the mask's shape, e.g. pupils in an eye)
   bake-springs <project> --out <project>   (springs → per-frame rotate keys; needed for Lottie)
   ik <project> --bone <bone> [--one-bone] [--bend positive|negative] --out <project>
           (2-bone IK ending at <bone>, target at its tip; the bend side follows the setup elbow unless given)
@@ -482,6 +484,13 @@ async function main(): Promise<Record<string, unknown>> {
       if (clear && (flag('recipe') !== undefined || flag('rate') !== undefined)) usage('emitter: --clear takes no --recipe or --rate.');
       if (!clear && flag('recipe') === undefined && flag('rate') === undefined) usage('emitter: give --recipe and/or --rate, or --clear.');
       const res = setEmitter(p, need('att'), { recipe: flag('recipe'), rate: num('rate'), clear });
+      writeProject(out, p);
+      return { outputs: [out], attachment: flag('att'), ...res };
+    }
+    case 'mask': {
+      const out = need('out');
+      if ((flag('to') === undefined) === (flag('clear') === undefined)) usage('mask: give --to <attachment> or --clear.');
+      const res = setMask(p, need('att'), flag('clear') !== undefined ? null : need('to'));
       writeProject(out, p);
       return { outputs: [out], attachment: flag('att'), ...res };
     }

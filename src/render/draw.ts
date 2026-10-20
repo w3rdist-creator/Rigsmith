@@ -36,10 +36,13 @@ function drawImageOrRegion(g: CanvasRenderingContext2D, el: CanvasImageSource | 
 export interface DrawOptions {
   /** Draw a translucent red box where an image is missing (editor only). */
   missingPlaceholder?: boolean;
+  /** v3 clipping masks: the frame's attachments by id (drawFrame fills it). */
+  masks?: Map<string, AttachmentFrame>;
 }
 
 export function drawFrame(g: CanvasRenderingContext2D, frame: Frame, images: ImageLookup, vm: Mat, opts: DrawOptions = {}): void {
-  for (const f of frame.attachments) drawAttachment(g, f, images, vm, opts);
+  const masks = frame.attachments.some((f) => f.att.clip) ? new Map(frame.attachments.map((f) => [f.att.id, f])) : undefined;
+  for (const f of frame.attachments) drawAttachment(g, f, images, vm, masks ? { ...opts, masks } : opts);
   g.setTransform(1, 0, 0, 1, 0, 0);
   g.globalAlpha = 1;
   g.globalCompositeOperation = 'source-over';
@@ -57,8 +60,9 @@ export function drawAttachment(g: CanvasRenderingContext2D, f: AttachmentFrame, 
   const op = BLEND_OP[f.blend];
   const tinted = f.color[0] < 1 || f.color[1] < 1 || f.color[2] < 1;
   const mesh = f.vertices && f.att.mesh ? f.att.mesh : null;
-  if (el && (tinted || mesh?.alphas)) {
-    drawEffectLayer(g, f, el, im, vm, alpha, op, tinted);
+  const mask = f.att.clip ? opts.masks?.get(f.att.clip) : undefined;
+  if (el && (tinted || mesh?.alphas || mask)) {
+    drawEffectLayer(g, f, el, im, vm, alpha, op, tinted, mask && { frame: mask, images });
     return;
   }
   g.globalAlpha = alpha;
@@ -82,9 +86,11 @@ export function drawAttachment(g: CanvasRenderingContext2D, f: AttachmentFrame, 
  * Tinted or vertex-alpha attachments: the attachment is drawn at full opacity into an
  * offscreen layer, its texels are multiplied by the tint (exactly, on unpremultiplied
  * pixels), its vertex alphas are applied as a mask, and the layer is composited once
- * with the attachment's alpha and blend mode.
+ * with the attachment's alpha and blend mode. With a clipping mask (v3), the layer is
+ * multiplied by the mask attachment's own drawn alpha (its shape at full opacity, untinted,
+ * whether or not the mask is visible) before compositing.
  */
-function drawEffectLayer(g: CanvasRenderingContext2D, f: AttachmentFrame, el: CanvasImageSource | ImageRegion, im: ImageAsset, vm: Mat, alpha: number, op: GlobalCompositeOperation, tinted: boolean): void {
+function drawEffectLayer(g: CanvasRenderingContext2D, f: AttachmentFrame, el: CanvasImageSource | ImageRegion, im: ImageAsset, vm: Mat, alpha: number, op: GlobalCompositeOperation, tinted: boolean, mask?: { frame: AttachmentFrame; images: ImageLookup }): void {
   const mesh = f.vertices && f.att.mesh ? f.att.mesh : null;
   let dev: number[];
   let m: Mat | null = null;
@@ -97,6 +103,14 @@ function drawEffectLayer(g: CanvasRenderingContext2D, f: AttachmentFrame, el: Ca
   const box = deviceBox(g, dev);
   if (!box) return;
   const { x0, y0, w, h } = box;
+  // The mask goes first: drawing it may itself use the effect and mask layers.
+  let C: Layer | null = null;
+  if (mask) {
+    C = layerOf('clip', w, h, true);
+    resetLayer(C.g, w, h, g);
+    const shape: AttachmentFrame = { ...mask.frame, att: { ...mask.frame.att, clip: undefined }, visible: true, opacity: 1, color: [1, 1, 1, 1], blend: 'normal', emitter: undefined };
+    drawAttachment(C.g, shape, mask.images, { ...vm, tx: vm.tx - x0, ty: vm.ty - y0 });
+  }
   const L = layerOf('effect', w, h, true);
   const lg = L.g;
   resetLayer(lg, w, h, g);
@@ -113,6 +127,11 @@ function drawEffectLayer(g: CanvasRenderingContext2D, f: AttachmentFrame, el: Ca
     lg.setTransform(1, 0, 0, 1, 0, 0);
   }
   if (tinted) tintPixels(lg, w, h, f.color);
+  if (C) {
+    lg.globalCompositeOperation = 'destination-in';
+    lg.drawImage(C.canvas, 0, 0, w, h, 0, 0, w, h);
+    lg.globalCompositeOperation = 'source-over';
+  }
   g.save();
   g.setTransform(1, 0, 0, 1, 0, 0);
   g.globalAlpha = alpha;
@@ -244,8 +263,8 @@ export function exportContext(canvas: { getContext(id: '2d', options?: CanvasRen
 const MIN_AREA = 1e-6;
 
 type Layer = { canvas: OffscreenCanvas | HTMLCanvasElement; g: CanvasRenderingContext2D };
-type LayerKey = 'gpu' | 'software' | 'effect' | 'mask';
-const layerCache: Record<LayerKey, Layer | null> = { gpu: null, software: null, effect: null, mask: null };
+type LayerKey = 'gpu' | 'software' | 'effect' | 'mask' | 'clip';
+const layerCache: Record<LayerKey, Layer | null> = { gpu: null, software: null, effect: null, mask: null, clip: null };
 /**
  * The offscreen layer for a mesh. A target created with `willReadFrequently` (every
  * exported frame, see exportContext) gets its own software layer, so an export never

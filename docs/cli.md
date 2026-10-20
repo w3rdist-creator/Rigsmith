@@ -52,6 +52,7 @@ read-only test probe.
 | `event <project> --anim A --at T --name n [--payload text\|number] --out p2` | no | one timeline event (v3): a named cue the game acts on; a plain number payload is stored as a number |
 | `spring <project> --bones b[,b…] [--follow] [--stiffness 0.08] [--damping 0.18] [--gain 1] [--max 35] [--blend 12] [--mix 1] [--name n] --out p2` | no | a spring (v3) on a bone chain, in chain order; one bone with `--follow` takes its single-child descendants too. A bone is in one spring at most. Prints the spring with bone names |
 | `emitter <project> --att S (--recipe id [--rate n] \| --rate n \| --clear) --out p2` | no | makes S an FX socket (v3): the game spawns particle recipe `id` at S's world transform, `rate` per second (default 20); S's image is the particle sprite and exports draw nothing for it. Key the rate with `key --slot S --channel rate`; `--clear` makes S a plain attachment again (its rate keys go) |
+| `mask <project> --att S (--to M \| --clear) --out p2` | no | clipping mask (v3): S is drawn only inside M's shape (M's image alpha at its transform; M's own visibility does not matter). One level deep; `--clear` removes it |
 | `bake-springs <project> --out p2` | no | writes every spring into every animation as one linear rotate key per frame (keyed rotation + spring offset) and removes the springs — the motion is unchanged; needed before `lottie` |
 
 Authoring commands validate the result with the editor's reader before writing and
@@ -200,6 +201,8 @@ invalid requests exit 1, nothing written on failure.
 `npm run test:cli` (`tests/cli/cli.test.ts`, R8): `spring --follow` writes the requested chain and parameters as v3; `lottie` refuses it with “Bake springs first”; `bake-springs` writes 31 keys per bone per 1 s clip and removes the spring; taken bones and bad parameters exit 1, `--follow` with two bones exits 2, nothing written on failure.
 
 `npm run test:cli` (R9): `emitter` writes the socket as v3, `key --channel rate` keys it, `runtime` carries it, `--clear` removes it with its keys; a bad recipe or a mesh exits 1, a missing `--recipe`/`--rate` exits 2, rate keys on a plain attachment exit 1.
+
+`npm run test:cli` (R11): `mask --to` writes the clip as v3, `--clear` removes it; a chain or a missing name exits 1, missing `--to`/`--clear` exits 2, nothing written on failure.
 
 `npm test` (`tests/unit/limb-weights.test.ts`): `mesh` / `weights` as subprocesses — the
 limb → mirror → smooth chain equals the model functions exactly; usage errors exit 2,

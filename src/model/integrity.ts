@@ -2,6 +2,7 @@
 // repair is part of the same undo step). The file validator is strict — e.g. every
 // draw-order key must list each attachment exactly once — and this pass guarantees an
 // edited project always re-opens. Returns human-readable notes for what it changed.
+import { clipProblems } from './masks.ts';
 import { normalizeWeights } from './meshOps.ts';
 import { hasInheritFlags, isAncestorOrSelf } from './skeleton.ts';
 import type { Project } from './types.ts';
@@ -12,6 +13,16 @@ export function repairReferences(p: Project): string[] {
   const boneIds = new Set(p.bones.map((b) => b.id));
   const attIds = new Set(p.attachments.map((a) => a.id));
   const imageIds = new Set(p.images.map((i) => i.id));
+
+  // Clipping masks whose mask is gone (or became invalid, e.g. turned into an emitter).
+  for (const a of p.attachments) {
+    if (a.clip === undefined) continue;
+    const bad = clipProblems(p.attachments, a, a.clip);
+    if (bad.length) {
+      notes.push(`${a.name} is no longer clipped (${bad[0]}).`);
+      delete a.clip;
+    }
+  }
 
   if (p.ik) {
     const before = p.ik.length;

@@ -52,6 +52,8 @@ export interface RuntimeExport {
     color?: string;
     /** v3 FX socket: spawn particle recipe `recipe` at the attachment's world transform, `rate` per second (`image` = sprite hint); draw nothing. */
     emitter?: { recipe: string; rate: number };
+    /** v3 clipping mask: drawn only where the named attachment's shape (its alpha, full opacity, visible or not) is. */
+    clip?: string;
   }[];
   /** v2 */
   ik: { name: string; bones: string[]; target: string; mix: number; bendPositive: boolean }[];
@@ -180,6 +182,7 @@ export function exportRuntime(source: Project): RuntimeExport {
         ...(a.blend && a.blend !== 'normal' ? { blend: a.blend } : {}),
         ...(a.color && !isWhite(setupColor(a)) ? { color: formatColor(setupColor(a)) } : {}),
         ...(a.emitter ? { emitter: { recipe: a.emitter.recipe, rate: a.emitter.rate } } : {}),
+        ...(a.clip ? { clip: attName.get(a.clip) ?? a.clip } : {}),
       };
     }),
     animations: project.animations.map((anim) => {

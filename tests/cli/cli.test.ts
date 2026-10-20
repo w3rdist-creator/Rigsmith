@@ -287,6 +287,21 @@ describe('clip specs (R6)', () => {
     assert.equal(cli('key', RIG, '--anim', 'wave', '--slot', 'torso', '--channel', 'rate', '--at', '1', '--value', '5', '--out', bad).code, 1, 'not an emitter');
     assert.ok(!existsSync(bad));
   });
+
+  it('mask clips an attachment to another (R11) and clears it; chains and missing names exit 1, bad usage 2', () => {
+    const out = path.join(OUT, 'm.rig.json');
+    const r = cli('mask', RIG, '--att', 'bead2', '--to', 'bead1', '--out', out);
+    assert.deepEqual([r.code, r.json.clip], [0, 'bead1'], JSON.stringify(r.json));
+    const p = parseProject(readFileSync(out, 'utf8'));
+    assert.ok(p.ok && p.project.version === 3 && p.project.attachments.find((a) => a.name === 'bead2')!.clip === 'a_bead1');
+    const bad = path.join(OUT, 'm-bad.rig.json');
+    assert.equal(cli('mask', out, '--att', 'torso', '--to', 'bead2', '--out', bad).code, 1, 'masks are one level deep');
+    assert.equal(cli('mask', RIG, '--att', 'bead2', '--to', 'nope', '--out', bad).code, 1);
+    assert.equal(cli('mask', RIG, '--att', 'bead2', '--out', bad).code, 2);
+    assert.ok(!existsSync(bad));
+    const c = cli('mask', out, '--att', 'bead2', '--clear', '--out', path.join(OUT, 'm2.rig.json'));
+    assert.deepEqual([c.code, c.json.clip], [0, null]);
+  });
 });
 
 describe('rendering (headless Chrome for Testing via render.html)', () => {

@@ -1,5 +1,6 @@
 import { colorValueProblem, formatColor, isColor, isWhite, parseColor, setupColor } from './color.ts';
 import { emitterProblems } from './emitters.ts';
+import { clipProblems } from './masks.ts';
 import { EMITTER_MAX_RATE } from './types.ts';
 import { springProblems } from './springs.ts';
 import { findCycles, hasInheritFlags, isAncestorOrSelf } from './skeleton.ts';
@@ -83,6 +84,7 @@ export function v3Features(p: Project): string[] {
     if (a.blend && a.blend !== 'normal') f.add('blend modes');
     if (a.color && !isWhite(setupColor(a))) f.add('tint colours');
     if (a.emitter) f.add('emitters');
+    if (a.clip) f.add('clipping masks');
     if (a.mesh?.alphas) f.add('vertex alpha');
     if (a.mesh?.bind) f.add('mesh bind poses');
   }
@@ -160,7 +162,7 @@ export function toFileObject(project: Project): Project {
     }),
     images: project.images,
     attachments: project.attachments.map((a) => {
-      const { hidden, mesh, blend, color, emitter, ...base } = a;
+      const { hidden, mesh, blend, color, emitter, clip, ...base } = a;
       const o: Attachment = { ...base };
       if (hidden) o.hidden = true;
       if (mesh) {
@@ -170,6 +172,7 @@ export function toFileObject(project: Project): Project {
       if (blend && blend !== 'normal') o.blend = blend;
       if (color && !isWhite(setupColor(a))) o.color = formatColor(setupColor(a));
       if (emitter) o.emitter = { recipe: emitter.recipe, rate: emitter.rate };
+      if (clip) o.clip = clip;
       return o;
     }),
     animations: project.animations.map(writeAnimation),
@@ -518,7 +521,16 @@ export function validateProject(raw: unknown): ParseResult {
         emitterIds.add(id);
       }
     }
+    if (a.clip !== undefined) {
+      v3only('clipping masks', w);
+      att.clip = c.str(a, 'clip', w);
+    }
     attachments.push(att);
+  });
+
+  attachments.forEach((att, i) => {
+    if (att.clip === undefined) return;
+    for (const e of clipProblems(attachments, att, att.clip)) c.fail(`attachments[${i}].clip: ${e}`);
   });
 
   // Constraints
