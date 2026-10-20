@@ -10,13 +10,13 @@ import { apply, applyLinear, identity, invert, multiply, fromTRS } from './math.
 import { drawOrderAt, steppedAt } from './evaluate.ts';
 import { attachmentWorld, boneLocalFromWorld, computeWorld, hasInheritFlags, isAncestorOrSelf, localFromWorld, parentLinear } from './skeleton.ts';
 import type { Animation, Attachment, Bone, ImageAsset, IkConstraint, PathConstraint, PathShape, Project, SpringConstraint, TransformConstraint } from './types.ts';
-import { SPRING_DEFAULTS, emptyTrack } from './types.ts';
+import { EMITTER_MAX_RATE, SPRING_DEFAULTS, emptyTrack } from './types.ts';
 import { springOffsets, springProblems } from './springs.ts';
 import { makeBone, uniqueName } from './ops.ts';
 
 // ---- Slot keys ------------------------------------------------------------------------
 
-export type ScalarSlotChannel = 'visible' | 'opacity';
+export type ScalarSlotChannel = 'visible' | 'opacity' | 'rate';
 
 function slotTrack(anim: Animation, attId: string) {
   anim.slots ??= {};
@@ -29,6 +29,7 @@ export function keySlotScalar(anim: Animation, attId: string, ch: ScalarSlotChan
   const st = slotTrack(anim, attId);
   const keys = (st[ch] ??= []);
   if (ch === 'visible') setKey(keys, t, [value >= 0.5 ? 1 : 0], 'step');
+  else if (ch === 'rate') setKey(keys, t, [Math.min(EMITTER_MAX_RATE, Math.max(0, value))]);
   else setKey(keys, t, [Math.min(1, Math.max(0, value))]);
 }
 

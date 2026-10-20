@@ -264,6 +264,29 @@ describe('clip specs (R6)', () => {
     assert.equal(cli('bake-springs', RIG, '--out', bad).code, 1, 'nothing to bake');
     assert.ok(!existsSync(bad));
   });
+
+  it('emitter makes an FX socket (R9); key --channel rate keys it; --clear drops it and its keys; bad input exits 1 / 2', () => {
+    const out = path.join(OUT, 'e.rig.json');
+    const r = cli('emitter', RIG, '--att', 'bead1', '--recipe', 'glint.sparkle', '--rate', '30', '--out', out);
+    assert.deepEqual([r.code, r.json.emitter], [0, { recipe: 'glint.sparkle', rate: 30 }], JSON.stringify(r.json));
+    assert.equal(cli('key', out, '--anim', 'wave', '--slot', 'bead1', '--channel', 'rate', '--at', '10', '--value', '90', '--out', out).code, 0);
+    const p = parseProject(readFileSync(out, 'utf8'));
+    assert.ok(p.ok && p.project.version === 3);
+    if (p.ok) assert.deepEqual(p.project.animations.find((a) => a.name === 'wave')!.slots!.a_bead1.rate!.map((k) => k.value), [[90]]);
+    const rt = path.join(OUT, 'e.runtime.json');
+    assert.equal(cli('runtime', out, '--out', rt).code, 0);
+    assert.deepEqual(JSON.parse(readFileSync(rt, 'utf8')).attachments.find((a: any) => a.name === 'bead1').emitter, { recipe: 'glint.sparkle', rate: 30 });
+    const cleared = path.join(OUT, 'e2.rig.json');
+    assert.equal(cli('emitter', out, '--att', 'bead1', '--clear', '--out', cleared).code, 0);
+    const q = parseProject(readFileSync(cleared, 'utf8'));
+    assert.ok(q.ok && !q.project.attachments.find((a) => a.name === 'bead1')!.emitter && !q.project.animations.find((a) => a.name === 'wave')!.slots?.a_bead1?.rate);
+    const bad = path.join(OUT, 'e-bad.rig.json');
+    assert.equal(cli('emitter', RIG, '--att', 'bead1', '--recipe', 'no spaces', '--out', bad).code, 1);
+    assert.equal(cli('emitter', RIG, '--att', 'band', '--recipe', 'x', '--out', bad).code, 1, 'a mesh');
+    assert.equal(cli('emitter', RIG, '--att', 'bead1', '--out', bad).code, 2);
+    assert.equal(cli('key', RIG, '--anim', 'wave', '--slot', 'torso', '--channel', 'rate', '--at', '1', '--value', '5', '--out', bad).code, 1, 'not an emitter');
+    assert.ok(!existsSync(bad));
+  });
 });
 
 describe('rendering (headless Chrome for Testing via render.html)', () => {

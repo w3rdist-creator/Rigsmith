@@ -33,7 +33,8 @@ rounded.
               "alphas"?: [a0, a1, …],                                                    // v3: per-vertex alpha 0..1
               "bind"?: { "attachment": [a, b, c, d, tx, ty], "bones": { "<bone>": [a, b, c, d, tx, ty] } } }, // v3 bind pose
     "blend"?: "additive" | "screen" | "multiply",                             // v3, absent = normal
-    "color"?: "#rrggbbaa"                                                      // v3 tint, absent = white
+    "color"?: "#rrggbbaa",                                                     // v3 tint, absent = white
+    "emitter"?: { "recipe": "<id>", "rate": <per second> }                    // v3 FX socket: not drawn (see FX sockets)
   }],
   "ik": [{ "name", "bones": ["upper", "lower"], "target": "bone", "mix", "bendPositive" }],           // v2
   "paths": [{ "name", "bone": null | "name", "closed", "nodes": [{ "x", "y", "inX", "inY", "outX", "outY" }] }], // v2
@@ -47,12 +48,12 @@ rounded.
     "name", "duration", "fps", "loop", "frames",
     "keys": { "<bone>": { "translate": [Key], "rotate": [Key], "scale": [Key] } },
     "slots": { "<attachment>": { "visible": [Key], "opacity": [Key], "image": [{ "time", "image" }], "deform": [Key],
-                                "color": [Key] } },                       // v2; color v3, value [r, g, b, a] 0..1
+                                "color": [Key], "rate": [Key] } },        // v2; color v3, value [r, g, b, a] 0..1; rate v3 (emitters), value [per second]
     "drawOrder": [{ "time", "order": ["<attachment>", …] }],                                          // v2
     "events"?: [{ "time", "name", "payload"?: "<text>" | <number> }],                                // v3: by time, then name
     "constraints": { "<constraint>": { "mix": [Key], "position": [Key], "angle": [Key] } },           // v2; angle v3
     "baked": { "<bone>": [[worldX, worldY, worldRotationDeg, worldScaleX, worldScaleY], …] },
-    "bakedSlots": [[{ "attachment", "visible", "opacity", "image", "color"? }, …], …],   // only with slot / draw-order keys; color only when not white
+    "bakedSlots": [[{ "attachment", "visible", "opacity", "image", "color"?, "rate"? }, …], …],   // only with slot / draw-order keys; color only when not white; rate on emitters
     "bakedMeshes": { "<attachment>": [[x0, y0, …], …] }                         // only with meshes
   }]
 }
@@ -76,6 +77,14 @@ image. Mixes: `docs/architecture.md` → Mixing.
 Baked data lets a consumer play without an interpolator: `frames` samples at `i / fps`
 (`frames = duration·fps` for loops, which omit the repeat of frame 0; `+1` for one-shots).
 Bakes ignore skins and mixes (evaluate from keys for those).
+
+FX sockets (v3): an attachment with `emitter: {recipe, rate}` is not drawn. A player spawns
+the particle recipe `recipe` (its own particle system, e.g. a factory particle family; the
+attachment's `image` is a sprite hint) at the attachment's world transform — bone baked
+world × the attachment's x/y/rotation/scale, exactly as for an image — at `rate` particles
+per second: the slot's `rate` keys, else the setup rate (`bakedSlots[].rate` has it per
+frame). Visibility and opacity keys still apply (hidden = not emitting). One-off bursts are
+timeline events. `cheeseweb-rig`'s RigSprite does not spawn them yet (pending).
 
 Springs (the editor's follow-through, v3) are never written to a runtime file: the export
 bakes them into each spring bone's rotate keys (one linear key per frame), so players need

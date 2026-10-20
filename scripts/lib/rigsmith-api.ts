@@ -26,7 +26,9 @@ import { evaluate } from '../../src/model/evaluate.ts';
 import { computeWorld } from '../../src/model/skeleton.ts';
 import { setMixRule } from '../../src/model/mix.ts';
 import { addAimConstraint, addIk, addRotationConstraint, addSpring, bakeSprings, constraintNames } from '../../src/model/rigOps.ts';
-import type { SpringConstraint } from '../../src/model/types.ts';
+import type { Emitter, SpringConstraint } from '../../src/model/types.ts';
+import { emitterProblems } from '../../src/model/emitters.ts';
+import { repairReferences } from '../../src/model/integrity.ts';
 import { dataUrlBytes, decodePngExact, encodePngExact } from '../../src/model/png.ts';
 import { addSkin, setSkinEntry } from '../../src/model/skinOps.ts';
 import type { BoneInherit, ClipSequence, ImageAsset, Project } from '../../src/model/types.ts';
@@ -327,6 +329,26 @@ export function addSpringNamed(p: Project, boneNames: string[], params: SpringPa
   const nameOf = (b: string) => p.bones.find((x) => x.id === b)!.name;
   const { id: _id, ...rest } = s;
   return { ...rest, bones: s.bones.map(nameOf) };
+}
+
+/**
+ * Makes an attachment an FX socket (emitter) with a particle recipe id and rate, updates
+ * them, or (clear) turns it back into a plain attachment (its rate keys go too).
+ */
+export function setEmitter(p: Project, attName: string, req: { recipe?: string; rate?: number; clear?: boolean }): { emitter: Emitter | null } {
+  const att = attachmentNamed(p, attName);
+  if (req.clear) {
+    delete att.emitter;
+    repairReferences(p);
+    return { emitter: null };
+  }
+  if (att.mesh) fail(`“${attName}” is a mesh; an emitter cannot have a mesh.`);
+  const e: Emitter = { recipe: req.recipe ?? att.emitter?.recipe ?? '', rate: req.rate ?? att.emitter?.rate ?? 20 };
+  if (!e.recipe) fail('Give --recipe for a new emitter.');
+  const bad = emitterProblems(e);
+  if (bad.length) fail(bad.join('; '));
+  att.emitter = e;
+  return { emitter: { ...e } };
 }
 
 /** Bakes every spring into rotate keys (see bakeSprings) and removes them. */

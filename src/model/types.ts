@@ -127,7 +127,25 @@ export interface Attachment {
    * Absent = `#ffffffff`. Keyable with slot `color` keys.
    */
   color?: string;
+  /**
+   * v3: an FX socket. The attachment draws nothing in exports; it marks where (its world
+   * transform) a game spawns the particle recipe `recipe` (an id the runtime resolves,
+   * e.g. a factory particle family) at `rate` particles per second (keyable: slot `rate`
+   * keys). `imageId` is the particle sprite: the editor's stand-in preview draws it, and
+   * the runtime export names it as a texture hint. Bursts are timeline events (R7).
+   */
+  emitter?: Emitter;
 }
+
+export interface Emitter {
+  recipe: string;
+  /** Particles per second (0 = off). */
+  rate: number;
+}
+
+/** Recipe ids: letters, digits and _ . : - (1–64 characters). */
+export const EMITTER_RECIPE = /^[A-Za-z0-9_.:-]{1,64}$/;
+export const EMITTER_MAX_RATE = 1000;
 
 export type Interp = 'linear' | 'step' | 'smooth' | 'bezier';
 export const INTERPS: readonly Interp[] = ['linear', 'step', 'smooth', 'bezier'];
@@ -199,6 +217,8 @@ export interface SlotTrack {
   deform?: Key[];
   /** v3: tint, value [r, g, b, a] each 0..1 (see Attachment.color). */
   color?: Key[];
+  /** v3, emitters only: value [particles per second, 0..1000]. */
+  rate?: Key[];
 }
 
 /** v2: animated constraint properties. */

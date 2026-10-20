@@ -25,6 +25,8 @@ import {
 } from '../model/rigOps.ts';
 import type { Animation, Attachment, Bone, IkConstraint, PathConstraint, Project, SpringConstraint, TransformConstraint } from '../model/types.ts';
 import { springProblems } from '../model/springs.ts';
+import { emitterProblems, emitterRate } from '../model/emitters.ts';
+import { EMITTER_MAX_RATE } from '../model/types.ts';
 import { newId } from '../model/types.ts';
 import { setBoneInherit } from '../model/skeleton.ts';
 import type { App } from './app.ts';
@@ -89,6 +91,7 @@ export function attachmentSlotSection(app: App, a: Attachment): HTMLElement[] {
         if (v) x.hidden = true;
         else delete x.hidden;
       }), 'Visibility keys can show it during animations.'),
+      ...emitterSetup(app, a),
       h('div', { class: 'group-label' }, 'Cutout'),
       h('button', { class: 'mini', 'data-testid': 'att-cutout', title: 'Cut a piece out of this image (non-destructive), optionally with a new joint bone', onclick: () => app.cutout.open(a.id) }, '✂ Cut out piece…'),
     );
@@ -128,6 +131,17 @@ export function attachmentSlotSection(app: App, a: Attachment): HTMLElement[] {
       keyToggle(has('color'), 'slot-key-color', 'tint', () => toggle('color')),
     ),
     h('div', { class: 'row-key' }, h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Image'), imgSel), keyToggle(has('image'), 'slot-key-image', 'image', () => toggle('image'))),
+    a.emitter
+      ? h('div', { class: 'row-key' },
+          numberField({ label: 'Emit rate (/s)', value: emitterRate(a, anim, t), step: 1, min: 0, max: EMITTER_MAX_RATE, testId: 'slot-rate', onCommit: (v) => mutateAnim('Key emit rate', (an) => keySlotScalar(an, a.id, 'rate', t, v)) }),
+          keyToggle(findKeyIndex(laneKeys(anim, slotLane(a.id, 'rate')) ?? [], t) >= 0, 'slot-key-rate', 'emit rate', () => {
+            const ks = laneKeys(anim, slotLane(a.id, 'rate')) ?? [];
+            const i = findKeyIndex(ks, t);
+            if (i >= 0) mutateAnim('Remove rate key', (an) => void laneKeys(an, slotLane(a.id, 'rate'))!.splice(i, 1));
+            else mutateAnim('Key emit rate', (an) => keySlotScalar(an, a.id, 'rate', t, emitterRate(a, anim, t)));
+          }),
+        )
+      : h('span', { hidden: true }),
     h('div', { class: 'group-label' }, `Draw order at frame ${frame}: ${idx + 1} of ${order.length}`),
     h('div', { class: 'row2' },
       h('button', { class: 'mini', 'data-testid': 'draw-backward', disabled: idx <= 0, title: 'Key a draw order with this attachment one step further back', onclick: () => mutateAnim('Key draw order', (an) => keyDrawOrderStep(ed.project, an, t, a.id, -1)) }, 'Key backward'),
@@ -135,6 +149,33 @@ export function attachmentSlotSection(app: App, a: Attachment): HTMLElement[] {
     ),
     h('p', { class: 'hint' }, 'Visibility, image and draw-order keys are stepped; opacity and tint interpolate. Offsets stay setup data (Tab).'),
   );
+  return out;
+}
+
+/** Setup mode: turn an attachment into an FX socket (emitter) and edit its recipe and rate. */
+function emitterSetup(app: App, a: Attachment): HTMLElement[] {
+  const { ed } = app;
+  const setE = (label: string, fn: (x: Attachment) => void) =>
+    app.guard(() => ed.mutate(label, (q) => {
+      const x = q.attachments.find((y) => y.id === a.id)!;
+      fn(x);
+      const bad = x.emitter ? emitterProblems(x.emitter) : [];
+      if (bad.length) throw new Error(bad.join('; '));
+    }));
+  const out: HTMLElement[] = [
+    h('div', { class: 'group-label' }, 'FX socket'),
+    checkbox('Particle emitter (draws nothing in exports)', !!a.emitter, 'att-emitter', (v) => {
+      if (v && a.mesh) return app.status('A mesh cannot be an emitter; remove the mesh first.');
+      setE(v ? 'Make emitter' : 'Remove emitter', (x) => void (v ? (x.emitter = { recipe: 'sparkle', rate: 20 }) : delete x.emitter));
+      if (v) app.status('Emitter: the game spawns the named particle recipe here (its image is the particle sprite). The viewport shows a stand-in.');
+    }, 'Marks where a game spawns a particle recipe; its image is the particle sprite. Exports draw nothing for it; the editor previews a stand-in.'),
+  ];
+  if (a.emitter)
+    out.push(
+      textField('Recipe id', a.emitter.recipe, 'emitter-recipe', (v) => setE('Emitter recipe', (x) => void (x.emitter!.recipe = v.trim()))),
+      numberField({ label: 'Rate (particles/s)', value: a.emitter.rate, min: 0, max: EMITTER_MAX_RATE, step: 1, testId: 'emitter-rate', onCommit: (v) => setE('Emitter rate', (x) => void (x.emitter!.rate = v)) }),
+      h('p', { class: 'hint' }, 'Key the rate in Animate mode (0 = off). For one-off bursts add a timeline event (e.g. “burst”) the game reads.'),
+    );
   return out;
 }
 

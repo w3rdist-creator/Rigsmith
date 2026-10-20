@@ -3,7 +3,8 @@ import type { Editor } from '../editor/store.ts';
 import type { AttachmentFrame, Frame } from '../model/evaluate.ts';
 import { attachmentPoints, evaluate } from '../model/evaluate.ts';
 import type { Mat, Vec } from '../model/math.ts';
-import { angleOf, apply, determinant, invert, wrapDegrees } from '../model/math.ts';
+import { angleOf, apply, determinant, fromTRS, invert, multiply, wrapDegrees } from '../model/math.ts';
+import { standInParticles } from '../model/emitters.ts';
 import { applyPoseEdit, makeBone, uniqueName } from '../model/ops.ts';
 import { PathTable, pathWorldMatrix } from '../model/constraints.ts';
 import { snapToFrame } from '../model/animation.ts';
@@ -12,7 +13,7 @@ import { moveBonePivot } from '../model/rigOps.ts';
 import { attachmentWorld, boneTip, computeWorld, parentLinear, parentWorld, toLocal, topoOrder } from '../model/skeleton.ts';
 import type { Bone, PathShape, Project } from '../model/types.ts';
 import { cloneProject, newId } from '../model/types.ts';
-import { drawFrame } from '../render/draw.ts';
+import { drawAttachment, drawFrame } from '../render/draw.ts';
 import type { ImageCache } from './images.ts';
 
 export interface View {
@@ -594,6 +595,7 @@ export class Viewport {
       this.outlineAttachment(g, vm, f, isSel ? '#ffd166' : 'rgba(255,209,102,0.5)');
     }
     this.drawMeshOverlay(g, vm, dpr, frame);
+    this.drawEmitters(g, vm, dpr, frame);
     if (ed.showBones) {
       this.drawPaths(g, p, world, vm, dpr);
       this.drawBones(g, p, world, vm, dpr);
@@ -824,6 +826,33 @@ export class Viewport {
         m.weights[i] = paintVertex(m.weights[i], bone, ed.brush.strength * (1 - d / r), ed.brush.mode, fallback);
       }
     });
+  }
+
+  /**
+   * FX sockets (editor only): a stand-in burst of the emitter's own sprite at its current
+   * rate (deterministic in time, not the game's recipe) and a small socket marker.
+   */
+  private drawEmitters(g: CanvasRenderingContext2D, vm: Mat, dpr: number, frame: Frame): void {
+    const t = this.ed.time;
+    for (const f of frame.attachments) {
+      if (!f.emitter || !f.visible) continue;
+      for (const q of standInParticles(f.emitter.rate, t)) {
+        const m = multiply(f.world, fromTRS(q.x, q.y, 0, q.scale, q.scale));
+        drawAttachment(g, { ...f, emitter: undefined, world: m, opacity: f.opacity * q.alpha }, (im) => this.images.get(im), vm);
+      }
+      const o = apply(multiply(vm, f.world), { x: 0, y: 0 });
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.strokeStyle = '#ff9f1c';
+      g.lineWidth = 1.5 * dpr;
+      const r = 5 * dpr;
+      g.beginPath();
+      g.moveTo(o.x, o.y - r);
+      g.lineTo(o.x + r, o.y);
+      g.lineTo(o.x, o.y + r);
+      g.lineTo(o.x - r, o.y);
+      g.closePath();
+      g.stroke();
+    }
   }
 
   private drawMeshOverlay(g: CanvasRenderingContext2D, vm: Mat, dpr: number, frame: Frame): void {

@@ -97,6 +97,7 @@ function convertRuntime(raw: unknown): Project {
       : {}),
     ...(a.blend ? { blend: a.blend } : {}),
     ...(a.color ? { color: a.color } : {}),
+    ...(a.emitter ? { emitter: { recipe: a.emitter.recipe, rate: a.emitter.rate } } : {}),
   }));
   const attNames = new Set(attachments.map((a) => a.id));
   const animations: Animation[] = rt.animations.map((an) => {
@@ -110,6 +111,7 @@ function convertRuntime(raw: unknown): Project {
         ...(st.image ? { image: st.image.map((k) => ({ time: k.time, imageId: need(imageNames, k.image, 'image') })) } : {}),
         ...(st.deform ? { deform: keys(st.deform) } : {}),
         ...(st.color ? { color: keys(st.color) } : {}),
+        ...(st.rate ? { rate: keys(st.rate) } : {}),
       };
     }
     const constraints: NonNullable<Animation['constraints']> = {};

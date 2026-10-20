@@ -20,6 +20,7 @@ Nothing is approximated. The code is in `src/model/lottie.ts`.
 | Visibility keys, image-swap keys, skins | one image layer per run of frames with the same image and visibility, switched by `ip`/`op`. Exact at whole frames; a key between frames takes effect at the next frame, as in the PNG sequence (shown as a note) | exported |
 | Draw order (static) | layers are written front to back | exported |
 | IK constraints, path constraints, constraint keys | none in Lottie | **refused** |
+| FX sockets / emitters (v3) | Lottie has no particles | **refused** |
 | Springs (v3) | simulated by Rigsmith | **refused** — bake them first (spring inspector ▸ Bake all springs, or `rigsmith bake-springs`) |
 | Meshes, deform keys | image layers cannot deform | **refused** |
 | Draw-order keys | Lottie layer order is fixed | **refused** |

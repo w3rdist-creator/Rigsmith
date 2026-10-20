@@ -1,4 +1,6 @@
 import { colorValueProblem, formatColor, isColor, isWhite, parseColor, setupColor } from './color.ts';
+import { emitterProblems } from './emitters.ts';
+import { EMITTER_MAX_RATE } from './types.ts';
 import { springProblems } from './springs.ts';
 import { findCycles, hasInheritFlags, isAncestorOrSelf } from './skeleton.ts';
 import type {
@@ -80,12 +82,14 @@ export function v3Features(p: Project): string[] {
   for (const a of p.attachments) {
     if (a.blend && a.blend !== 'normal') f.add('blend modes');
     if (a.color && !isWhite(setupColor(a))) f.add('tint colours');
+    if (a.emitter) f.add('emitters');
     if (a.mesh?.alphas) f.add('vertex alpha');
     if (a.mesh?.bind) f.add('mesh bind poses');
   }
   for (const an of p.animations) {
     if (an.constraints && Object.values(an.constraints).some((c) => c.angle?.length)) f.add('constraint angle keys');
     if (an.slots && Object.values(an.slots).some((s) => s.color?.length)) f.add('colour keys');
+    if (an.slots && Object.values(an.slots).some((s) => s.rate?.length)) f.add('emitters');
     if (Object.values(an.tracks).some((tr) => tr.translate.some((k) => k.interpY))) f.add('per-axis translate easing');
     if (Object.values(an.events ?? {}).some((ks) => ks.length)) f.add('timeline events');
   }
@@ -120,6 +124,7 @@ function writeAnimation(an: Animation): Animation {
     if (s.image?.length) t.image = s.image;
     if (s.deform?.length) t.deform = s.deform.map(writeKey);
     if (s.color?.length) t.color = s.color.map(writeKey);
+    if (s.rate?.length) t.rate = s.rate.map(writeKey);
     if (Object.keys(t).length) slots[id] = t;
   }
   if (Object.keys(slots).length) out.slots = slots;
@@ -155,7 +160,7 @@ export function toFileObject(project: Project): Project {
     }),
     images: project.images,
     attachments: project.attachments.map((a) => {
-      const { hidden, mesh, blend, color, ...base } = a;
+      const { hidden, mesh, blend, color, emitter, ...base } = a;
       const o: Attachment = { ...base };
       if (hidden) o.hidden = true;
       if (mesh) {
@@ -164,6 +169,7 @@ export function toFileObject(project: Project): Project {
       }
       if (blend && blend !== 'normal') o.blend = blend;
       if (color && !isWhite(setupColor(a))) o.color = formatColor(setupColor(a));
+      if (emitter) o.emitter = { recipe: emitter.recipe, rate: emitter.rate };
       return o;
     }),
     animations: project.animations.map(writeAnimation),
@@ -452,6 +458,7 @@ export function validateProject(raw: unknown): ParseResult {
   const attachments: Attachment[] = [];
   const attIds = new Set<string>();
   const meshVerts = new Map<string, number>();
+  const emitterIds = new Set<string>();
   c.arr(raw, 'attachments', 'project').forEach((a, i) => {
     const w = `attachments[${i}]`;
     if (!isObj(a)) return c.fail(`${w} must be an object`);
@@ -498,6 +505,18 @@ export function validateProject(raw: unknown): ParseResult {
       v3only('color', w);
       if (!isColor(a.color)) c.fail(`${w}.color must be #rrggbb or #rrggbbaa`);
       else if (!isWhite(parseColor(a.color)!)) att.color = formatColor(parseColor(a.color)!);
+    }
+    if (a.emitter !== undefined) {
+      v3only('emitters', w);
+      const ew = `${w}.emitter`;
+      if (!isObj(a.emitter)) c.fail(`${ew} must be an object`);
+      else {
+        const em = { recipe: c.str(a.emitter, 'recipe', ew), rate: c.num(a.emitter, 'rate', ew) };
+        for (const e of emitterProblems(em)) c.fail(`${ew}: ${e}`);
+        if (att.mesh) c.fail(`${w}: an emitter cannot have a mesh`);
+        att.emitter = em;
+        emitterIds.add(id);
+      }
     }
     attachments.push(att);
   });
@@ -718,6 +737,11 @@ export function validateProject(raw: unknown): ParseResult {
           if (sr.color !== undefined) {
             v3only('colour keys', sw);
             st.color = readKeys(c, sr.color, `${sw}.color`, colorValueProblem, version);
+          }
+          if (sr.rate !== undefined) {
+            v3only('emitters', sw);
+            if (!emitterIds.has(attId)) c.fail(`${sw}.rate needs the attachment to be an emitter`);
+            st.rate = readKeys(c, sr.rate, `${sw}.rate`, (v) => (v.length === 1 && v[0] >= 0 && v[0] <= EMITTER_MAX_RATE ? null : `must be one number from 0 to ${EMITTER_MAX_RATE}`), version);
           }
           slots[attId] = st;
         }

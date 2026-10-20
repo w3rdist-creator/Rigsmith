@@ -51,7 +51,8 @@ export const BLEND_OP: Record<BlendMode, GlobalCompositeOperation> = { normal: '
 export function drawAttachment(g: CanvasRenderingContext2D, f: AttachmentFrame, images: ImageLookup, vm: Mat, opts: DrawOptions = {}): void {
   const im = f.image;
   const alpha = f.opacity * f.color[3];
-  if (!im || !f.visible || alpha <= 0) return;
+  // FX sockets draw nothing (the editor previews a stand-in; games spawn the recipe).
+  if (!im || !f.visible || alpha <= 0 || f.emitter) return;
   const el = images(im);
   const op = BLEND_OP[f.blend];
   const tinted = f.color[0] < 1 || f.color[1] < 1 || f.color[2] < 1;

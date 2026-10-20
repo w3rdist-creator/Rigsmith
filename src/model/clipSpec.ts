@@ -38,6 +38,7 @@ import { drawOrderAt } from './evaluate.ts';
 import { formatColor, parseColor } from './color.ts';
 import { insertSorted, findKeyIndex } from './animation.ts';
 import { parseProject, serializeProject } from './format.ts';
+import { EMITTER_MAX_RATE } from './types.ts';
 import type { Animation, Bone, Channel, ConstraintTrack, Curve, DrawOrderKey, ImageKey, Interp, Key, Project, SlotTrack } from './types.ts';
 import { EVENT_NAME, cloneProject, emptyTrack } from './types.ts';
 import { flatEvents } from './events.ts';
@@ -50,7 +51,7 @@ export type ClipMode = 'create' | 'replace' | 'merge';
 export type ApplyResult = { ok: true; project: Project; animId: string; keys: number; created: boolean } | { ok: false; errors: string[] };
 
 const BONE_CHANNELS: readonly Channel[] = ['translate', 'rotate', 'scale'];
-const SLOT_CH = ['visible', 'opacity', 'image', 'deform', 'color'] as const;
+const SLOT_CH = ['visible', 'opacity', 'image', 'deform', 'color', 'rate'] as const;
 const CON_CH = ['mix', 'position', 'angle'] as const;
 const INTERP_NAMES: readonly Interp[] = ['linear', 'step', 'smooth', 'bezier'];
 /** Presets addressable by name; linear and smooth are interpolations of their own. */
@@ -153,7 +154,7 @@ function readEase(name: unknown, curve: unknown, where: string, ctx: Ctx): { int
   return { interp: name as Interp };
 }
 
-type Kind = 'translate' | 'rotate' | 'scale' | 'opacity' | 'visible' | 'color' | 'deform' | 'mix' | 'position' | 'angle';
+type Kind = 'translate' | 'rotate' | 'scale' | 'opacity' | 'visible' | 'color' | 'deform' | 'rate' | 'mix' | 'position' | 'angle';
 
 /** Value arity and range per channel (`n` = mesh vertex count for deform). */
 function checkValue(kind: Kind, v: number[], n: number | undefined): string | null {
@@ -162,6 +163,7 @@ function checkValue(kind: Kind, v: number[], n: number | undefined): string | nu
   if (!v.every(isNum)) return `${kind} values must be finite numbers`;
   if ((kind === 'opacity' || kind === 'mix' || kind === 'position' || kind === 'color') && !v.every((x) => x >= 0 && x <= 1)) return `${kind} values must be from 0 to 1`;
   if (kind === 'visible' && !(v[0] === 0 || v[0] === 1)) return 'visible must be true or false';
+  if (kind === 'rate' && !(v[0] >= 0 && v[0] <= EMITTER_MAX_RATE)) return `rate must be from 0 to ${EMITTER_MAX_RATE} particles per second`;
   return null;
 }
 
@@ -485,7 +487,7 @@ export function applyClip(project: Project, spec: ClipSpec, mode: ClipMode = 'cr
         const att = byName(p.attachments, an, 'attachment', `slots.${an}`, ctx);
         if (!att) continue;
         if (!isObj(chs)) {
-          errors.push(`slots.${an}: must be {visible, opacity, image, deform, color}`);
+          errors.push(`slots.${an}: must be {visible, opacity, image, deform, color, rate}`);
           continue;
         }
         anim.slots ??= {};
@@ -502,6 +504,10 @@ export function applyClip(project: Project, spec: ClipSpec, mode: ClipMode = 'cr
           }
           if (ch === 'deform' && !att.mesh) {
             errors.push(`${w}: “${an}” has no mesh`);
+            continue;
+          }
+          if (ch === 'rate' && !att.emitter) {
+            errors.push(`${w}: “${an}” is not an emitter`);
             continue;
           }
           const keys = readKeyList(ch as Kind, list, w, ctx, att.mesh ? att.mesh.points.length / 2 : undefined);
@@ -619,7 +625,7 @@ export function exportClip(project: Project, animId: string): ClipSpec {
   const tally = new Map<string, number>();
   const allKeys: Key[] = [];
   for (const tr of Object.values(anim.tracks)) for (const ch of BONE_CHANNELS) allKeys.push(...tr[ch]);
-  for (const st of Object.values(anim.slots ?? {})) for (const ch of ['opacity', 'color', 'deform'] as const) allKeys.push(...(st[ch] ?? []));
+  for (const st of Object.values(anim.slots ?? {})) for (const ch of ['opacity', 'color', 'deform', 'rate'] as const) allKeys.push(...(st[ch] ?? []));
   for (const ct of Object.values(anim.constraints ?? {})) for (const ch of CON_CH) allKeys.push(...(ct[ch] ?? []));
   for (const k of allKeys) {
     const e = easeOf(k.interp, k.curve);
@@ -668,6 +674,7 @@ export function exportClip(project: Project, animId: string): ClipSpec {
     if (st.opacity?.length) chs.opacity = st.opacity.map((k) => key(k, k.value[0], def));
     if (st.image?.length) chs.image = st.image.map((k) => [time(k.time), imgName(k.imageId)]);
     if (st.color?.length) chs.color = st.color.map((k) => (k.value.every((v) => Math.round(v * 255) / 255 === v) ? key(k, formatColor(k.value), def) : key(k, k.value.slice(), def)));
+    if (st.rate?.length) chs.rate = st.rate.map((k) => key(k, k.value[0], def));
     if (st.deform?.length) chs.deform = st.deform.map((k) => key(k, k.value.every((v) => v === 0 && !Object.is(v, -0)) ? 'rest' : k.value.slice(), def));
     if (Object.keys(chs).length) slots[a.name] = chs;
   }

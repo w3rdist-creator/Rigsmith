@@ -15,7 +15,7 @@ import type { ClipMode, ClipSpec } from '../src/model/clipSpec.ts';
 import { exportLottie } from '../src/model/lottie.ts';
 import type { CliMediaFormat } from './lib/rigsmith-api.ts';
 import type { TransformRequest, VertexAlphaRequest, WeightRequest } from './lib/rigsmith-api.ts';
-import { ApiError, EXIT, addImage, addIkNamed, addSpringNamed, bakeSpringsCmd, addTransform, setBind, setInherit, setTint, setVertexAlpha, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
+import { ApiError, EXIT, addImage, addIkNamed, addSpringNamed, bakeSpringsCmd, setEmitter, addTransform, setBind, setInherit, setTint, setVertexAlpha, atlas, encodeMedia, ffmpegEncoder, gridMesh, readProject, replaceImage, runtime, sequenceZip, setMix, setSequence, setSkin, setWeights, summary, withRenderer, writeOutput, writeProject } from './lib/rigsmith-api.ts';
 
 const USAGE = `rigsmith <command> [options]
   validate <project.rig.json>
@@ -60,6 +60,8 @@ const USAGE = `rigsmith <command> [options]
           (bind a weighted mesh at the setup pose, or at an animation frame's pose; --clear: bind at setup)
   spring <project> --bones <bone[,bone…]> [--follow] [--stiffness 0.08] [--damping 0.18] [--gain 1] [--max 35] [--blend 12] [--mix 1] [--name <n>] --out <project>
           (follow-through on a chain; one bone with --follow takes its single-child descendants too)
+  emitter <project> --att <attachment> (--recipe <id> [--rate 20] | --rate N | --clear) --out <project>
+          (FX socket: the game spawns the particle recipe at the attachment; key the rate with key --channel rate)
   bake-springs <project> --out <project>   (springs → per-frame rotate keys; needed for Lottie)
   ik <project> --bone <bone> [--one-bone] [--bend positive|negative] --out <project>
           (2-bone IK ending at <bone>, target at its tip; the bend side follows the setup elbow unless given)
@@ -473,6 +475,15 @@ async function main(): Promise<Record<string, unknown>> {
       const spring = addSpringNamed(p, bones, params, { name: flag('name'), follow: flag('follow') !== undefined });
       writeProject(out, p);
       return { outputs: [out], spring };
+    }
+    case 'emitter': {
+      const out = need('out');
+      const clear = flag('clear') !== undefined;
+      if (clear && (flag('recipe') !== undefined || flag('rate') !== undefined)) usage('emitter: --clear takes no --recipe or --rate.');
+      if (!clear && flag('recipe') === undefined && flag('rate') === undefined) usage('emitter: give --recipe and/or --rate, or --clear.');
+      const res = setEmitter(p, need('att'), { recipe: flag('recipe'), rate: num('rate'), clear });
+      writeProject(out, p);
+      return { outputs: [out], attachment: flag('att'), ...res };
     }
     case 'bake-springs': {
       const out = need('out');

@@ -50,6 +50,8 @@ export interface RuntimeExport {
     blend?: 'additive' | 'screen' | 'multiply';
     /** v3: tint `#rrggbbaa`; absent = white. */
     color?: string;
+    /** v3 FX socket: spawn particle recipe `recipe` at the attachment's world transform, `rate` per second (`image` = sprite hint); draw nothing. */
+    emitter?: { recipe: string; rate: number };
   }[];
   /** v2 */
   ik: { name: string; bones: string[]; target: string; mix: number; bendPositive: boolean }[];
@@ -71,7 +73,7 @@ export interface RuntimeExport {
     frames: number;
     keys: Record<string, { translate: RuntimeKey[]; rotate: RuntimeKey[]; scale: RuntimeKey[] }>;
     /** v2: slot keys by attachment name (image keys by image name). */
-    slots: Record<string, { visible?: RuntimeKey[]; opacity?: RuntimeKey[]; image?: { time: number; image: string }[]; deform?: RuntimeKey[]; color?: RuntimeKey[] }>;
+    slots: Record<string, { visible?: RuntimeKey[]; opacity?: RuntimeKey[]; image?: { time: number; image: string }[]; deform?: RuntimeKey[]; color?: RuntimeKey[]; rate?: RuntimeKey[] }>;
     /** v2: attachment names back→front. */
     drawOrder: { time: number; order: string[] }[];
     /** v3: timeline events sorted by time, then name (absent when the clip has none). */
@@ -81,7 +83,7 @@ export interface RuntimeExport {
     /** baked[boneName][frame] = [worldX, worldY, worldRotationDeg, worldScaleX, worldScaleY] (after IK/path/transform constraints) */
     baked: Record<string, number[][]>;
     /** Only when the animation keys slots or draw order: per frame, attachments back→front with their state. */
-    bakedSlots?: { attachment: string; visible: boolean; opacity: number; image: string; color?: number[] }[][];
+    bakedSlots?: { attachment: string; visible: boolean; opacity: number; image: string; color?: number[]; rate?: number }[][];
     /** Only when the project has meshes: bakedMeshes[attachmentName][frame] = world vertices [x0,y0,…] (deform + skinning applied). */
     bakedMeshes?: Record<string, number[][]>;
   }[];
@@ -177,6 +179,7 @@ export function exportRuntime(source: Project): RuntimeExport {
         ...(a.mesh ? { mesh: { uvs: a.mesh.points.slice(), triangles: a.mesh.triangles.slice(), hull: a.mesh.hull, ...(a.mesh.weights ? { weights: a.mesh.weights.map((l) => l.map((x) => ({ bone: bone(x.bone), w: x.w }))) } : {}), ...(a.mesh.alphas ? { alphas: a.mesh.alphas.slice() } : {}), ...(a.mesh.bind ? { bind: { attachment: a.mesh.bind.attachment.slice(), bones: Object.fromEntries(Object.entries(a.mesh.bind.bones).map(([id, m]) => [bone(id), m.slice()])) } } : {}) } } : {}),
         ...(a.blend && a.blend !== 'normal' ? { blend: a.blend } : {}),
         ...(a.color && !isWhite(setupColor(a)) ? { color: formatColor(setupColor(a)) } : {}),
+        ...(a.emitter ? { emitter: { recipe: a.emitter.recipe, rate: a.emitter.rate } } : {}),
       };
     }),
     animations: project.animations.map((anim) => {
@@ -192,7 +195,7 @@ export function exportRuntime(source: Project): RuntimeExport {
         const fr = evaluate(project, anim, t);
         const world = fr.world;
         for (const a of fr.attachments) if (a.vertices && a.att.name in bakedMeshes) bakedMeshes[a.att.name].push(a.vertices.map((v) => round(v, 3)));
-        if (slotted) bakedSlots.push(fr.attachments.map((a) => ({ attachment: a.att.name, visible: a.visible, opacity: round(a.opacity, 4), image: a.image?.name ?? '', ...(isWhite(a.color) ? {} : { color: a.color.map((v) => round(v, 4)) }) })));
+        if (slotted) bakedSlots.push(fr.attachments.map((a) => ({ attachment: a.att.name, visible: a.visible, opacity: round(a.opacity, 4), image: a.image?.name ?? '', ...(isWhite(a.color) ? {} : { color: a.color.map((v) => round(v, 4)) }), ...(a.emitter ? { rate: round(a.emitter.rate, 3) } : {}) })));
         for (const b of ordered) {
           const m = world.get(b.id)!;
           baked[b.name].push([round(m.tx, 3), round(m.ty, 3), round(angleOf(m), 3), round(Math.hypot(m.a, m.b), 4), round(Math.hypot(m.c, m.d), 4)]);
@@ -214,6 +217,7 @@ export function exportRuntime(source: Project): RuntimeExport {
           ...(st.image?.length ? { image: st.image.map((k) => ({ time: k.time, image: img(k.imageId) })) } : {}),
           ...(st.deform?.length ? { deform: conv(st.deform) } : {}),
           ...(st.color?.length ? { color: conv(st.color) } : {}),
+          ...(st.rate?.length ? { rate: conv(st.rate) } : {}),
         };
       }
       const constraints: RuntimeExport['animations'][number]['constraints'] = {};

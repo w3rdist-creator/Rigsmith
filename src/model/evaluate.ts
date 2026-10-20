@@ -3,6 +3,7 @@
 //   local pose (keys + curves) → constraints (IK, paths) → world matrices →
 //   per-attachment draw state (visibility, opacity, tint, image, skin, draw order) →
 //   mesh vertices (deform keys + skinning).
+import { emitterRate } from './emitters.ts';
 import { applySprings, setSpringEvaluator, springOffsets } from './springs.ts';
 import type { SpringOffsets } from './springs.ts';
 import { TIME_EPSILON, samplePose, sampleKeys } from './animation.ts';
@@ -40,6 +41,8 @@ export interface AttachmentFrame {
   vertices?: number[];
   /** Texture coordinates into `image` (pixels) for each mesh vertex. */
   uvs?: readonly number[];
+  /** v3 FX socket: drawn by nothing but the editor's stand-in preview. */
+  emitter?: { recipe: string; rate: number };
 }
 
 export interface Frame {
@@ -94,6 +97,7 @@ export function evaluate(project: Project, anim: Animation | null, time: number,
     const color = (st?.color?.length ? sampleKeys(st.color, time, setupColor(att)) : setupColor(att)).map(clamp01) as Rgba;
     const w = attachmentWorld(att, world);
     const frame: AttachmentFrame = { att, image: imageById.get(imageId), visible: vis, opacity: Math.min(1, Math.max(0, opacity)), color, blend: att.blend ?? 'normal', world: w };
+    if (att.emitter) frame.emitter = { recipe: att.emitter.recipe, rate: emitterRate(att, anim, time) };
     if (att.mesh && frame.image) {
       const deform = st?.deform?.length ? sampleKeys(st.deform, time, new Array(att.mesh.points.length).fill(0)) : undefined;
       const setupIm = imageById.get(att.imageId) ?? frame.image;
@@ -128,7 +132,7 @@ export interface Bounds {
 export function frameBounds(frame: Frame, b: Bounds | null = null): Bounds | null {
   let out = b ? { ...b } : null;
   for (const f of frame.attachments) {
-    if (!f.visible || f.opacity * f.color[3] <= 0 || !f.image) continue;
+    if (!f.visible || f.opacity * f.color[3] <= 0 || !f.image || f.emitter) continue;
     for (const q of attachmentPoints(f)) {
       if (!out) out = { minX: q.x, minY: q.y, maxX: q.x, maxY: q.y };
       else {

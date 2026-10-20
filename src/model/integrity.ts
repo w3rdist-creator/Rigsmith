@@ -127,6 +127,10 @@ export function repairReferences(p: Project): string[] {
           if (kept.length) st.deform = kept;
           else delete st.deform;
         }
+        if (st.rate?.length && !att.emitter) {
+          notes.push(`${st.rate.length} rate key(s) of ${att.name} removed (it is no longer an emitter).`);
+          delete st.rate;
+        }
       }
     }
     if (an.constraints) for (const id of Object.keys(an.constraints)) if (!constraintIds.has(id)) delete an.constraints[id];

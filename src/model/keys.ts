@@ -15,7 +15,7 @@ import type { Animation, BoneTrack, Channel, ConstraintTrack, Key, Project, Slot
 import { CHANNELS, emptyTrack } from './types.ts';
 
 export type SlotChannel = keyof SlotTrack;
-export const SLOT_CHANNELS: readonly SlotChannel[] = ['visible', 'opacity', 'image', 'deform', 'color'];
+export const SLOT_CHANNELS: readonly SlotChannel[] = ['visible', 'opacity', 'image', 'deform', 'color', 'rate'];
 export type ConstraintChannel = keyof ConstraintTrack;
 
 export interface KeyRef {
