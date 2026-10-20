@@ -198,7 +198,9 @@ tint, image, skin, draw order) → mesh vertices.
   (`scripts/roadmap/r8-springs-mapo.ts`). Results are cached per animation and
   re-simulated when anything they depend on changes (bones, constraints, springs, the
   clip's keys) — about 0.5 s per 8 s clip on Mapo, and the cache check costs about
-  0.6 ms per evaluate. Mixing adds each clip's offsets to its rotation. The runtime export
+  0.6 ms per evaluate. During a drag gesture the editor holds the last simulation
+  (`holdSprings`: a pointer move costs 0.14 ms instead of 432 ms on Mapo) and re-simulates
+  when the gesture ends. Mixing adds each clip's offsets to its rotation. The runtime export
   bakes springs into keys (players need no simulation); Lottie refuses them until
   **Bake all springs** (`bakeSprings`), which writes the same motion as one linear rotate
   key per frame and removes the springs.

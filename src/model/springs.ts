@@ -13,6 +13,16 @@ type Evaluator = (project: Project, anim: Animation, time: number, partial: Spri
 
 const cache = new WeakMap<Animation, { sig: string; offsets: SpringOffsets }>();
 let evaluator: Evaluator | null = null;
+let held = false;
+
+/**
+ * While held (the editor's drag gestures), springOffsets() keeps returning an animation's
+ * last simulation instead of re-simulating on every pointer move (≈0.5 s per 8 s clip on
+ * a 56-bone rig); releasing re-simulates on the next evaluate.
+ */
+export function holdSprings(on: boolean): void {
+  held = on;
+}
 
 /** evaluate.ts registers itself (avoids an import cycle). */
 export function setSpringEvaluator(e: Evaluator): void {
@@ -72,8 +82,9 @@ function simulate(p: Project, a: Animation, s: SpringConstraint, boneId: string,
 /** The spring offsets of an animation (cached; empty without springs). */
 export function springOffsets(p: Project, a: Animation): SpringOffsets {
   if (!p.springs?.length || !evaluator) return new Map();
-  const sig = signature(p, a);
   const hit = cache.get(a);
+  if (hit && held) return hit.offsets;
+  const sig = signature(p, a);
   if (hit && hit.sig === sig) return hit.offsets;
   const out: SpringOffsets = new Map();
   for (const s of p.springs) for (const id of s.bones) if (p.bones.some((b) => b.id === id)) out.set(id, simulate(p, a, s, id, out));

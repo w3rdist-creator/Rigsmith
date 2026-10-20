@@ -1,5 +1,6 @@
 // Editor state container. All project mutations go through mutate() or a gesture so
 // undo/redo captures them; view/time/selection changes are deliberately not undoable.
+import { holdSprings } from '../model/springs.ts';
 import { playbackTime, snapToFrame } from '../model/animation.ts';
 import type { Frame } from '../model/evaluate.ts';
 import { evaluate } from '../model/evaluate.ts';
@@ -120,6 +121,7 @@ export class Editor {
   beginGesture(): void {
     this.gestureBefore = cloneProject(this.project);
     this.gestureChanged = false;
+    holdSprings(true);
   }
 
   gestureMutate(fn: (p: Project) => void): void {
@@ -133,6 +135,7 @@ export class Editor {
   endGesture(label: string): void {
     const before = this.gestureBefore;
     this.gestureBefore = null;
+    this.releaseSprings();
     if (before && this.gestureChanged) this.lastRepairs = repairReferences(this.project);
     if (before && this.gestureChanged && !deepEqualJson(this.project, before)) {
       this.history.record(label, before);
@@ -142,7 +145,14 @@ export class Editor {
     this.gestureChanged = false;
   }
 
+  /** Ends a gesture's spring hold; a rig with springs redraws with a fresh simulation. */
+  private releaseSprings(): void {
+    holdSprings(false);
+    if (this.project.springs?.length) this.emit('project');
+  }
+
   cancelGesture(): void {
+    this.releaseSprings();
     if (this.gestureBefore) {
       this.project = this.gestureBefore;
       this.gestureBefore = null;
