@@ -8,6 +8,7 @@
   "bone-tree": "tree container; rows are operated through tree-bone-* ids",
   "constraint-list": "list container; rows are operated through their own ids",
   "constraints-panel": "panel container",
+  "curve-interp": "read-only interpolation label of the shown curve (smooth / step / bezier)",
   "curve-panel": "panel container; curve controls carry their own ids",
   "curve-segment": "read-only label of the selected curve segment",
   "cut-errors": "read-only error list",
@@ -41,6 +42,7 @@
   "lottie-dialog": "dialog container; its controls carry their own ids",
   "lottie-frame-warning": "read-only notice that art is clipped by the project frame",
   "lottie-summary": "read-only summary line",
+  "mesh-bind-summary": "read-only bind-pose summary line (own bind pose · n bones, or bound at the setup pose)",
   "mesh-dialog": "dialog container; its controls carry their own ids",
   "mesh-errors": "read-only error list",
   "mesh-problem": "read-only problem hint",
@@ -60,6 +62,7 @@
   "pc-bones": "read-only constrained-bone list",
   "player-canvas": "read-only player canvas (no event handlers)",
   "player-errors": "read-only error list",
+  "player-events": "read-only list of events fired during playback (no event handlers)",
   "player-frame-label": "read-only frame label",
   "player-status": "read-only status line",
   "playhead": "drawn playhead line (pointer-events: none); scrubbing lands on the timeline lanes and ruler",
@@ -87,8 +90,11 @@
   "skin-diagnostics": "read-only diagnostics list",
   "skin-summary": "read-only skin summary",
   "skins-panel": "panel container",
+  "spring-chain": "read-only chain text",
   "status": "read-only status bar",
+  "tc-bone": "read-only constrained-bone label",
   "time-readout": "read-only time readout",
   "timeline-empty": "read-only empty-state text",
-  "tl-zoom-readout": "read-only timeline zoom readout (fit or px/frame)"
+  "tl-zoom-readout": "read-only timeline zoom readout (fit or px/frame)",
+  "va-summary": "read-only vertex-alpha summary line (count of faded vertices)"
 }
