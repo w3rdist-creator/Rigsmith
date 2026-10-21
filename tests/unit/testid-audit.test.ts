@@ -62,6 +62,15 @@ describe('test-id audit (FR-004)', () => {
     assert.deepEqual(audit({ recorded: [r] }).notInInventory, ['made-up-id', 'other-made-up']);
   });
 
+  test('an allow-listed id that no test references is still reported as unreferenced', () => {
+    assert.ok(ALLOW.status, 'status is allow-listed');
+    const tests = "page.getByTestId('weights-auto'); page.getByTestId('play');";
+    const a = audit({ recorded: [recordingWithout([])], tests });
+    assert.ok(a.unreferenced.some((m) => /^status\s.*\[allow-listed\]/.test(m)), a.unreferenced.slice(0, 5).join('\n'));
+    assert.ok(!a.unreferenced.some((m) => /^weights-auto\s/.test(m)), 'a referenced id is not reported');
+    assert.deepEqual(audit({ recorded: [recordingWithout([])] }).unreferenced, [], 'every id, allow-listed or not, is referenced by the real tests/');
+  });
+
   test('an allow-list entry for an unknown id, or without a reason, is stale', () => {
     const a = audit({ recorded: [recordingWithout([])], allow: { ...ALLOW, 'no-such-id': 'reason given here', status: ' ' } });
     assert.deepEqual(a.staleAllow.sort(), ['no-such-id', 'status']);

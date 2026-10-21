@@ -113,6 +113,10 @@ describe('RV-003: project delivery frame', () => {
 
   it('“Set frame: fit to all animations” stores one frame enclosing every pose; one undo step', async () => {
     assert.equal(await page.getByTestId('frame-x').count(), 0, 'no frame yet');
+    const section = page.getByTestId('frame-section');
+    assert.match(await section.innerText(), /Delivery frame[\s\S]*No fixed frame/i, 'the section explains there is no frame yet');
+    assert.equal(await section.getByTestId('frame-fit').count(), 1, 'the section holds the fit button');
+    assert.equal(await section.getByTestId('frame-clear').count(), 0, 'nothing to remove yet');
     const u0 = (await probe<any>(page, 'state')).undo;
     await page.getByTestId('frame-fit').click();
     frame = (await project()).frame;
@@ -123,6 +127,9 @@ describe('RV-003: project delivery frame', () => {
     assert.equal(await page.getByTestId('frame-width').inputValue(), String(frame.width));
     assert.equal(await page.getByTestId('frame-height').inputValue(), String(frame.height));
     assert.match(await page.getByTestId('frame-summary').innerText(), new RegExp(`${frame.width}×${frame.height}`));
+    for (const id of ['frame-x', 'frame-y', 'frame-width', 'frame-height', 'frame-summary', 'frame-fit', 'frame-clear'])
+      assert.equal(await section.getByTestId(id).count(), 1, `the section now holds ${id}`);
+    assert.ok(!/No fixed frame/i.test(await section.innerText()), 'the no-frame hint is gone');
     assert.equal((await probe<any>(page, 'state')).undo, u0 + 1);
     await page.screenshot({ path: path.join(OUT, 'frame-on-canvas.png') });
   });

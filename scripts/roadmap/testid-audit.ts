@@ -9,7 +9,8 @@
 //   3. completeness: every id rendered or interacted with at runtime is covered by the
 //      static inventory, so a control the scan misses cannot escape checks 1 and 2.
 // Ids that are read but never operated (status lines, readouts, containers) need a reason
-// in scripts/roadmap/testid-allow.json. An allow-list entry that matches no id, or whose
+// in scripts/roadmap/testid-allow.json; they skip check 2 only, so a test must still
+// reference (read) them for check 1. An allow-list entry that matches no id, or whose
 // id was in fact exercised, is reported so the list cannot silently go stale.
 // Usage: node scripts/roadmap/testid-audit.ts [--recorded <dir>]
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -103,11 +104,13 @@ export function audit(opts: { recorded?: Recording[]; allow?: Record<string, str
   for (const [id, file] of [...ids.entries()].sort()) {
     const needle = id.endsWith('*') ? id.slice(0, -1) : id;
     const referenced = id.endsWith('*') ? tests.includes(needle) : new RegExp(`['"\`]${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"\`]`).test(tests);
+    // Allow-listed ids skip only the interaction check: "read-only, and a test reads it"
+    // is checked, so every id (allow-listed or not) must be referenced under tests/.
+    if (!referenced) unreferenced.push(`${id}  (${file})${allow[id] ? '  [allow-listed]' : ''}`);
     if (allow[id]) {
       if (opts.recorded && hit(id)) exercisedButAllowed.push(id);
       continue;
     }
-    if (!referenced) unreferenced.push(`${id}  (${file})`);
     if (opts.recorded && !hit(id)) unexercised.push(`${id}  (${file})`);
   }
   const staleAllow = Object.keys(allow).filter((id) => !ids.has(id) || !String(allow[id]).trim());
