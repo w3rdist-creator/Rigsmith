@@ -52,6 +52,8 @@ export function uiTestIds(): Map<string, string> {
       const id = literals(m[1])[0];
       if (id) add(id, f);
     }
+    // tintFields(colour, 'att-tint', 'att-tint-alpha', …) renders two ids: the colour input and the alpha field.
+    for (const m of text.matchAll(/\btintFields\((?=([^\n]*))/g)) for (const id of literals(m[1]).slice(0, 2)) add(id, f);
     // rigPanels keyable(ch, …, 'pc-position', …) also renders the key toggle `${'pc'}-key-${ch}`.
     for (const m of text.matchAll(/\bkeyable\('([a-z]+)'[^\n]*?'([a-z]+)-[a-z0-9-]+'/g)) add(`${m[2]}-key-${m[1]}`, f);
   }

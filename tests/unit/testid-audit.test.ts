@@ -50,7 +50,7 @@ describe('test-id audit (FR-004)', () => {
   test('the static scan covers ids built by helpers and templates (gaps found from runtime recordings)', () => {
     const ids = uiTestIds();
     const covered = (id: string) => [...ids.keys()].some((k) => (k.endsWith('*') ? id.startsWith(k.slice(0, -1)) : k === id));
-    for (const id of ['atlas-pot', 'bone-name', 'curve-y2', 'cut-min-alpha', 'cut-speck-dist', 'cut-speck-faint', 'cut-speck-solid', 'cut-tolerance', 'mesh-tool-vertices', 'mesh-tool-weights', 'mix-from', 'mix-interrupt-anim', 'mix-to', 'mv-add-bone', 'pc-key-position', 'pc-key-mix', 'ik-key-mix', 'project-name', 'att-name', 'skin-from-green.png', 'skin-image', 'tree-constraint-forearm-front-ik', 'tree-path-rail', 'wp-bone', 'wp-mode'])
+    for (const id of ['atlas-pot', 'bone-name', 'curve-y2', 'cut-min-alpha', 'cut-speck-dist', 'cut-speck-faint', 'cut-speck-solid', 'cut-tolerance', 'mesh-tool-vertices', 'mesh-tool-weights', 'mix-from', 'mix-interrupt-anim', 'mix-to', 'mv-add-bone', 'pc-key-position', 'pc-key-mix', 'ik-key-mix', 'project-name', 'att-name', 'skin-from-green.png', 'skin-image', 'att-tint', 'att-tint-alpha', 'slot-color', 'slot-color-alpha', 'tree-constraint-forearm-front-ik', 'tree-path-rail', 'wp-bone', 'wp-mode'])
       assert.ok(covered(id), id);
     assert.ok(![...ids.keys()].includes('*'), 'no template without a static prefix');
   });

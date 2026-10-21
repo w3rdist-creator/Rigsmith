@@ -76,8 +76,11 @@ describe('clip specs in the editor (R6)', () => {
     const renamed = path.join(OUT, 'walk2.clip.yaml');
     writeFileSync(renamed, text.replace(/^name: walk$/m, 'name: walk2'));
     const n0 = (await anims()).length;
-    await page.getByTestId('anim-apply-spec').waitFor();
-    await page.getByTestId('clip-spec-input').setInputFiles(renamed);
+    // The visible "Apply spec…" button opens the clip-spec file picker; the picked file creates walk2.
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('anim-apply-spec').click()]);
+    assert.equal(await chooser.element().getAttribute('data-testid'), 'clip-spec-input', 'Apply spec… opens the clip-spec picker');
+    assert.equal(chooser.isMultiple(), false);
+    await chooser.setFiles(renamed);
     await page.waitForFunction((n) => (window as any).__rigsmith.project().animations.length === n + 1, n0);
     const created = (await anims()).find((a: any) => a.name === 'walk2');
     assert.deepEqual({ ...created, id: 'x', name: 'x' }, { ...original, id: 'x', name: 'x' });
