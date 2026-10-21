@@ -120,7 +120,9 @@ describe('timeline events (R7)', () => {
     const pass1 = fired.slice(0, 3).map((e) => e.name), pass2 = fired.slice(3, 5).map((e) => e.name);
     assert.deepEqual(pass1, ['beat', 'prop_flash', 'burst']);
     assert.deepEqual(pass2, ['beat', 'prop_flash'], 'each fires once per loop pass');
-    assert.match(await player.getByTestId('player-events').innerText(), /f6 prop_flash/);
+    const log = await player.getByTestId('player-events').innerText();
+    assert.match(log, /f6 prop_flash/);
+    assert.match(log, /f\d+ burst \(big\)/, 'the payload is shown in parentheses after the name');
     await player.screenshot({ path: path.join(OUT, 'player-events.png') });
     await player.close();
     assert.deepEqual(pageErrors, []);
